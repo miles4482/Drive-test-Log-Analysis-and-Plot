@@ -57,7 +57,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.12"
+REPORT_VERSION = "1.13"
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
@@ -532,7 +532,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     notes = [
         "Cover — dataset and KPI tables on the left, IDLE Mode plots on the right, Active Mode section at the bottom.",
         "RSRP / RSRQ / SINR — IDLE Mode coverage map on the left; Active Mode map on the right when those logs are provided.",
-        "Bad Spot Analysis — poor RSRP / RSRQ / SINR clusters circled on IDLE maps. Site icons will be added when the site database is provided.",
+        "Bad Spot Analysis — every dense poor stretch on the full IDLE maps is circled and numbered. Site icons will be added when the site database is provided.",
         "RSRP vs KPIs — RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter with trend.",
         "Sample Log — evenly spaced subset of the merged samples (full 1.07M rows stay in output/Bogura_merged.csv.gz).",
         "These files are IDLE Mode. Active Mode coverage maps will be added when those logs are provided.",
@@ -688,8 +688,8 @@ def build_bad_spot_sheet(
         ws,
         note_row,
         1,
-        "A sample is poor when RSRP < -115 dBm, RSRQ < -15 dB, or SINR < 0 dB (yellow-or-worse legend bins). "
-        "Spots are adjacent clusters of those samples. Top Cell Id is from the drive log only — site names and sector icons will be added with the site database.",
+        "Every numbered oval is a dense cluster of poor samples on the full drive (RSRP < -115 dBm, RSRQ < -15 dB, or SINR < 0 dB). "
+        "Site names and sector icons will be added when the site database is provided.",
         size=9,
         wrap=True,
     )

@@ -255,13 +255,11 @@ def plot_sinr_coverage_map(df: pd.DataFrame, path: Path, max_points: int = 25000
     )
 
 
-# Poor-sample rules for bad-spot clustering (legend bins that are yellow or worse).
-BAD_SPOT_GRID_DEG = 0.004
-BAD_SPOT_COUNT = 3
-BAD_SPOT_RADIUS_KM = 30
-BAD_SPOT_MIN_CELL_N = 40
-BAD_SPOT_MIN_POOR = 40
-BAD_SPOT_MIN_FRAC = 0.35
+# Poor-sample clustering. Use the full drive map and keep every dense
+# yellow/magenta/red stretch — not just the three worst nearby clusters.
+BAD_SPOT_GRID_DEG = 0.01  # ~1.1 km cells
+BAD_SPOT_MIN_POOR = 180
+BAD_SPOT_MAX = 40
 BAD_SPOT_RULES = {
     "RSRP": {"threshold": -115.0, "unit": "dBm"},
     "RSRQ": {"threshold": -15.0, "unit": "dB"},
@@ -285,21 +283,23 @@ def cluster_poor_cells(
     column: str,
     threshold: float,
     grid_deg: float = BAD_SPOT_GRID_DEG,
-    min_n: int = BAD_SPOT_MIN_CELL_N,
     min_poor: int = BAD_SPOT_MIN_POOR,
-    min_frac: float = BAD_SPOT_MIN_FRAC,
 ) -> pd.DataFrame:
-    """Merge adjacent grid cells of poor samples into scored clusters."""
+    """Cluster poor samples on a ~1 km grid and merge adjacent cells.
+
+    Every dense yellow/magenta/red stretch becomes a spot. Nearby cells join;
+    separate holes on other roads stay separate.
+    """
     g = df.dropna(subset=["Longitude", "Latitude", column]).copy()
     values = pd.to_numeric(g[column], errors="coerce")
-    g = g.loc[values.notna()].copy()
+    g = g.loc[values.notna() & (values < threshold)].copy()
     g[column] = values.loc[g.index]
-    g["poor"] = g[column] < threshold
+    if g.empty:
+        return pd.DataFrame()
     g["latb"] = np.floor(g["Latitude"] / grid_deg).astype(int)
     g["lonb"] = np.floor(g["Longitude"] / grid_deg).astype(int)
     agg = g.groupby(["latb", "lonb"], sort=False).agg(
-        n=(column, "size"),
-        n_poor=("poor", "sum"),
+        n_poor=(column, "size"),
         mean=(column, "mean"),
         lat=("Latitude", "mean"),
         lon=("Longitude", "mean"),
@@ -308,8 +308,7 @@ def cluster_poor_cells(
         lon_min=("Longitude", "min"),
         lon_max=("Longitude", "max"),
     )
-    agg["frac"] = agg["n_poor"] / agg["n"]
-    hot = agg[(agg["n"] >= min_n) & (agg["frac"] >= min_frac) & (agg["n_poor"] >= min_poor)]
+    hot = agg[agg["n_poor"] >= min_poor]
     if hot.empty:
         return pd.DataFrame()
 
@@ -332,9 +331,8 @@ def cluster_poor_cells(
                     queue.append(nb)
                     group.append(nb)
         part = hot.loc[group]
-        n = int(part["n"].sum())
         n_poor = int(part["n_poor"].sum())
-        weights = part["n"].to_numpy(dtype=float)
+        weights = part["n_poor"].to_numpy(dtype=float)
         mean = float(np.average(part["mean"], weights=weights))
         lat = float(np.average(part["lat"], weights=weights))
         lon = float(np.average(part["lon"], weights=weights))
@@ -342,13 +340,11 @@ def cluster_poor_cells(
         lat_max = float(part["lat_max"].max())
         lon_min = float(part["lon_min"].min())
         lon_max = float(part["lon_max"].max())
-        frac = n_poor / n if n else 0.0
-        score = n_poor * frac * max(0.0, threshold - mean)
         rows.append(
             {
-                "n": n,
+                "n": n_poor,
                 "n_poor": n_poor,
-                "poor_pct": frac,
+                "poor_pct": 1.0,
                 "mean": mean,
                 "lat": lat,
                 "lon": lon,
@@ -358,25 +354,17 @@ def cluster_poor_cells(
                 "lon_max": lon_max,
                 "span_lat_km": (lat_max - lat_min) * 111.32,
                 "span_lon_km": (lon_max - lon_min) * _km_per_deg_lon(lat),
-                "score": score,
+                "score": n_poor * max(0.0, threshold - mean),
             }
         )
     return pd.DataFrame(rows).sort_values("score", ascending=False).reset_index(drop=True)
 
 
-def select_nearby_spots(clusters: pd.DataFrame, count: int = BAD_SPOT_COUNT, radius_km: float = BAD_SPOT_RADIUS_KM) -> pd.DataFrame:
-    """Keep the worst cluster and the next-worst clusters near it (one zoomed view)."""
+def select_all_spots(clusters: pd.DataFrame, max_spots: int = BAD_SPOT_MAX) -> pd.DataFrame:
+    """Keep every significant cluster on the full drive, not one local window."""
     if clusters.empty:
         return clusters
-    ranked = clusters.sort_values("score", ascending=False).reset_index(drop=True)
-    seed = ranked.iloc[0]
-    nearby = ranked.head(1)
-    for radius in (radius_km, radius_km * 1.5, radius_km * 2.5):
-        dist = _equirect_km(seed["lat"], seed["lon"], ranked["lat"], ranked["lon"])
-        nearby = ranked.loc[dist <= radius].head(count)
-        if len(nearby) >= count:
-            break
-    return nearby.reset_index(drop=True)
+    return clusters.sort_values("score", ascending=False).head(max_spots).reset_index(drop=True)
 
 
 def _spot_extra_stats(df: pd.DataFrame, spot: pd.Series) -> dict:
@@ -395,19 +383,34 @@ def _spot_extra_stats(df: pd.DataFrame, spot: pd.Series) -> dict:
     }
 
 
-def find_bad_spots(df: pd.DataFrame, column: str, count: int = BAD_SPOT_COUNT) -> pd.DataFrame:
-    """Return the top local bad spots for one KPI, numbered 1..N."""
+def find_bad_spots(df: pd.DataFrame, column: str, max_spots: int = BAD_SPOT_MAX) -> pd.DataFrame:
+    """Return every significant bad spot for one KPI on the full drive, numbered 1..N."""
     rule = BAD_SPOT_RULES[column]
     clusters = cluster_poor_cells(df, column, rule["threshold"])
-    spots = select_nearby_spots(clusters, count=count)
+    spots = select_all_spots(clusters, max_spots=max_spots)
     if spots.empty:
         return spots
     extras = [_spot_extra_stats(df, row) for _, row in spots.iterrows()]
     spots = spots.copy()
+    bbox_n = []
+    bbox_poor = []
+    for _, row in spots.iterrows():
+        box = df[
+            df["Latitude"].between(row["lat_min"], row["lat_max"])
+            & df["Longitude"].between(row["lon_min"], row["lon_max"])
+        ]
+        vals = pd.to_numeric(box[column], errors="coerce")
+        n = int(vals.notna().sum())
+        n_poor = int((vals < rule["threshold"]).sum())
+        bbox_n.append(n)
+        bbox_poor.append(n_poor)
     spots["spot"] = np.arange(1, len(spots) + 1)
     spots["kpi"] = column
     spots["threshold"] = rule["threshold"]
     spots["unit"] = rule["unit"]
+    spots["n"] = bbox_n
+    spots["n_poor"] = bbox_poor
+    spots["poor_pct"] = np.array(bbox_poor) / np.maximum(np.array(bbox_n), 1)
     spots["mean_rsrp"] = [e["mean_rsrp"] for e in extras]
     spots["mean_rsrq"] = [e["mean_rsrq"] for e in extras]
     spots["mean_sinr"] = [e["mean_sinr"] for e in extras]
@@ -415,7 +418,7 @@ def find_bad_spots(df: pd.DataFrame, column: str, count: int = BAD_SPOT_COUNT) -
     return spots
 
 
-def _ellipse_from_points(lons: np.ndarray, lats: np.ndarray, min_km: float = 2.0) -> tuple[float, float, float, float, float]:
+def _ellipse_from_points(lons: np.ndarray, lats: np.ndarray, min_km: float = 4.0, max_km: float = 14.0) -> tuple[float, float, float, float, float]:
     """Return ellipse center/width/height/angle so a dashed oval follows the poor samples."""
     lon0 = float(np.mean(lons))
     lat0 = float(np.mean(lats))
@@ -423,7 +426,9 @@ def _ellipse_from_points(lons: np.ndarray, lats: np.ndarray, min_km: float = 2.0
     if len(lons) < 12:
         lon_span = max(float(np.max(lons) - np.min(lons)) if len(lons) else 0.0, min_km / km_lon)
         lat_span = max(float(np.max(lats) - np.min(lats)) if len(lats) else 0.0, min_km / 111.32)
-        return lon0, lat0, lon_span * 1.6, lat_span * 1.6, 0.0
+        width_deg = min(lon_span * 1.5, max_km / km_lon)
+        height_deg = min(lat_span * 1.5, max_km / 111.32)
+        return lon0, lat0, width_deg, height_deg, 0.0
     x = (lons - lon0) * km_lon
     y = (lats - lat0) * 111.32
     cov = np.cov(np.vstack([x, y]))
@@ -431,9 +436,8 @@ def _ellipse_from_points(lons: np.ndarray, lats: np.ndarray, min_km: float = 2.0
     order = np.argsort(eigvals)[::-1]
     eigvals = np.clip(eigvals[order], 0.05, None)
     eigvecs = eigvecs[:, order]
-    # ~2.4 sigma wraps the stretch of poor samples along the road.
-    width_km = max(3.0 * 2.0 * np.sqrt(eigvals[0]), min_km)
-    height_km = max(3.0 * 2.0 * np.sqrt(eigvals[1]), min_km * 0.6)
+    width_km = min(max(2.2 * 2.0 * np.sqrt(eigvals[0]), min_km), max_km)
+    height_km = min(max(2.2 * 2.0 * np.sqrt(eigvals[1]), min_km * 0.55), max_km * 0.7)
     angle = float(np.degrees(np.arctan2(eigvecs[1, 0], eigvecs[0, 0])))
     width_deg = width_km / km_lon
     height_deg = height_km / 111.32
@@ -462,38 +466,29 @@ def plot_bad_spot_map(
     legend_title: str,
     max_points: int = 25000,
 ) -> Path:
-    """Coverage map zoomed to the bad-spot area, with dashed ovals and callouts."""
+    """Full-drive coverage map with every significant poor stretch circled."""
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
     geo = df.dropna(subset=["Longitude", "Latitude", column]).copy()
     classes_all = class_series.reindex(geo.index)
-    if spots is None or spots.empty:
-        sample = downsample(geo, max_points=max_points)
-        classes = classes_all.reindex(sample.index)
-        lat_min = float(sample["Latitude"].min())
-        lat_max = float(sample["Latitude"].max())
-        lon_min = float(sample["Longitude"].min())
-        lon_max = float(sample["Longitude"].max())
-    else:
-        pad_lat = 0.06
-        pad_lon = 0.06
-        lat_min = float(spots["lat_min"].min()) - pad_lat
-        lat_max = float(spots["lat_max"].max()) + pad_lat
-        lon_min = float(spots["lon_min"].min()) - pad_lon
-        lon_max = float(spots["lon_max"].max()) + pad_lon
-        cropped = geo[
-            geo["Latitude"].between(lat_min, lat_max) & geo["Longitude"].between(lon_min, lon_max)
-        ]
-        if cropped.empty:
-            cropped = geo
-        sample = downsample(cropped, max_points=max_points)
-        classes = classes_all.reindex(sample.index)
+    sample = downsample(geo, max_points=max_points)
+    classes = classes_all.reindex(sample.index)
+    lat_min = float(geo["Latitude"].min())
+    lat_max = float(geo["Latitude"].max())
+    lon_min = float(geo["Longitude"].min())
+    lon_max = float(geo["Longitude"].max())
+    pad_lat = 0.02 * (lat_max - lat_min)
+    pad_lon = 0.02 * (lon_max - lon_min)
+    lat_min -= pad_lat
+    lat_max += pad_lat
+    lon_min -= pad_lon
+    lon_max += pad_lon
 
-    fig, ax = plt.subplots(figsize=(8.2, 9.4))
+    fig, ax = plt.subplots(figsize=(8.0, 9.2))
     for label, color in zip(reversed(labels), reversed(colors)):
         part = sample[classes == label]
         if part.empty:
             continue
-        ax.scatter(part["Longitude"], part["Latitude"], s=6, c=color, linewidths=0, rasterized=True, zorder=2)
+        ax.scatter(part["Longitude"], part["Latitude"], s=5, c=color, linewidths=0, rasterized=True, zorder=2)
     handles = [
         Line2D(
             [0],
@@ -524,8 +519,6 @@ def plot_bad_spot_map(
     if spots is not None and not spots.empty:
         threshold = float(spots["threshold"].iloc[0])
         poor = geo[pd.to_numeric(geo[column], errors="coerce") < threshold]
-        center_lon = (lon_min + lon_max) / 2.0
-        center_lat = (lat_min + lat_max) / 2.0
         for _, spot in spots.iterrows():
             box_poor = poor[
                 poor["Latitude"].between(spot["lat_min"], spot["lat_max"])
@@ -547,45 +540,28 @@ def plot_bad_spot_map(
                     fill=False,
                     edgecolor="#E74C3C",
                     linestyle=(0, (6, 4)),
-                    linewidth=1.8,
+                    linewidth=1.5,
                     zorder=4,
                 )
             )
-            km_lon = _km_per_deg_lon(cy)
-            vx = (center_lon - cx) * km_lon
-            vy = (center_lat - cy) * 111.32
-            norm = float(np.hypot(vx, vy)) or 1.0
-            ux, uy = vx / norm, vy / norm
-            # Spread labels so neighbouring spots do not stack.
-            spread = (int(spot["spot"]) - 2) * 0.55
-            px, py = -uy, ux
-            offset_km = 4.2
-            dx = (offset_km * ux + spread * px) / km_lon
-            dy = (offset_km * uy + spread * py) / 111.32
-            ax.annotate(
-                f"Bad Spot {int(spot['spot'])}",
-                xy=(cx, cy),
-                xytext=(cx + dx, cy + dy),
-                fontsize=9,
+            ax.text(
+                cx,
+                cy,
+                str(int(spot["spot"])),
+                fontsize=7,
                 fontweight="bold",
                 color="#922B21",
                 ha="center",
                 va="center",
-                bbox={
-                    "boxstyle": "round,pad=0.35",
-                    "facecolor": "#FDEBD0",
-                    "edgecolor": "#922B21",
-                    "linewidth": 1.05,
-                },
-                arrowprops={
-                    "arrowstyle": "wedge,tail_width=0.55",
-                    "facecolor": "#FDEBD0",
-                    "edgecolor": "#922B21",
-                    "linewidth": 0.9,
-                },
                 zorder=5,
+                bbox={
+                    "boxstyle": "round,pad=0.12",
+                    "facecolor": "#FDEBD0",
+                    "edgecolor": "#922B21",
+                    "linewidth": 0.7,
+                },
             )
-    add_map_scale_bar(ax, km=4)
+    add_map_scale_bar(ax, km=20)
     ax.set_title(title)
     hide_map_axes(ax)
     fig.tight_layout()
