@@ -1,0 +1,11 @@
+extracted/
+__pycache__/
+.venv/
+.venv-*/
+*.pyc
+.DS_Store
+.ipynb_checkpoints/
+output/*.csv
+output/*.xlsx
+output/*.parquet
+output/*.csv.gz
