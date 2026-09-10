@@ -53,3 +53,22 @@ After a successful run:
 - `output/plots/05_band_counts.png` — LTE band from DL EARFCN
 - `output/plots/06_top_cells.png` — most-seen Cell Ids
 - `output/plots/07_p1_vs_p2_counts.png` — sample counts by source file
+
+If `output/Bogura_merged.csv.gz` already exists, skip Excel reload with:
+
+```bash
+python merge_and_analyze.py --from-merged
+```
+
+## Merged-log snapshot
+
+| Item | Value |
+| --- | --- |
+| P1 samples | 1,015,226 (11–20 May 2026) |
+| P2 samples | 60,159 (21 May 2026) |
+| Merged | 1,075,385 |
+| Mean RSRP / RSRQ / SINR | −99.1 dBm / −10.9 dB / 8.4 dB |
+| Dominant bands | B3 1800 (50.5%), B1 2100 (42.3%), B41 2500 (6.5%), B8 900 (0.7%) |
+| Unique Cell Ids | 2,521 |
+
+RSRP is mostly fair-to-poor: 48% of samples are below −100 dBm; 7% are excellent (> −80 dBm).

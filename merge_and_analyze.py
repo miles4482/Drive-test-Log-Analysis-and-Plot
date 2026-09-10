@@ -37,11 +37,13 @@ COLUMNS = [
     "DL EARFCN",
 ]
 
-# LTE FDD downlink EARFCN ranges (3GPP TS 36.101).
+# LTE downlink EARFCN ranges (3GPP TS 36.101).
 EARFCN_BANDS = {
     1: (0, 599, "B1 2100 MHz"),
     3: (1200, 1949, "B3 1800 MHz"),
     8: (3450, 3799, "B8 900 MHz"),
+    40: (38650, 39649, "B40 2300 MHz"),
+    41: (39650, 41589, "B41 2500 MHz"),
 }
 
 RSRP_BINS = [-np.inf, -110, -100, -90, -80, np.inf]
@@ -106,6 +108,8 @@ def load_part(path: Path, source: str) -> pd.DataFrame:
     df["Time"] = pd.to_datetime(df["Time"], errors="coerce")
     for col in ("RSRP", "RSRQ", "SINR", "Longitude", "Latitude", "DL EARFCN"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["Cell Id"] = pd.to_numeric(df["Cell Id"], errors="coerce").astype("Int64")
+    df["DL EARFCN"] = df["DL EARFCN"].astype("Int64")
     df["Source"] = source
     df["Band"] = df["DL EARFCN"].map(earfcn_to_band)
     print(f"  {len(df):,} rows")
@@ -121,10 +125,6 @@ def merge_parts() -> pd.DataFrame:
     merged.to_csv(MERGED_CSV, index=False, compression="gzip")
     print(f"Wrote merged file: {MERGED_CSV} ({len(merged):,} rows)")
     return merged
-
-
-def pct(series: pd.Series) -> pd.Series:
-    return series / series.sum() * 100
 
 
 def format_stats(series: pd.Series) -> str:
@@ -190,6 +190,12 @@ def write_summary(df: pd.DataFrame) -> None:
         "",
         f"- Unique Cell Ids: {df['Cell Id'].nunique():,}",
         "",
+        "## Notes",
+        "",
+        "- P1 covers multiple drive days (11–20 May 2026). P2 is a shorter session on 21 May 2026.",
+        "- About 24% of samples have no SINR (typical when the logger recorded neighbor cells).",
+        "- Band 41 (TDD 2500) appears as EARFCN ~40742 / 40940 / 41138.",
+        "",
         "Plots are written to `output/plots/`.",
         "",
     ]
@@ -250,7 +256,7 @@ def plot_all(df: pd.DataFrame) -> None:
     fig, axes = plt.subplots(3, 1, figsize=(12, 9), sharex=True)
     ts = downsample(df.dropna(subset=["Time"]), max_points=40000)
     for ax, col in zip(axes, ("RSRP", "RSRQ", "SINR")):
-        ax.plot(ts["Time"], ts[col], lw=0.4, color="#1d3557")
+        ax.scatter(ts["Time"], ts[col], s=2, alpha=0.25, color="#1d3557", linewidths=0)
         style_axes(ax, f"{col} vs time", "Time", col)
     fig.tight_layout()
     fig.savefig(PLOTS_DIR / "03_kpi_vs_time.png", dpi=140)
@@ -276,7 +282,7 @@ def plot_all(df: pd.DataFrame) -> None:
     plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(10, 6))
-    top_cells = df["Cell Id"].value_counts().head(15)
+    top_cells = df["Cell Id"].dropna().astype("int64").value_counts().head(15)
     ax.barh(top_cells.index.astype(str)[::-1], top_cells.values[::-1], color="#1d3557")
     style_axes(ax, "Top 15 serving Cell Ids", "Samples", "Cell Id")
     fig.tight_layout()
@@ -294,9 +300,24 @@ def plot_all(df: pd.DataFrame) -> None:
     print(f"Wrote plots to {PLOTS_DIR}")
 
 
+def load_merged_csv() -> pd.DataFrame:
+    print(f"Loading existing merged file {MERGED_CSV}")
+    df = pd.read_csv(MERGED_CSV)
+    df["Time"] = pd.to_datetime(df["Time"], errors="coerce")
+    df["Cell Id"] = pd.to_numeric(df["Cell Id"], errors="coerce").astype("Int64")
+    df["DL EARFCN"] = pd.to_numeric(df["DL EARFCN"], errors="coerce").astype("Int64")
+    df["Band"] = df["DL EARFCN"].map(earfcn_to_band)
+    return df
+
+
 def main() -> None:
-    extract_archives()
-    merged = merge_parts()
+    if "--from-merged" in sys.argv:
+        if not MERGED_CSV.exists():
+            sys.exit(f"{MERGED_CSV} not found; run without --from-merged first")
+        merged = load_merged_csv()
+    else:
+        extract_archives()
+        merged = merge_parts()
     write_summary(merged)
     plot_all(merged)
     print("Done.")
