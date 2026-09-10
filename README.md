@@ -62,6 +62,7 @@ After a successful run:
 - `output/plots/05_band_counts.png` — LTE band from DL EARFCN
 - `output/plots/06_top_cells.png` — most-seen Cell Ids
 - `output/plots/07_p1_vs_p2_counts.png` — sample counts by source file
+- `output/plots/08_bad_spots_rsrp.png` / `_rsrq.png` / `_sinr.png` — bad-spot maps with dashed ovals (no sites yet)
 
 If `output/Bogura_merged.csv.gz` already exists, skip Excel reload with:
 
@@ -90,17 +91,19 @@ RSRP / RSRQ / SINR coverage maps use the Page 1 legend:
 
 Throughput (PDCP DL) and CQI are on the same legend sheet but are not in these IDLE logs, so those maps are not drawn yet.
 
-## Download Excel report (v1.11)
+**Bad Spot Analysis** circles geographic clusters of poor samples (RSRP < −115 dBm, RSRQ < −15 dB, SINR < 0 dB) with dashed ovals and Bad Spot 1/2/3 callouts. Site names and sector icons are **not** drawn yet — those will be mapped when the site database is provided.
 
-**v1.11 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.11.xlsx
+## Download Excel report (v1.12)
+
+**v1.12 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.12.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.11.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.12.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.11.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.12.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
 Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 
@@ -108,6 +111,7 @@ Sheet banners do not include the file version. The filename still carries the ve
 | --- | --- |
 | Cover | IDLE Mode bar, dataset/KPI tables on the left, histograms on the right, Active Mode bar at the bottom |
 | RSRP / RSRQ / SINR | IDLE Mode coverage map on the left and Active Mode placeholder on the right (no statistics table) |
+| Bad Spot Analysis | IDLE Mode poor-sample clusters for RSRP, RSRQ and SINR (site icons later) |
 | RSRP vs KPIs | RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter plots with trend |
 | Sample Log | Evenly spaced subset of the merged samples |
 

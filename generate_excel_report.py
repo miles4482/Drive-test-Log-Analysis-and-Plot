@@ -43,8 +43,12 @@ from merge_and_analyze import (
     MAP_SINR_LABELS,
     downsample,
     earfcn_to_band,
+    find_bad_spots,
+    plot_rsrp_bad_spot_map,
     plot_rsrp_coverage_map,
+    plot_rsrq_bad_spot_map,
     plot_rsrq_coverage_map,
+    plot_sinr_bad_spot_map,
     plot_sinr_coverage_map,
     plot_stacked_map_hist,
     rsrp_map_class,
@@ -53,7 +57,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.11"
+REPORT_VERSION = "1.12"
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
@@ -528,6 +532,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     notes = [
         "Cover — dataset and KPI tables on the left, IDLE Mode plots on the right, Active Mode section at the bottom.",
         "RSRP / RSRQ / SINR — IDLE Mode coverage map on the left; Active Mode map on the right when those logs are provided.",
+        "Bad Spot Analysis — poor RSRP / RSRQ / SINR clusters circled on IDLE maps. Site icons will be added when the site database is provided.",
         "RSRP vs KPIs — RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter with trend.",
         "Sample Log — evenly spaced subset of the merged samples (full 1.07M rows stay in output/Bogura_merged.csv.gz).",
         "These files are IDLE Mode. Active Mode coverage maps will be added when those logs are provided.",
@@ -575,6 +580,120 @@ def build_kpi_sheet(ws, df, name, color, unit, map_path: Path | None, placeholde
         add_image(ws, map_path, "A6", width=620, height=520)
     if placeholder_path and placeholder_path.exists():
         add_image(ws, placeholder_path, "J6", width=520, height=360)
+
+
+def _bad_spot_table_rows(spots: pd.DataFrame) -> list[list]:
+    rows = []
+    for _, s in spots.iterrows():
+        size_km = max(float(s["span_lat_km"]), float(s["span_lon_km"]))
+        top_cell = "" if pd.isna(s.get("top_cell", pd.NA)) else int(s["top_cell"])
+        rows.append(
+            [
+                f"Bad Spot {int(s['spot'])}",
+                str(s["kpi"]),
+                float(s["lat"]),
+                float(s["lon"]),
+                int(s["n"]),
+                int(s["n_poor"]),
+                float(s["poor_pct"]),
+                float(s["mean"]),
+                float(s["mean_rsrp"]),
+                float(s["mean_rsrq"]),
+                float(s["mean_sinr"]),
+                size_km,
+                top_cell,
+            ]
+        )
+    return rows
+
+
+def build_bad_spot_sheet(
+    ws,
+    rsrp_spots: pd.DataFrame,
+    rsrq_spots: pd.DataFrame,
+    sinr_spots: pd.DataFrame,
+    rsrp_map: Path,
+    rsrq_map: Path,
+    sinr_map: Path,
+) -> None:
+    last_col = 18
+    banner(
+        ws,
+        "  Bad Spot Analysis",
+        "  IDLE Mode  |  Poor-sample clusters  |  Site database not applied yet",
+        last_col=last_col,
+    )
+    set_widths(ws, {get_column_letter(i): 13 for i in range(1, last_col + 1)})
+    ws.column_dimensions["A"].width = 16
+    section_bar(ws, 3, "IDLE Mode", 1, last_col)
+    ws.merge_cells(start_row=4, start_column=1, end_row=4, end_column=last_col)
+    write_cell(
+        ws,
+        4,
+        1,
+        "Site locations are not plotted yet. When the site database is provided, sites will be mapped onto these bad-spot plots.",
+        size=11,
+        wrap=True,
+    )
+    ws.row_dimensions[4].height = 20
+    section_bar(ws, 5, "RSRP bad spots", 1, 6)
+    section_bar(ws, 5, "RSRQ bad spots", 7, 12)
+    section_bar(ws, 5, "SINR bad spots", 13, 18)
+    if rsrp_map.exists():
+        add_image(ws, rsrp_map, "A7", width=430, height=500)
+    if rsrq_map.exists():
+        add_image(ws, rsrq_map, "G7", width=430, height=500)
+    if sinr_map.exists():
+        add_image(ws, sinr_map, "M7", width=430, height=500)
+
+    write_cell(ws, 40, 1, "Identified bad spots", size=14, bold=True)
+    headers = [
+        "Spot",
+        "KPI",
+        "Latitude",
+        "Longitude",
+        "Samples",
+        "Poor samples",
+        "Poor share",
+        "Mean KPI",
+        "Mean RSRP",
+        "Mean RSRQ",
+        "Mean SINR",
+        "Size (km)",
+        "Top Cell Id",
+    ]
+    rows = _bad_spot_table_rows(rsrp_spots) + _bad_spot_table_rows(rsrq_spots) + _bad_spot_table_rows(sinr_spots)
+    write_table(
+        ws,
+        41,
+        1,
+        headers,
+        rows,
+        num_formats={
+            2: "0.00000",
+            3: "0.00000",
+            4: "#,##0",
+            5: "#,##0",
+            6: "0.0%",
+            7: "0.00",
+            8: "0.00",
+            9: "0.00",
+            10: "0.00",
+            11: "0.00",
+        },
+    )
+    note_row = 42 + len(rows)
+    ws.merge_cells(start_row=note_row, start_column=1, end_row=note_row, end_column=13)
+    write_cell(
+        ws,
+        note_row,
+        1,
+        "A sample is poor when RSRP < -115 dBm, RSRQ < -15 dB, or SINR < 0 dB (yellow-or-worse legend bins). "
+        "Spots are adjacent clusters of those samples. Top Cell Id is from the drive log only — site names and sector icons will be added with the site database.",
+        size=9,
+        wrap=True,
+    )
+    ws.row_dimensions[note_row].height = 32
 
 
 def style_smooth_line(series, color: str, width=25000) -> None:
@@ -852,6 +971,10 @@ def verify_report(path: Path) -> dict:
                 info["problems"].append(f"{name}/{title}: missing horizontal axis title")
             if not y_title:
                 info["problems"].append(f"{name}/{title}: missing vertical axis title")
+    if "Bad Spot Analysis" not in info["sheets"]:
+        info["problems"].append("missing Bad Spot Analysis sheet")
+    elif info["sheets"]["Bad Spot Analysis"]["images"] < 3:
+        info["problems"].append("Bad Spot Analysis: expected 3 coverage maps")
     wb.close()
     with zipfile.ZipFile(path) as zf:
         for item in zf.namelist():
@@ -940,6 +1063,15 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
     sinr_map = plot_sinr_coverage_map(df, PLOTS_DIR / "excel_route_sinr.png")
     scatter_sinr = save_rsrp_scatter(df, "SINR", PLOTS_DIR / "excel_scatter_rsrp_sinr.png", "SINR (dB)", "RSRP vs SINR", ylim=(-10, 32))
     scatter_rsrq = save_rsrp_scatter(df, "RSRQ", PLOTS_DIR / "excel_scatter_rsrp_rsrq.png", "RSRQ (dB)", "RSRP vs RSRQ", ylim=(-24, 0))
+    rsrp_spots = find_bad_spots(df, "RSRP")
+    rsrq_spots = find_bad_spots(df, "RSRQ")
+    sinr_spots = find_bad_spots(df, "SINR")
+    rsrp_bad = plot_rsrp_bad_spot_map(df, rsrp_spots, PLOTS_DIR / "excel_bad_spots_rsrp.png")
+    rsrq_bad = plot_rsrq_bad_spot_map(df, rsrq_spots, PLOTS_DIR / "excel_bad_spots_rsrq.png")
+    sinr_bad = plot_sinr_bad_spot_map(df, sinr_spots, PLOTS_DIR / "excel_bad_spots_sinr.png")
+    shutil.copy2(rsrp_bad, PLOTS_DIR / "08_bad_spots_rsrp.png")
+    shutil.copy2(rsrq_bad, PLOTS_DIR / "08_bad_spots_rsrq.png")
+    shutil.copy2(sinr_bad, PLOTS_DIR / "08_bad_spots_sinr.png")
     save_binned_vs_preview(df, PLOTS_DIR / "excel_rsrp_vs_sinr_lines.png")
     save_report_preview(df, PLOTS_DIR / "excel_rsrp_rsrq_sinr_histograms.png")
 
@@ -949,6 +1081,7 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
     rsrp_ws = wb.create_sheet("RSRP")
     rsrq_ws = wb.create_sheet("RSRQ")
     sinr_ws = wb.create_sheet("SINR")
+    bad_ws = wb.create_sheet("Bad Spot Analysis")
     time_ws = wb.create_sheet("RSRP vs KPIs")
     sample_ws = wb.create_sheet("Sample Log")
     data_ws = wb.create_sheet("_ChartData")
@@ -960,6 +1093,7 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
     build_kpi_sheet(rsrp_ws, df, "RSRP", RSRP_COLOR, "dBm", rsrp_map, placeholder)
     build_kpi_sheet(rsrq_ws, df, "RSRQ", RSRQ_COLOR, "dB", rsrq_map, placeholder)
     build_kpi_sheet(sinr_ws, df, "SINR", SINR_COLOR, "dB", sinr_map, placeholder)
+    build_bad_spot_sheet(bad_ws, rsrp_spots, rsrq_spots, sinr_spots, rsrp_bad, rsrq_bad, sinr_bad)
     build_rsrp_vs_sheet(time_ws, data_ws, blocks["vs_n"], scatter_sinr, scatter_rsrq)
     build_sample_log(sample_ws, df)
 
@@ -970,7 +1104,7 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
     wb.properties.subject = "IDLE Mode"
     wb.properties.description = (
         "Bogura drive-test report, IDLE Mode. "
-        "KPI sheets: statistics and coverage map. Analysis: RSRP vs SINR/RSRQ."
+        "KPI sheets: coverage maps. Bad Spot Analysis: poor-sample clusters. Analysis: RSRP vs SINR/RSRQ."
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(out_path)
