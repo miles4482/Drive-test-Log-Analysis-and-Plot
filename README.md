@@ -80,24 +80,24 @@ python merge_and_analyze.py --from-merged
 
 RSRP ranges used in the report (dBm): **≥ -85**, **-85 to -95**, **-95 to -105**, **-105 to -110**, **-110 to -115**, **-115 to -120**, **-120 to -125**, **<-125**.
 
-## Download Excel report (v1.9)
+## Download Excel report (v1.10)
 
-**v1.9 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.9.xlsx
+**v1.10 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.10.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.9.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.10.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.9.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.10.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
-Sheet banners use **IDLE Mode** (no version number inside the workbook). The filename still carries the version when the report is updated. KPI sheets reserve space **below** each IDLE coverage map for Active Mode logs.
+Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 
 | Sheet | Contents |
 | --- | --- |
-| Cover | Dataset size, KPI scorecard, RSRP ranges, band mix, RSRP/RSRQ/SINR histograms |
-| RSRP / RSRQ / SINR | Statistics, IDLE Mode coverage map, and a placeholder below for Active Mode |
+| Cover | IDLE Mode bar, dataset/KPI tables on the left, histograms on the right, Active Mode bar at the bottom |
+| RSRP / RSRQ / SINR | IDLE Mode coverage map on the left and Active Mode placeholder on the right (no statistics table) |
 | RSRP vs KPIs | RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter plots with trend |
 | Sample Log | Evenly spaced subset of the merged samples |
 

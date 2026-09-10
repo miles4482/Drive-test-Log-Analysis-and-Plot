@@ -46,7 +46,7 @@ from merge_and_analyze import (
     rsrp_range_counts,
 )
 
-REPORT_VERSION = "1.9"
+REPORT_VERSION = "1.10"
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
@@ -54,6 +54,7 @@ NAVY = "1B4F72"
 WHITE = "FFFFFF"
 LIGHT = "F4F6F7"
 CARD = "EAF2F8"
+YELLOW = "F4D03F"
 RSRP_COLOR = "C0392B"
 RSRQ_COLOR = "1F618D"
 SINR_COLOR = "117A65"
@@ -163,6 +164,40 @@ def banner(ws: Worksheet, title: str, subtitle: str, last_col: int = 12) -> None
         ws.cell(2, col).fill = fill(NAVY)
         ws.cell(1, col).font = font(20, bold=True, color=WHITE)
         ws.cell(2, col).font = font(12, color=WHITE)
+
+
+def section_bar(ws: Worksheet, row: int, text: str, start_col: int, end_col: int, fill_color=YELLOW) -> None:
+    """Yellow section header like IDLE Mode / Active Mode."""
+    ws.merge_cells(start_row=row, start_column=start_col, end_row=row, end_column=end_col)
+    write_cell(ws, row, start_col, text, size=13, bold=True, color=NAVY, fill_color=fill_color, align="center")
+    ws.row_dimensions[row].height = 22
+    for col in range(start_col, end_col + 1):
+        ws.cell(row, col).fill = fill(fill_color)
+        ws.cell(row, col).font = font(13, bold=True, color=NAVY)
+        ws.cell(row, col).alignment = Alignment(horizontal="center", vertical="center")
+
+
+def save_active_placeholder(path: Path) -> Path:
+    """Blue placeholder shown until Active Mode logs are provided."""
+    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(7.4, 8.2))
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.axis("off")
+    ax.add_patch(plt.Rectangle((0.12, 0.38), 0.76, 0.24, facecolor="#2E86C1", edgecolor="none", linewidth=0))
+    ax.text(
+        0.5,
+        0.50,
+        "Later I will give you data,\nthen plot here",
+        ha="center",
+        va="center",
+        color="white",
+        fontsize=14,
+        fontweight="bold",
+    )
+    fig.savefig(path, dpi=140, facecolor="white", bbox_inches="tight")
+    plt.close(fig)
+    return path
 
 
 def write_table(ws, start_row: int, start_col: int, headers: list[str], rows: list[list], header_fill=NAVY, num_formats: dict[int, str] | None = None):
@@ -453,15 +488,19 @@ def write_chart_data(ws: Worksheet, df: pd.DataFrame) -> dict:
 
 
 def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
+    last_col = 20
     banner(
         ws,
-        "  Bogura Drive-Test Report IDLE Mode",
+        "  Bogura Drive-Test Report",
         f"  Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}  |  IDLE Mode  |  Gridlines off  |  Freeze panes off",
-        last_col=10,
+        last_col=last_col,
     )
-    set_widths(ws, {"A": 28, "B": 18, "C": 18, "D": 18, "E": 18, "F": 18, "G": 18, "H": 18, "I": 18, "J": 18})
+    set_widths(ws, {get_column_letter(i): 14 for i in range(1, last_col + 1)})
+    ws.column_dimensions["A"].width = 26
+    ws.column_dimensions["B"].width = 18
+    section_bar(ws, 3, "IDLE Mode", 1, last_col)
 
-    write_cell(ws, 4, 1, "Dataset", size=14, bold=True)
+    write_cell(ws, 5, 1, "Dataset", size=14, bold=True)
     info_rows = [
         ["Mode", "IDLE"],
         ["Generated", datetime.now().strftime("%Y-%m-%d %H:%M")],
@@ -474,11 +513,11 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
         ["Longitude range", f"{df['Longitude'].min():.5f} – {df['Longitude'].max():.5f}"],
         ["Latitude range", f"{df['Latitude'].min():.5f} – {df['Latitude'].max():.5f}"],
     ]
-    write_table(ws, 5, 1, ["Item", "Value"], info_rows, num_formats={1: "#,##0"})
-    ws.cell(11, 2).number_format = "yyyy-mm-dd hh:mm:ss"
+    write_table(ws, 6, 1, ["Item", "Value"], info_rows, num_formats={1: "#,##0"})
     ws.cell(12, 2).number_format = "yyyy-mm-dd hh:mm:ss"
+    ws.cell(13, 2).number_format = "yyyy-mm-dd hh:mm:ss"
 
-    write_cell(ws, 4, 4, "Radio KPIs (all samples)", size=14, bold=True)
+    write_cell(ws, 5, 4, "Radio KPIs (all samples)", size=14, bold=True)
     stats_headers = ["KPI", "Count", "Min", "P5", "Median", "Mean", "P95", "Max"]
     stats_rows = []
     for name in ("RSRP", "RSRQ", "SINR"):
@@ -488,38 +527,37 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
         )
     write_table(
         ws,
-        5,
+        6,
         4,
         stats_headers,
         stats_rows,
         num_formats={1: "#,##0", 2: "0.00", 3: "0.00", 4: "0.00", 5: "0.00", 6: "0.00", 7: "0.00"},
     )
 
-    write_cell(ws, 15, 1, "How to read this workbook", size=14, bold=True)
+    write_cell(ws, 18, 1, "How to read this workbook", size=14, bold=True)
     notes = [
-        "Cover — dataset size, KPI scorecard, band mix, and overview histograms.",
-        "RSRP / RSRQ / SINR — statistics table and coverage map (discrete range legend).",
+        "Cover — dataset and KPI tables on the left, IDLE Mode plots on the right, Active Mode section at the bottom.",
+        "RSRP / RSRQ / SINR — IDLE Mode coverage map on the left; Active Mode map on the right when those logs are provided.",
         "RSRP vs KPIs — RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter with trend.",
         "Sample Log — evenly spaced subset of the merged samples (full 1.07M rows stay in output/Bogura_merged.csv.gz).",
-        "These files are IDLE Mode. Active Mode coverage maps will be added beside/below each IDLE map when those logs are provided.",
-        "P1 is the split archive (part1–part5). P2 is the standalone archive. This report uses the concatenated final file.",
+        "These files are IDLE Mode. Active Mode coverage maps will be added when those logs are provided.",
     ]
     for i, text in enumerate(notes):
-        ws.merge_cells(start_row=16 + i, start_column=1, end_row=16 + i, end_column=10)
-        write_cell(ws, 16 + i, 1, text, wrap=True)
-        ws.row_dimensions[16 + i].height = 18
+        ws.merge_cells(start_row=19 + i, start_column=1, end_row=19 + i, end_column=11)
+        write_cell(ws, 19 + i, 1, text, wrap=True)
+        ws.row_dimensions[19 + i].height = 18
 
-    write_cell(ws, 22, 1, "Band mix (DL EARFCN)", size=14, bold=True)
+    write_cell(ws, 25, 1, "Band mix (DL EARFCN)", size=14, bold=True)
     band = df["Band"].value_counts()
     band_rows = [[str(k), int(v), v / len(df)] for k, v in band.items()]
-    write_table(ws, 23, 1, ["Band", "Samples", "Share"], band_rows, num_formats={1: "#,##0", 2: "0.0%"})
+    write_table(ws, 26, 1, ["Band", "Samples", "Share"], band_rows, num_formats={1: "#,##0", 2: "0.0%"})
 
-    write_cell(ws, 22, 5, "RSRP ranges (dBm)", size=14, bold=True)
+    write_cell(ws, 25, 5, "RSRP ranges (dBm)", size=14, bold=True)
     rsrp_q = rsrp_range_counts(df["RSRP"])
     rsrp_rows = [[str(label), int(n), n / len(df)] for label, n in rsrp_q.items()]
     write_table(
         ws,
-        23,
+        26,
         5,
         ["Range", "Samples", "Share"],
         rsrp_rows,
@@ -527,46 +565,26 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     )
     write_cell(
         ws,
-        33,
+        36,
         5,
         "≥ -85 holds samples stronger than -85. Other bins: lower ≤ RSRP < upper (<-125 is RSRP < -125).",
         size=9,
         wrap=True,
     )
-    ws.merge_cells(start_row=33, start_column=5, end_row=33, end_column=8)
-    # Histograms are added after _ChartData exists; see add_cover_charts().
+    ws.merge_cells(start_row=36, start_column=5, end_row=36, end_column=8)
+    section_bar(ws, 42, "Active Mode", 1, 20)
 
 
-def build_kpi_sheet(ws, df, name, color, unit, map_path: Path | None):
-    banner(ws, f"  {name} Report IDLE Mode", f"  Unit: {unit}  |  IDLE Mode coverage map  |  Gridlines off", last_col=12)
-    set_widths(ws, {get_column_letter(i): 16 for i in range(1, 13)})
-    ws.column_dimensions["A"].width = 28
-    ws.column_dimensions["B"].width = 18
-
-    write_cell(ws, 4, 1, f"{name} statistics", size=14, bold=True)
-    st = kpi_stats(df[name])
-    write_table(
-        ws,
-        5,
-        1,
-        ["Metric", "Value"],
-        [[k, st[k]] for k in ("Count", "Min", "P5", "Median", "Mean", "P95", "Max", "Std")],
-        header_fill=color,
-        num_formats={1: "0.00"},
-    )
-    ws.cell(6, 2).number_format = "#,##0"
+def build_kpi_sheet(ws, df, name, color, unit, map_path: Path | None, placeholder_path: Path | None = None):
+    last_col = 18
+    banner(ws, f"  {name} Report", f"  Unit: {unit}  |  IDLE Mode coverage map  |  Gridlines off", last_col=last_col)
+    set_widths(ws, {get_column_letter(i): 14 for i in range(1, last_col + 1)})
+    section_bar(ws, 4, f"{name} coverage map — IDLE Mode", 1, 8)
+    section_bar(ws, 4, f"{name} coverage map — Active Mode", 10, 18)
     if map_path and map_path.exists():
-        write_cell(ws, 4, 4, f"{name} coverage map — IDLE Mode", size=14, bold=True)
-        add_image(ws, map_path, "D5", width=780, height=580)
-        write_cell(ws, 38, 4, f"{name} coverage map — Active Mode", size=14, bold=True)
-        ws.merge_cells(start_row=39, start_column=4, end_row=40, end_column=12)
-        write_cell(
-            ws,
-            39,
-            4,
-            "Placeholder for Active Mode logs. The Active Mode coverage map will be placed here (below the IDLE map) when those files are provided.",
-            wrap=True,
-        )
+        add_image(ws, map_path, "A6", width=620, height=520)
+    if placeholder_path and placeholder_path.exists():
+        add_image(ws, placeholder_path, "J6", width=520, height=360)
 
 
 def style_smooth_line(series, color: str, width=25000) -> None:
@@ -868,29 +886,30 @@ def verify_report(path: Path) -> dict:
 
 
 def add_cover_charts(cover, data_ws, blocks) -> None:
-    write_cell(cover, 35, 1, "RSRP, RSRQ and SINR plots (native Excel charts with legends)", size=14, bold=True)
+    write_cell(cover, 5, 12, "RSRP, RSRQ and SINR plots (native Excel charts with legends)", size=14, bold=True)
+    cover.merge_cells(start_row=5, start_column=12, end_row=5, end_column=20)
     add_stacked_col_chart(
-        data_ws, cover, "A37", "RSRP histogram",
+        data_ws, cover, "L6", "RSRP histogram",
         blocks["RSRP"]["cat_col"], blocks["RSRP"]["data_min"], blocks["RSRP"]["data_max"],
         2, 1 + blocks["RSRP"]["n"],
-        "Samples", "RSRP (dBm)", MAP_RSRP_COLORS, width=14, height=8,
+        "Samples", "RSRP (dBm)", MAP_RSRP_COLORS, width=11, height=7,
     )
     add_stacked_col_chart(
-        data_ws, cover, "H37", "RSRQ histogram",
+        data_ws, cover, "R6", "RSRQ histogram",
         blocks["RSRQ"]["cat_col"], blocks["RSRQ"]["data_min"], blocks["RSRQ"]["data_max"],
         2, 1 + blocks["RSRQ"]["n"],
-        "Samples", "RSRQ (dB)", RSRQ_STACK_COLORS, width=14, height=8,
+        "Samples", "RSRQ (dB)", RSRQ_STACK_COLORS, width=11, height=7,
     )
     add_stacked_col_chart(
-        data_ws, cover, "A56", "SINR histogram",
+        data_ws, cover, "L23", "SINR histogram",
         blocks["SINR"]["cat_col"], blocks["SINR"]["data_min"], blocks["SINR"]["data_max"],
         2, 1 + blocks["SINR"]["n"],
-        "Samples", "SINR (dB)", SINR_STACK_COLORS, width=14, height=8,
+        "Samples", "SINR (dB)", SINR_STACK_COLORS, width=11, height=7,
     )
     add_col_chart(
-        data_ws, cover, "H56", "RSRP ranges (dBm)", RSRP_COLOR,
+        data_ws, cover, "R23", "RSRP ranges (dBm)", RSRP_COLOR,
         12, 13, 2, 1 + blocks["rsrp_q_n"],
-        "Samples", "RSRP range", width=14, height=8, show_legend=True,
+        "Samples", "RSRP range", width=11, height=7, show_legend=True,
     )
 
 
@@ -946,6 +965,7 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
         df = df.copy()
         df["Band"] = df["DL EARFCN"].map(earfcn_to_band)
 
+    placeholder = save_active_placeholder(PLOTS_DIR / "active_mode_placeholder.png")
     rsrp_map = plot_rsrp_coverage_map(df, PLOTS_DIR / "excel_route_rsrp.png")
     rsrq_map = plot_rsrq_coverage_map(df, PLOTS_DIR / "excel_route_rsrq.png")
     sinr_map = plot_sinr_coverage_map(df, PLOTS_DIR / "excel_route_sinr.png")
@@ -968,9 +988,9 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
     blocks = write_chart_data(data_ws, df)
     build_cover(cover, df)
     add_cover_charts(cover, data_ws, blocks)
-    build_kpi_sheet(rsrp_ws, df, "RSRP", RSRP_COLOR, "dBm", rsrp_map)
-    build_kpi_sheet(rsrq_ws, df, "RSRQ", RSRQ_COLOR, "dB", rsrq_map)
-    build_kpi_sheet(sinr_ws, df, "SINR", SINR_COLOR, "dB", sinr_map)
+    build_kpi_sheet(rsrp_ws, df, "RSRP", RSRP_COLOR, "dBm", rsrp_map, placeholder)
+    build_kpi_sheet(rsrq_ws, df, "RSRQ", RSRQ_COLOR, "dB", rsrq_map, placeholder)
+    build_kpi_sheet(sinr_ws, df, "SINR", SINR_COLOR, "dB", sinr_map, placeholder)
     build_rsrp_vs_sheet(time_ws, data_ws, blocks["vs_n"], scatter_sinr, scatter_rsrq)
     build_sample_log(sample_ws, df)
 
