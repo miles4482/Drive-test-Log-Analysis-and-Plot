@@ -46,7 +46,7 @@ from merge_and_analyze import (
     rsrp_range_counts,
 )
 
-REPORT_VERSION = "1.8"
+REPORT_VERSION = "1.9"
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
@@ -501,6 +501,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
         "RSRP / RSRQ / SINR — statistics table and coverage map (discrete range legend).",
         "RSRP vs KPIs — RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter with trend.",
         "Sample Log — evenly spaced subset of the merged samples (full 1.07M rows stay in output/Bogura_merged.csv.gz).",
+        "These files are IDLE Mode. Active Mode coverage maps will be added beside/below each IDLE map when those logs are provided.",
         "P1 is the split archive (part1–part5). P2 is the standalone archive. This report uses the concatenated final file.",
     ]
     for i, text in enumerate(notes):
@@ -537,8 +538,8 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
 
 
 def build_kpi_sheet(ws, df, name, color, unit, map_path: Path | None):
-    banner(ws, f"  {name} Report IDLE Mode", f"  Unit: {unit}  |  Statistics and coverage map  |  Gridlines off", last_col=10)
-    set_widths(ws, {get_column_letter(i): 16 for i in range(1, 11)})
+    banner(ws, f"  {name} Report IDLE Mode", f"  Unit: {unit}  |  IDLE Mode coverage map  |  Gridlines off", last_col=12)
+    set_widths(ws, {get_column_letter(i): 16 for i in range(1, 13)})
     ws.column_dimensions["A"].width = 28
     ws.column_dimensions["B"].width = 18
 
@@ -555,8 +556,17 @@ def build_kpi_sheet(ws, df, name, color, unit, map_path: Path | None):
     )
     ws.cell(6, 2).number_format = "#,##0"
     if map_path and map_path.exists():
-        write_cell(ws, 4, 4, f"{name} coverage map", size=14, bold=True)
+        write_cell(ws, 4, 4, f"{name} coverage map — IDLE Mode", size=14, bold=True)
         add_image(ws, map_path, "D5", width=780, height=580)
+        write_cell(ws, 38, 4, f"{name} coverage map — Active Mode", size=14, bold=True)
+        ws.merge_cells(start_row=39, start_column=4, end_row=40, end_column=12)
+        write_cell(
+            ws,
+            39,
+            4,
+            "Placeholder for Active Mode logs. The Active Mode coverage map will be placed here (below the IDLE map) when those files are provided.",
+            wrap=True,
+        )
 
 
 def style_smooth_line(series, color: str, width=25000) -> None:
@@ -746,13 +756,13 @@ def build_rsrp_vs_sheet(ws, data_ws, n_rows: int, scatter_sinr: Path, scatter_rs
         50, 52, 52, 2, 1 + n_rows, "RSRQ (dB)",
         [VS_RSRQ_LINE], width=15, height=8,
     )
-    add_dual_axis_vs_chart(data_ws, ws, "A22", n_rows, width=24, height=10)
-    write_cell(ws, 40, 1, "RSRP vs SINR scatter (trend line)", size=14, bold=True)
-    write_cell(ws, 40, 8, "RSRP vs RSRQ scatter (trend line)", size=14, bold=True)
+    add_dual_axis_vs_chart(data_ws, ws, "A22", n_rows, width=22, height=8)
+    write_cell(ws, 48, 1, "RSRP vs SINR scatter (trend line)", size=14, bold=True)
+    write_cell(ws, 48, 8, "RSRP vs RSRQ scatter (trend line)", size=14, bold=True)
     if scatter_sinr.exists():
-        add_image(ws, scatter_sinr, "A42", width=520, height=350)
+        add_image(ws, scatter_sinr, "A50", width=520, height=350)
     if scatter_rsrq.exists():
-        add_image(ws, scatter_rsrq, "H42", width=520, height=350)
+        add_image(ws, scatter_rsrq, "H50", width=520, height=350)
 
 
 def build_sample_log(ws: Worksheet, df: pd.DataFrame, n: int = 8000) -> None:

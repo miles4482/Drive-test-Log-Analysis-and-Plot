@@ -80,24 +80,24 @@ python merge_and_analyze.py --from-merged
 
 RSRP ranges used in the report (dBm): **≥ -85**, **-85 to -95**, **-95 to -105**, **-105 to -110**, **-110 to -115**, **-115 to -120**, **-120 to -125**, **<-125**.
 
-## Download Excel report (v1.8)
+## Download Excel report (v1.9)
 
-**v1.8 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.8.xlsx
+**v1.9 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.9.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.8.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.9.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.8.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.9.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
-Sheet banners use **IDLE Mode** (no version number inside the workbook). The filename still carries the version when the report is updated.
+Sheet banners use **IDLE Mode** (no version number inside the workbook). The filename still carries the version when the report is updated. KPI sheets reserve space **below** each IDLE coverage map for Active Mode logs.
 
 | Sheet | Contents |
 | --- | --- |
 | Cover | Dataset size, KPI scorecard, RSRP ranges, band mix, RSRP/RSRQ/SINR histograms |
-| RSRP / RSRQ / SINR | Statistics table and coverage map with a discrete range legend |
+| RSRP / RSRQ / SINR | Statistics, IDLE Mode coverage map, and a placeholder below for Active Mode |
 | RSRP vs KPIs | RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter plots with trend |
 | Sample Log | Evenly spaced subset of the merged samples |
 
