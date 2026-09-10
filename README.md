@@ -86,7 +86,7 @@ RSRP is mostly fair-to-poor: 48% of samples are below −100 dBm; 7% are excelle
 
 | Sheet | Contents |
 | --- | --- |
-| Cover | Dataset size, KPI scorecard, band mix |
+| Cover | Dataset size, KPI scorecard, band mix, RSRP/RSRQ/SINR histograms |
 | RSRP / RSRQ / SINR | Histogram, CDF, quality-bin charts, coverage map |
 | Time Series | 10-minute mean line charts for all three KPIs |
 | Sample Log | Evenly spaced subset of the merged samples |

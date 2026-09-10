@@ -364,6 +364,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     band = df["Band"].value_counts()
     band_rows = [[str(k), int(v), v / len(df)] for k, v in band.items()]
     write_table(ws, 23, 1, ["Band", "Samples", "Share"], band_rows, num_formats={1: "#,##0", 2: "0.0%"})
+    # Histograms are added after _ChartData exists; see add_cover_charts().
 
 
 def build_kpi_sheet(ws, data_ws, df, name, color, unit, hist_col, hist_n, cdf_col, q_cat_col, q_n, map_path: Path | None):
@@ -509,6 +510,47 @@ def verify_report(path: Path) -> dict:
     return info
 
 
+def add_cover_charts(cover, data_ws, blocks) -> None:
+    write_cell(cover, 29, 1, "RSRP, RSRQ and SINR plots (native Excel charts)", size=14, bold=True)
+    add_col_chart(
+        data_ws, cover, "A31", "RSRP histogram", RSRP_COLOR,
+        blocks["RSRP"]["col"], blocks["RSRP"]["col"] + 1, 2, 1 + blocks["RSRP"]["n"],
+        "Samples", "RSRP (dBm)", width=12, height=7,
+    )
+    add_col_chart(
+        data_ws, cover, "G31", "RSRQ histogram", RSRQ_COLOR,
+        blocks["RSRQ"]["col"], blocks["RSRQ"]["col"] + 1, 2, 1 + blocks["RSRQ"]["n"],
+        "Samples", "RSRQ (dB)", width=12, height=7,
+    )
+    add_col_chart(
+        data_ws, cover, "A48", "SINR histogram", SINR_COLOR,
+        blocks["SINR"]["col"], blocks["SINR"]["col"] + 1, 2, 1 + blocks["SINR"]["n"],
+        "Samples", "SINR (dB)", width=12, height=7,
+    )
+
+
+def save_report_preview(df: pd.DataFrame, path: Path) -> Path:
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.6))
+    specs = (
+        ("RSRP", np.arange(-140, -48, 2), (-140, -50), RSRP_COLOR, "dBm"),
+        ("RSRQ", np.arange(-24, -2.5, 0.5), (-24, -3), RSRQ_COLOR, "dB"),
+        ("SINR", np.arange(-15, 31, 1), (-15, 30), SINR_COLOR, "dB"),
+    )
+    for ax, (col, bins, xlim, color, unit) in zip(axes, specs):
+        ax.hist(df[col].dropna(), bins=bins, color=f"#{color}", edgecolor="none")
+        ax.set_title(f"{col} histogram")
+        ax.set_xlabel(f"{col} ({unit})")
+        ax.set_ylabel("Samples")
+        ax.set_xlim(*xlim)
+        ax.grid(False)
+        ax.set_facecolor("white")
+    fig.suptitle("Bogura Drive-Test Report — RSRP / RSRQ / SINR", fontsize=13, fontweight="bold")
+    fig.tight_layout()
+    fig.savefig(path, dpi=140, facecolor="white")
+    plt.close(fig)
+    return path
+
+
 def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -519,6 +561,7 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
     rsrp_map = save_route_plot(df, "RSRP", PLOTS_DIR / "excel_route_rsrp.png", -120, -70, "RdYlGn", "dBm")
     rsrq_map = save_route_plot(df, "RSRQ", PLOTS_DIR / "excel_route_rsrq.png", -20, -6, "RdYlGn", "dB")
     sinr_map = save_route_plot(df, "SINR", PLOTS_DIR / "excel_route_sinr.png", -5, 25, "RdYlGn", "dB")
+    save_report_preview(df, PLOTS_DIR / "excel_rsrp_rsrq_sinr_histograms.png")
 
     wb = Workbook()
     cover = wb.active
@@ -533,6 +576,7 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
 
     blocks = write_chart_data(data_ws, df)
     build_cover(cover, df)
+    add_cover_charts(cover, data_ws, blocks)
     build_kpi_sheet(
         rsrp_ws,
         data_ws,
