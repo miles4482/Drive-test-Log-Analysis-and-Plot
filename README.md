@@ -39,6 +39,13 @@ The script:
 2. Extracts P2 into `extracted/Bogura_P2.xlsx`
 3. Merges them into `output/Bogura_merged.csv.gz` (gzip CSV; a full `.xlsx` of 1M+ rows is impractical)
 4. Writes KPI plots under `output/plots/` and a text summary in `output/analysis_summary.md`
+5. Writes `output/Bogura_DriveTest_Report.xlsx` — Excel report with native RSRP, RSRQ and SINR charts, **freeze panes off** and **gridlines off** on every sheet
+
+You can rebuild only the Excel report from the merged CSV:
+
+```bash
+python generate_excel_report.py
+```
 
 Split RAR volumes are not concatenated with `cat`. `unrar` reads `Bogura_P1.part1.rar` and automatically consumes part2–part5.
 
@@ -72,3 +79,16 @@ python merge_and_analyze.py --from-merged
 | Unique Cell Ids | 2,521 |
 
 RSRP is mostly fair-to-poor: 48% of samples are below −100 dBm; 7% are excellent (> −80 dBm).
+
+## Excel report
+
+`output/Bogura_DriveTest_Report.xlsx`
+
+| Sheet | Contents |
+| --- | --- |
+| Cover | Dataset size, KPI scorecard, band mix |
+| RSRP / RSRQ / SINR | Histogram, CDF, quality-bin charts, coverage map |
+| Time Series | 10-minute mean line charts for all three KPIs |
+| Sample Log | Evenly spaced subset of the merged samples |
+
+Every sheet has freeze panes disabled and worksheet gridlines turned off (screen and print). Charts are native Excel objects, not just pictures.

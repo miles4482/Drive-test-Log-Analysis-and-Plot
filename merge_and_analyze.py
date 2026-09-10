@@ -320,6 +320,13 @@ def main() -> None:
         merged = merge_parts()
     write_summary(merged)
     plot_all(merged)
+    from generate_excel_report import build_report, verify_report
+
+    report_path = build_report(merged)
+    result = verify_report(report_path)
+    if result["problems"]:
+        raise SystemExit("Excel view checks failed: " + "; ".join(result["problems"]))
+    print("Excel report verified: no freeze panes, no gridlines.")
     print("Done.")
 
 
