@@ -8,5 +8,6 @@ __pycache__/
 output/*.csv
 output/*.xlsx
 !output/Bogura_DriveTest_Report.xlsx
+!output/Bogura_DriveTest_Report_v*.xlsx
 output/*.parquet
 output/*.csv.gz

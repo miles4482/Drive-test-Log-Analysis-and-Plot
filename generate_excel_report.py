@@ -8,7 +8,9 @@ Worksheet rules for every sheet:
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
+import shutil
 
 import matplotlib
 
@@ -36,7 +38,9 @@ from merge_and_analyze import (
     rsrp_range_counts,
 )
 
+REPORT_VERSION = "2"
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
+VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
 NAVY = "1B4F72"
 WHITE = "FFFFFF"
@@ -392,14 +396,16 @@ def write_chart_data(ws: Worksheet, df: pd.DataFrame) -> dict:
 def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     banner(
         ws,
-        "  Bogura LTE Drive-Test Report",
-        "  Merged P1 + P2  |  RSRP, RSRQ, SINR  |  Gridlines off  |  Freeze panes off",
+        f"  Bogura LTE Drive-Test Report  (v{REPORT_VERSION})",
+        f"  Version {REPORT_VERSION}  |  Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}  |  Gridlines off  |  Freeze panes off",
         last_col=10,
     )
     set_widths(ws, {"A": 28, "B": 18, "C": 18, "D": 18, "E": 18, "F": 18, "G": 18, "H": 18, "I": 18, "J": 18})
 
     write_cell(ws, 4, 1, "Dataset", size=14, bold=True)
     info_rows = [
+        ["Report version", f"v{REPORT_VERSION}"],
+        ["Generated", datetime.now().strftime("%Y-%m-%d %H:%M")],
         ["P1 samples", int((df["Source"] == "P1").sum())],
         ["P2 samples", int((df["Source"] == "P2").sum())],
         ["Merged samples", int(len(df))],
@@ -410,8 +416,8 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
         ["Latitude range", f"{df['Latitude'].min():.5f} – {df['Latitude'].max():.5f}"],
     ]
     write_table(ws, 5, 1, ["Item", "Value"], info_rows, num_formats={1: "#,##0"})
-    ws.cell(9, 2).number_format = "yyyy-mm-dd hh:mm:ss"
-    ws.cell(10, 2).number_format = "yyyy-mm-dd hh:mm:ss"
+    ws.cell(11, 2).number_format = "yyyy-mm-dd hh:mm:ss"
+    ws.cell(12, 2).number_format = "yyyy-mm-dd hh:mm:ss"
 
     write_cell(ws, 4, 4, "Radio KPIs (all samples)", size=14, bold=True)
     stats_headers = ["KPI", "Count", "Min", "P5", "Median", "Mean", "P95", "Max"]
@@ -472,7 +478,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
 
 
 def build_kpi_sheet(ws, df, name, color, unit, map_path: Path | None):
-    banner(ws, f"  {name} report", f"  Unit: {unit}  |  Statistics and coverage map  |  Gridlines off", last_col=10)
+    banner(ws, f"  {name} report  (v{REPORT_VERSION})", f"  Unit: {unit}  |  Statistics and coverage map  |  Gridlines off", last_col=10)
     set_widths(ws, {get_column_letter(i): 16 for i in range(1, 11)})
     ws.column_dimensions["A"].width = 28
     ws.column_dimensions["B"].width = 18
@@ -595,7 +601,7 @@ def build_rsrp_vs_sheet(ws, data_ws, n_rows: int, scatter_sinr: Path, scatter_rs
     banner(
         ws,
         "  RSRP vs SINR / RSRQ",
-        "  RSRP on the horizontal axis  |  Binned mean lines (P1 vs P2) and scatter with trend  |  Gridlines off",
+        f"  RSRP on the horizontal axis  |  Version {REPORT_VERSION}  |  Binned mean lines and scatter with trend  |  Gridlines off",
         last_col=12,
     )
     set_widths(ws, {get_column_letter(i): 14 for i in range(1, 13)})
@@ -802,9 +808,17 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
     for ws in wb.worksheets:
         apply_sheet_view(ws)
 
+    wb.properties.title = f"Bogura LTE Drive-Test Report v{REPORT_VERSION}"
+    wb.properties.subject = f"Version {REPORT_VERSION}"
+    wb.properties.description = (
+        f"Bogura drive-test report v{REPORT_VERSION}. "
+        "KPI sheets: statistics and coverage map. Analysis: RSRP vs SINR/RSRQ."
+    )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(out_path)
+    shutil.copy2(out_path, VERSIONED_XLSX)
     print(f"Wrote Excel report: {out_path}")
+    print(f"Wrote versioned copy: {VERSIONED_XLSX}")
     return out_path
 
 
