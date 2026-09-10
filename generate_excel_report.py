@@ -26,10 +26,9 @@ from openpyxl.worksheet.worksheet import Worksheet
 from merge_and_analyze import (
     OUTPUT_DIR,
     PLOTS_DIR,
-    RSRP_BINS,
-    RSRP_LABELS,
     downsample,
     earfcn_to_band,
+    rsrp_range_counts,
 )
 
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
@@ -269,9 +268,11 @@ def write_chart_data(ws: Worksheet, df: pd.DataFrame) -> dict:
 
     ws.cell(1, 12, "RSRP_quality")
     ws.cell(1, 13, "RSRP_quality_n")
-    for i, (label, n) in enumerate(quality_counts(df["RSRP"], RSRP_BINS, RSRP_LABELS).items(), start=2):
+    rsrp_q = rsrp_range_counts(df["RSRP"])
+    for i, (label, n) in enumerate(rsrp_q.items(), start=2):
         ws.cell(i, 12, str(label))
         ws.cell(i, 13, int(n))
+    blocks["rsrp_q_n"] = len(rsrp_q)
     ws.cell(1, 15, "RSRQ_quality")
     ws.cell(1, 16, "RSRQ_quality_n")
     for i, (label, n) in enumerate(quality_counts(df["RSRQ"], RSRQ_BINS, RSRQ_LABELS).items(), start=2):
@@ -350,7 +351,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     write_cell(ws, 15, 1, "How to read this workbook", size=14, bold=True)
     notes = [
         "Cover — dataset size and KPI scorecard for the merged Bogura log.",
-        "RSRP / RSRQ / SINR — Excel charts (histogram, CDF, quality bins) plus a coverage map. No freeze, no gridlines.",
+        "RSRP / RSRQ / SINR — Excel charts (histogram, CDF, RSRP ranges, quality bins) plus a coverage map. No freeze, no gridlines.",
         "Time Series — 10-minute mean RSRP, RSRQ and SINR across the drive days.",
         "Sample Log — evenly spaced subset of the merged samples (full 1.07M rows stay in output/Bogura_merged.csv.gz).",
         "P1 is the split archive (part1–part5). P2 is the standalone archive. This report uses the concatenated final file.",
@@ -364,6 +365,27 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     band = df["Band"].value_counts()
     band_rows = [[str(k), int(v), v / len(df)] for k, v in band.items()]
     write_table(ws, 23, 1, ["Band", "Samples", "Share"], band_rows, num_formats={1: "#,##0", 2: "0.0%"})
+
+    write_cell(ws, 22, 5, "RSRP ranges (dBm)", size=14, bold=True)
+    rsrp_q = rsrp_range_counts(df["RSRP"])
+    rsrp_rows = [[str(label), int(n), n / len(df)] for label, n in rsrp_q.items()]
+    write_table(
+        ws,
+        23,
+        5,
+        ["Range", "Samples", "Share"],
+        rsrp_rows,
+        num_formats={1: "#,##0", 2: "0.0%"},
+    )
+    write_cell(
+        ws,
+        33,
+        5,
+        "≥ -85 holds samples stronger than -85. Other bins: lower ≤ RSRP < upper (<-125 is RSRP < -125).",
+        size=9,
+        wrap=True,
+    )
+    ws.merge_cells(start_row=33, start_column=5, end_row=33, end_column=8)
     # Histograms are added after _ChartData exists; see add_cover_charts().
 
 
@@ -419,7 +441,7 @@ def build_kpi_sheet(ws, data_ws, df, name, color, unit, hist_col, hist_n, cdf_co
         data_ws,
         ws,
         "A20",
-        f"{name} quality bins",
+        f"{name} quality bins" if name != "RSRP" else "RSRP ranges (dBm)",
         color,
         q_cat_col,
         q_cat_col + 1,
@@ -511,21 +533,26 @@ def verify_report(path: Path) -> dict:
 
 
 def add_cover_charts(cover, data_ws, blocks) -> None:
-    write_cell(cover, 29, 1, "RSRP, RSRQ and SINR plots (native Excel charts)", size=14, bold=True)
+    write_cell(cover, 35, 1, "RSRP, RSRQ and SINR plots (native Excel charts)", size=14, bold=True)
     add_col_chart(
-        data_ws, cover, "A31", "RSRP histogram", RSRP_COLOR,
+        data_ws, cover, "A37", "RSRP histogram", RSRP_COLOR,
         blocks["RSRP"]["col"], blocks["RSRP"]["col"] + 1, 2, 1 + blocks["RSRP"]["n"],
         "Samples", "RSRP (dBm)", width=12, height=7,
     )
     add_col_chart(
-        data_ws, cover, "G31", "RSRQ histogram", RSRQ_COLOR,
+        data_ws, cover, "G37", "RSRQ histogram", RSRQ_COLOR,
         blocks["RSRQ"]["col"], blocks["RSRQ"]["col"] + 1, 2, 1 + blocks["RSRQ"]["n"],
         "Samples", "RSRQ (dB)", width=12, height=7,
     )
     add_col_chart(
-        data_ws, cover, "A48", "SINR histogram", SINR_COLOR,
+        data_ws, cover, "A54", "SINR histogram", SINR_COLOR,
         blocks["SINR"]["col"], blocks["SINR"]["col"] + 1, 2, 1 + blocks["SINR"]["n"],
         "Samples", "SINR (dB)", width=12, height=7,
+    )
+    add_col_chart(
+        data_ws, cover, "G54", "RSRP ranges (dBm)", RSRP_COLOR,
+        12, 13, 2, 1 + blocks["rsrp_q_n"],
+        "Samples", "RSRP range", width=12, height=7,
     )
 
 
@@ -588,7 +615,7 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
         blocks["RSRP"]["n"],
         8,
         12,
-        5,
+        blocks["rsrp_q_n"],
         rsrp_map,
     )
     build_kpi_sheet(

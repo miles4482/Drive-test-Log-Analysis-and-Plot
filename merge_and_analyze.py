@@ -46,14 +46,51 @@ EARFCN_BANDS = {
     41: (39650, 41589, "B41 2500 MHz"),
 }
 
-RSRP_BINS = [-np.inf, -110, -100, -90, -80, np.inf]
-RSRP_LABELS = [
-    "Very Poor (<-110)",
-    "Poor (-110 to -100)",
-    "Fair (-100 to -90)",
-    "Good (-90 to -80)",
-    "Excellent (>-80)",
+# Requested RSRP ranges. pd.cut needs increasing edges (right=False).
+# <-125; [-125, -120); [-120, -115); [-115, -110); [-110, -105);
+# [-105, -95); [-95, -85); [-85, inf).
+RSRP_BINS = [-np.inf, -125, -120, -115, -110, -105, -95, -85, np.inf]
+RSRP_CUT_LABELS = [
+    "<-125",
+    "-120 to -125",
+    "-115 to -120",
+    "-110 to -115",
+    "-105 to -110",
+    "-95 to -105",
+    "-85 to -95",
+    "≥ -85",
 ]
+# Display order: requested list, with ≥ -85 first so strong samples are not dropped.
+RSRP_LABELS = [
+    "≥ -85",
+    "-85 to -95",
+    "-95 to -105",
+    "-105 to -110",
+    "-110 to -115",
+    "-115 to -120",
+    "-120 to -125",
+    "<-125",
+]
+RSRP_COLORS = [
+    "#1a9850",
+    "#91cf60",
+    "#d9ef8b",
+    "#fee08b",
+    "#fc8d59",
+    "#e34a33",
+    "#b30000",
+    "#67001f",
+]
+
+
+def rsrp_range_counts(series: pd.Series) -> pd.Series:
+    binned = pd.cut(
+        pd.to_numeric(series, errors="coerce"),
+        bins=RSRP_BINS,
+        labels=RSRP_CUT_LABELS,
+        right=False,
+    )
+    return binned.value_counts(dropna=False).reindex(RSRP_LABELS, fill_value=0)
 
 
 def require_unrar() -> str:
@@ -173,12 +210,11 @@ def write_summary(df: pd.DataFrame) -> None:
         f"- RSRQ: {format_stats(df['RSRQ'])}",
         f"- SINR: {format_stats(df['SINR'])} (blank SINR samples are skipped)",
         "",
-        "## RSRP quality bins",
+        "## RSRP ranges (dBm)",
         "",
     ]
-    rsrp_bin = pd.cut(df["RSRP"], bins=RSRP_BINS, labels=RSRP_LABELS, right=False)
-    counts = rsrp_bin.value_counts(dropna=False).reindex(RSRP_LABELS, fill_value=0)
-    for label, n in counts.items():
+    rsrp_counts = rsrp_range_counts(df["RSRP"])
+    for label, n in rsrp_counts.items():
         lines.append(f"- {label}: {int(n):,} ({n / len(df) * 100:.1f}%)")
 
     lines += ["", "## Bands (from DL EARFCN)", ""]
@@ -262,12 +298,10 @@ def plot_all(df: pd.DataFrame) -> None:
     fig.savefig(PLOTS_DIR / "03_kpi_vs_time.png", dpi=140)
     plt.close(fig)
 
-    fig, ax = plt.subplots(figsize=(9, 5))
-    rsrp_bin = pd.cut(df["RSRP"], bins=RSRP_BINS, labels=RSRP_LABELS, right=False)
-    counts = rsrp_bin.value_counts().reindex(RSRP_LABELS, fill_value=0)
-    colors = ["#9b2226", "#e07a3d", "#e9c46a", "#90be6d", "#2a9d8f"]
-    ax.barh(list(counts.index), counts.values, color=colors)
-    style_axes(ax, "RSRP quality bins", "Samples", "")
+    fig, ax = plt.subplots(figsize=(9, 5.5))
+    counts = rsrp_range_counts(df["RSRP"])
+    ax.barh(list(counts.index[::-1]), counts.values[::-1], color=list(reversed(RSRP_COLORS)))
+    style_axes(ax, "RSRP ranges (dBm)", "Samples", "")
     fig.tight_layout()
     fig.savefig(PLOTS_DIR / "04_rsrp_quality_bins.png", dpi=140)
     plt.close(fig)

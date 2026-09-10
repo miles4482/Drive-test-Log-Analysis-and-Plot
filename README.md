@@ -78,7 +78,13 @@ python merge_and_analyze.py --from-merged
 | Dominant bands | B3 1800 (50.5%), B1 2100 (42.3%), B41 2500 (6.5%), B8 900 (0.7%) |
 | Unique Cell Ids | 2,521 |
 
-RSRP is mostly fair-to-poor: 48% of samples are below −100 dBm; 7% are excellent (> −80 dBm).
+RSRP ranges used in the report (dBm): **≥ -85**, **-85 to -95**, **-95 to -105**, **-105 to -110**, **-110 to -115**, **-115 to -120**, **-120 to -125**, **<-125**.
+
+## Download Excel report
+
+**Direct download:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
+
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
 ## Excel report
 
@@ -86,7 +92,7 @@ RSRP is mostly fair-to-poor: 48% of samples are below −100 dBm; 7% are excelle
 
 | Sheet | Contents |
 | --- | --- |
-| Cover | Dataset size, KPI scorecard, band mix, RSRP/RSRQ/SINR histograms |
+| Cover | Dataset size, KPI scorecard, RSRP ranges, band mix, RSRP/RSRQ/SINR histograms |
 | RSRP / RSRQ / SINR | Histogram, CDF, quality-bin charts, coverage map |
 | Time Series | 10-minute mean line charts for all three KPIs |
 | Sample Log | Evenly spaced subset of the merged samples |
