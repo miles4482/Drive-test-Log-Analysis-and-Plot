@@ -46,7 +46,7 @@ from merge_and_analyze import (
     rsrp_range_counts,
 )
 
-REPORT_VERSION = "1.6"
+REPORT_VERSION = "1.7"
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
@@ -57,6 +57,8 @@ CARD = "EAF2F8"
 RSRP_COLOR = "C0392B"
 RSRQ_COLOR = "1F618D"
 SINR_COLOR = "117A65"
+VS_SINR_LINE = "48C9B0"
+VS_RSRQ_LINE = "5DADE2"
 THIN = Border(
     left=Side(style="thin", color="D5D8DC"),
     right=Side(style="thin", color="D5D8DC"),
@@ -206,6 +208,7 @@ def apply_xy_levels(
     y_min=None,
     y_max=None,
     show_all_x_ticks=True,
+    x_tick_skip=None,
     rotate_x=False,
     y_major_unit=None,
     y_ax_pos="l",
@@ -234,7 +237,13 @@ def apply_xy_levels(
     chart.y_axis.minorTickMark = "none"
     if y_num_fmt:
         chart.y_axis.numFmt = y_num_fmt
-    if show_all_x_ticks:
+    if x_tick_skip is not None:
+        try:
+            chart.x_axis.tickLblSkip = int(x_tick_skip)
+            chart.x_axis.tickMarkSkip = int(x_tick_skip)
+        except Exception:
+            pass
+    elif show_all_x_ticks:
         try:
             chart.x_axis.tickLblSkip = 1
             chart.x_axis.tickMarkSkip = 1
@@ -490,7 +499,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     notes = [
         "Cover — dataset size, KPI scorecard, band mix, and overview histograms.",
         "RSRP / RSRQ / SINR — statistics table and coverage map (discrete range legend).",
-        "RSRP vs KPIs — merged P1+P2 as one SINR line and one RSRQ line vs RSRP.",
+        "RSRP vs KPIs — merged P1+P2 as one SINR line, plus a dual-axis SINR/RSRQ chart.",
         "Sample Log — evenly spaced subset of the merged samples (full 1.07M rows stay in output/Bogura_merged.csv.gz).",
         "P1 is the split archive (part1–part5). P2 is the standalone archive. This report uses the concatenated final file.",
     ]
@@ -550,6 +559,14 @@ def build_kpi_sheet(ws, df, name, color, unit, map_path: Path | None):
         add_image(ws, map_path, "D5", width=780, height=580)
 
 
+def style_smooth_line(series, color: str, width=25000) -> None:
+    hexcol = color.lstrip("#")
+    series.graphicalProperties.line.solidFill = hexcol
+    series.graphicalProperties.line.width = width
+    series.smooth = True
+    series.marker = Marker(symbol="none")
+
+
 def add_vs_line_chart(ws_data, ws_dest, anchor, title, cat_col, data_min, data_max, min_row, max_row, y_title, colors, width=16, height=8):
     chart = LineChart()
     chart.style = 10
@@ -558,7 +575,7 @@ def add_vs_line_chart(ws_data, ws_dest, anchor, title, cat_col, data_min, data_m
     chart.x_axis.title = "RSRP (dBm)"
     chart.width = width
     chart.height = height
-    chart.legend.position = "b"
+    chart.legend = None
     cats = Reference(ws_data, min_col=cat_col, min_row=min_row, max_row=max_row)
     data = Reference(ws_data, min_col=data_min, max_col=data_max, min_row=min_row - 1, max_row=max_row)
     chart.add_data(data, titles_from_data=True)
@@ -566,30 +583,18 @@ def add_vs_line_chart(ws_data, ws_dest, anchor, title, cat_col, data_min, data_m
     for i, color in enumerate(colors):
         if i >= len(chart.series):
             break
-        hexcol = color.lstrip("#")
-        chart.series[i].graphicalProperties.line.solidFill = hexcol
-        chart.series[i].graphicalProperties.line.width = 18000
-        chart.series[i].marker = Marker(symbol="circle", size=6)
-        chart.series[i].marker.graphicalProperties.solidFill = hexcol
-    if "SINR" in y_title:
-        apply_xy_levels(
-            chart, "RSRP (dBm)", y_title,
-            y_min=-10, y_max=35, show_all_x_ticks=True, rotate_x=True, y_major_unit=5,
-            y_num_fmt="0",
-        )
-    elif "RSRQ" in y_title:
-        apply_xy_levels(
-            chart, "RSRP (dBm)", y_title,
-            y_min=-22, y_max=0, show_all_x_ticks=True, rotate_x=True, y_major_unit=2,
-            y_num_fmt="0.0",
-        )
-    else:
-        apply_xy_levels(chart, "RSRP (dBm)", y_title, show_all_x_ticks=True, rotate_x=True)
+        style_smooth_line(chart.series[i], color)
+    apply_xy_levels(
+        chart, "RSRP (dBm)", y_title,
+        y_min=0, y_max=30, show_all_x_ticks=False, x_tick_skip=5, rotate_x=False,
+        y_major_unit=5, y_num_fmt="0",
+    )
+    reserve_plot_area(chart, left=0.12, top=0.14, width=0.82, height=0.70)
     ws_dest.add_chart(chart, anchor)
     return chart
 
 
-def add_dual_axis_vs_chart(ws_data, ws_dest, anchor, n_rows, width=22, height=9):
+def add_dual_axis_vs_chart(ws_data, ws_dest, anchor, n_rows, width=16, height=9):
     cats = Reference(ws_data, min_col=50, min_row=2, max_row=1 + n_rows)
     sinr = LineChart()
     sinr.style = 10
@@ -600,22 +605,20 @@ def add_dual_axis_vs_chart(ws_data, ws_dest, anchor, n_rows, width=22, height=9)
     sinr.height = height
     sinr.add_data(Reference(ws_data, min_col=51, min_row=1, max_row=1 + n_rows), titles_from_data=True)
     sinr.set_categories(cats)
-    sinr.series[0].graphicalProperties.line.solidFill = SINR_COLOR
-    sinr.series[0].graphicalProperties.line.width = 20000
+    style_smooth_line(sinr.series[0], VS_SINR_LINE)
     sinr.legend.position = "b"
 
     rsrq = LineChart()
     rsrq.y_axis.axId = 200
     rsrq.y_axis.title = "RSRQ (dB)"
     rsrq.add_data(Reference(ws_data, min_col=52, min_row=1, max_row=1 + n_rows), titles_from_data=True)
-    rsrq.series[0].graphicalProperties.line.solidFill = RSRQ_COLOR
-    rsrq.series[0].graphicalProperties.line.width = 20000
+    style_smooth_line(rsrq.series[0], VS_RSRQ_LINE)
     sinr.y_axis.crosses = "min"
     rsrq.y_axis.crosses = "max"
     apply_xy_levels(
         sinr, "RSRP (dBm)", "SINR (dB)",
-        y_min=-10, y_max=35, show_all_x_ticks=True, rotate_x=True, y_major_unit=5,
-        layout=False, y_num_fmt="0",
+        y_min=0, y_max=30, show_all_x_ticks=False, x_tick_skip=5, rotate_x=False,
+        y_major_unit=5, layout=False, y_num_fmt="0",
     )
     reserve_plot_area(sinr, left=0.12, top=0.14, width=0.74, height=0.58)
     rsrq.y_axis.delete = False
@@ -625,11 +628,11 @@ def add_dual_axis_vs_chart(ws_data, ws_dest, anchor, n_rows, width=22, height=9)
     rsrq.y_axis.minorTickMark = "none"
     rsrq.y_axis.title = "RSRQ (dB)"
     _title_outside(rsrq.y_axis.title)
-    rsrq.y_axis.scaling.min = -22
+    rsrq.y_axis.scaling.min = -20
     rsrq.y_axis.scaling.max = 0
     rsrq.y_axis.numFmt = "0.0"
     try:
-        rsrq.y_axis.majorUnit = 2
+        rsrq.y_axis.majorUnit = 10
     except Exception:
         pass
     sinr += rsrq
@@ -664,62 +667,64 @@ def save_rsrp_scatter(df: pd.DataFrame, ycol: str, path: Path, ylabel: str, titl
 
 
 def save_binned_vs_preview(df: pd.DataFrame, path: Path) -> Path:
-    pair = df.dropna(subset=["RSRP", "SINR"]).copy()
+    pair = df.dropna(subset=["RSRP", "SINR", "RSRQ"]).copy()
     pair["rsrp_bin"] = pair["RSRP"].round().astype(int)
-    fig, ax = plt.subplots(figsize=(11, 5.5))
-    g = pair.groupby("rsrp_bin")["SINR"].mean().sort_index(ascending=False)
-    g = g.loc[(g.index <= -80) & (g.index >= -125)]
-    ax.plot(g.index, g.values, marker="o", ms=4, color=f"#{SINR_COLOR}", label="SINR")
+    g = pair.groupby("rsrp_bin")[["SINR", "RSRQ"]].mean()
+    g = g.loc[(g.index <= -80) & (g.index >= -125)].sort_index(ascending=False)
+    fig, axes = plt.subplots(1, 2, figsize=(16.4, 5.4))
+
+    ax = axes[0]
+    ax.plot(g.index, g["SINR"], color=f"#{VS_SINR_LINE}", lw=2.4)
     ax.set_title("RSRP vs SINR")
     ax.set_xlabel("RSRP (dBm)")
     ax.set_ylabel("SINR (dB)")
     ax.set_xlim(-80, -125)
-    ax.set_ylim(-10, 35)
+    ax.set_ylim(0, 30)
     ax.set_xticks(range(-80, -126, -5))
     ax.yaxis.set_major_locator(MultipleLocator(5))
-    ax.tick_params(axis="x", rotation=90, labelsize=7)
-    ax.tick_params(axis="y", labelsize=8)
-    ax.legend()
-    ax.grid(True, alpha=0.35)
+    ax.grid(True, axis="y", color="#D5D8DC", lw=0.8)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    ax = axes[1]
+    ax.plot(g.index, g["SINR"], color=f"#{VS_SINR_LINE}", lw=2.4, label="SINR")
+    ax.set_ylim(0, 30)
+    ax.set_ylabel("SINR (dB)")
+    ax.yaxis.set_major_locator(MultipleLocator(5))
+    ax2 = ax.twinx()
+    ax2.plot(g.index, g["RSRQ"], color=f"#{VS_RSRQ_LINE}", lw=2.4, label="RSRQ")
+    ax2.set_ylim(-20, 0)
+    ax2.set_ylabel("RSRQ (dB)")
+    ax2.yaxis.set_major_locator(MultipleLocator(10))
+    ax.set_title("RSRP vs SINR vs RSRQ")
+    ax.set_xlabel("RSRP (dBm)")
+    ax.set_xlim(-80, -125)
+    ax.set_xticks(range(-80, -126, -5))
+    ax.grid(True, axis="y", color="#D5D8DC", lw=0.8)
+    ax.spines["top"].set_visible(False)
+    handles = ax.get_lines() + ax2.get_lines()
+    labels = [h.get_label() for h in handles]
+    ax.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=2, frameon=False)
     fig.tight_layout()
     fig.savefig(path, dpi=140, facecolor="white")
     plt.close(fig)
     return path
 
 
-def build_rsrp_vs_sheet(ws, data_ws, n_rows: int, scatter_sinr: Path, scatter_rsrq: Path) -> None:
+def build_rsrp_vs_sheet(ws, data_ws, n_rows: int) -> None:
     banner(
         ws,
         "  RSRP vs SINR / RSRQ",
-        f"  RSRP on the horizontal axis  |  Version {REPORT_VERSION}  |  Binned mean lines and scatter with trend  |  Gridlines off",
-        last_col=12,
+        f"  Merged P1+P2  |  Version {REPORT_VERSION}  |  Smooth mean lines  |  Gridlines off",
+        last_col=18,
     )
-    set_widths(ws, {get_column_letter(i): 14 for i in range(1, 13)})
-    write_cell(
-        ws,
-        4,
-        1,
-        "Binned 1 dBm means of the merged P1+P2 log (one SINR line, one RSRQ line). Worse RSRP is to the right. Scatter plots below include a trend line.",
-        wrap=True,
-    )
-    ws.merge_cells(start_row=4, start_column=1, end_row=4, end_column=12)
+    set_widths(ws, {get_column_letter(i): 12 for i in range(1, 19)})
     add_vs_line_chart(
-        data_ws, ws, "A6", "RSRP vs SINR",
+        data_ws, ws, "A4", "RSRP vs SINR",
         50, 51, 51, 2, 1 + n_rows, "SINR (dB)",
-        [SINR_COLOR], width=15, height=8,
+        [VS_SINR_LINE], width=16, height=9,
     )
-    add_vs_line_chart(
-        data_ws, ws, "I6", "RSRP vs RSRQ",
-        50, 52, 52, 2, 1 + n_rows, "RSRQ (dB)",
-        [RSRQ_COLOR], width=15, height=8,
-    )
-    add_dual_axis_vs_chart(data_ws, ws, "A24", n_rows, width=24, height=10)
-    write_cell(ws, 40, 1, "RSRP vs SINR scatter (trend line)", size=14, bold=True)
-    write_cell(ws, 40, 8, "RSRP vs RSRQ scatter (trend line)", size=14, bold=True)
-    if scatter_sinr.exists():
-        add_image(ws, scatter_sinr, "A42", width=520, height=350)
-    if scatter_rsrq.exists():
-        add_image(ws, scatter_rsrq, "H42", width=520, height=350)
+    add_dual_axis_vs_chart(data_ws, ws, "J4", n_rows, width=16, height=9)
 
 
 def build_sample_log(ws: Worksheet, df: pd.DataFrame, n: int = 8000) -> None:
@@ -906,8 +911,6 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
     rsrp_map = plot_rsrp_coverage_map(df, PLOTS_DIR / "excel_route_rsrp.png")
     rsrq_map = plot_rsrq_coverage_map(df, PLOTS_DIR / "excel_route_rsrq.png")
     sinr_map = plot_sinr_coverage_map(df, PLOTS_DIR / "excel_route_sinr.png")
-    scatter_sinr = save_rsrp_scatter(df, "SINR", PLOTS_DIR / "excel_scatter_rsrp_sinr.png", "SINR (dB)", "RSRP vs SINR", ylim=(-10, 32))
-    scatter_rsrq = save_rsrp_scatter(df, "RSRQ", PLOTS_DIR / "excel_scatter_rsrp_rsrq.png", "RSRQ (dB)", "RSRP vs RSRQ", ylim=(-24, 0))
     save_binned_vs_preview(df, PLOTS_DIR / "excel_rsrp_vs_sinr_lines.png")
     save_report_preview(df, PLOTS_DIR / "excel_rsrp_rsrq_sinr_histograms.png")
 
@@ -928,7 +931,7 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
     build_kpi_sheet(rsrp_ws, df, "RSRP", RSRP_COLOR, "dBm", rsrp_map)
     build_kpi_sheet(rsrq_ws, df, "RSRQ", RSRQ_COLOR, "dB", rsrq_map)
     build_kpi_sheet(sinr_ws, df, "SINR", SINR_COLOR, "dB", sinr_map)
-    build_rsrp_vs_sheet(time_ws, data_ws, blocks["vs_n"], scatter_sinr, scatter_rsrq)
+    build_rsrp_vs_sheet(time_ws, data_ws, blocks["vs_n"])
     build_sample_log(sample_ws, df)
 
     for ws in wb.worksheets:
