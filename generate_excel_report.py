@@ -46,7 +46,7 @@ from merge_and_analyze import (
     rsrp_range_counts,
 )
 
-REPORT_VERSION = "1.5"
+REPORT_VERSION = "1.6"
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
@@ -431,26 +431,14 @@ def write_chart_data(ws: Worksheet, df: pd.DataFrame) -> dict:
     pair = df.copy()
     pair["rsrp_bin"] = pd.to_numeric(pair["RSRP"], errors="coerce").round().astype("Int64")
     ws.cell(1, 50, "RSRP_dBm")
-    ws.cell(1, 51, "P1 SINR")
-    ws.cell(1, 52, "P2 SINR")
-    ws.cell(1, 53, "P1 RSRQ")
-    ws.cell(1, 54, "P2 RSRQ")
-    ws.cell(1, 55, "SINR mean")
-    ws.cell(1, 56, "RSRQ mean")
-    grouped = pair.groupby(["Source", "rsrp_bin"], dropna=True)
-    sinr_by_src = grouped["SINR"].mean()
-    rsrq_by_src = grouped["RSRQ"].mean()
+    ws.cell(1, 51, "SINR")
+    ws.cell(1, 52, "RSRQ")
     all_mean = pair.groupby("rsrp_bin")[["SINR", "RSRQ"]].mean()
     for i, b in enumerate(rsrp_vs_bins, start=2):
         ws.cell(i, 50, int(b))
-        for src, scol, rcol in (("P1", 51, 53), ("P2", 52, 54)):
-            s_val = sinr_by_src.get((src, b), np.nan)
-            r_val = rsrq_by_src.get((src, b), np.nan)
-            ws.cell(i, scol, None if pd.isna(s_val) else float(s_val))
-            ws.cell(i, rcol, None if pd.isna(r_val) else float(r_val))
         if b in all_mean.index:
-            ws.cell(i, 55, None if pd.isna(all_mean.loc[b, "SINR"]) else float(all_mean.loc[b, "SINR"]))
-            ws.cell(i, 56, None if pd.isna(all_mean.loc[b, "RSRQ"]) else float(all_mean.loc[b, "RSRQ"]))
+            ws.cell(i, 51, None if pd.isna(all_mean.loc[b, "SINR"]) else float(all_mean.loc[b, "SINR"]))
+            ws.cell(i, 52, None if pd.isna(all_mean.loc[b, "RSRQ"]) else float(all_mean.loc[b, "RSRQ"]))
     blocks["vs_n"] = len(rsrp_vs_bins)
     return blocks
 
@@ -502,7 +490,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     notes = [
         "Cover — dataset size, KPI scorecard, band mix, and overview histograms.",
         "RSRP / RSRQ / SINR — statistics table and coverage map (discrete range legend).",
-        "RSRP vs KPIs — RSRP levels on the horizontal axis, SINR/RSRQ levels on the vertical axis.",
+        "RSRP vs KPIs — merged P1+P2 as one SINR line and one RSRQ line vs RSRP.",
         "Sample Log — evenly spaced subset of the merged samples (full 1.07M rows stay in output/Bogura_merged.csv.gz).",
         "P1 is the split archive (part1–part5). P2 is the standalone archive. This report uses the concatenated final file.",
     ]
@@ -610,7 +598,7 @@ def add_dual_axis_vs_chart(ws_data, ws_dest, anchor, n_rows, width=22, height=9)
     sinr.x_axis.title = "RSRP (dBm)"
     sinr.width = width
     sinr.height = height
-    sinr.add_data(Reference(ws_data, min_col=55, min_row=1, max_row=1 + n_rows), titles_from_data=True)
+    sinr.add_data(Reference(ws_data, min_col=51, min_row=1, max_row=1 + n_rows), titles_from_data=True)
     sinr.set_categories(cats)
     sinr.series[0].graphicalProperties.line.solidFill = SINR_COLOR
     sinr.series[0].graphicalProperties.line.width = 20000
@@ -619,7 +607,7 @@ def add_dual_axis_vs_chart(ws_data, ws_dest, anchor, n_rows, width=22, height=9)
     rsrq = LineChart()
     rsrq.y_axis.axId = 200
     rsrq.y_axis.title = "RSRQ (dB)"
-    rsrq.add_data(Reference(ws_data, min_col=56, min_row=1, max_row=1 + n_rows), titles_from_data=True)
+    rsrq.add_data(Reference(ws_data, min_col=52, min_row=1, max_row=1 + n_rows), titles_from_data=True)
     rsrq.series[0].graphicalProperties.line.solidFill = RSRQ_COLOR
     rsrq.series[0].graphicalProperties.line.width = 20000
     sinr.y_axis.crosses = "min"
@@ -679,11 +667,9 @@ def save_binned_vs_preview(df: pd.DataFrame, path: Path) -> Path:
     pair = df.dropna(subset=["RSRP", "SINR"]).copy()
     pair["rsrp_bin"] = pair["RSRP"].round().astype(int)
     fig, ax = plt.subplots(figsize=(11, 5.5))
-    colors = {"P1": "#2E86C1", "P2": "#E67E22"}
-    for src in ("P1", "P2"):
-        g = pair.loc[pair["Source"] == src].groupby("rsrp_bin")["SINR"].mean().sort_index(ascending=False)
-        g = g.loc[(g.index <= -80) & (g.index >= -125)]
-        ax.plot(g.index, g.values, marker="o", ms=4, color=colors[src], label=f"{src} SINR")
+    g = pair.groupby("rsrp_bin")["SINR"].mean().sort_index(ascending=False)
+    g = g.loc[(g.index <= -80) & (g.index >= -125)]
+    ax.plot(g.index, g.values, marker="o", ms=4, color=f"#{SINR_COLOR}", label="SINR")
     ax.set_title("RSRP vs SINR")
     ax.set_xlabel("RSRP (dBm)")
     ax.set_ylabel("SINR (dB)")
@@ -713,19 +699,19 @@ def build_rsrp_vs_sheet(ws, data_ws, n_rows: int, scatter_sinr: Path, scatter_rs
         ws,
         4,
         1,
-        "Binned 1 dBm means (like a cluster line chart). Worse RSRP is to the right. Scatter plots below include a trend line.",
+        "Binned 1 dBm means of the merged P1+P2 log (one SINR line, one RSRQ line). Worse RSRP is to the right. Scatter plots below include a trend line.",
         wrap=True,
     )
     ws.merge_cells(start_row=4, start_column=1, end_row=4, end_column=12)
     add_vs_line_chart(
         data_ws, ws, "A6", "RSRP vs SINR",
-        50, 51, 52, 2, 1 + n_rows, "SINR (dB)",
-        ["2E86C1", "E67E22"], width=15, height=8,
+        50, 51, 51, 2, 1 + n_rows, "SINR (dB)",
+        [SINR_COLOR], width=15, height=8,
     )
     add_vs_line_chart(
         data_ws, ws, "I6", "RSRP vs RSRQ",
-        50, 53, 54, 2, 1 + n_rows, "RSRQ (dB)",
-        ["2E86C1", "E67E22"], width=15, height=8,
+        50, 52, 52, 2, 1 + n_rows, "RSRQ (dB)",
+        [RSRQ_COLOR], width=15, height=8,
     )
     add_dual_axis_vs_chart(data_ws, ws, "A24", n_rows, width=24, height=10)
     write_cell(ws, 40, 1, "RSRP vs SINR scatter (trend line)", size=14, bold=True)
