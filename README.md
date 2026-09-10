@@ -93,8 +93,8 @@ GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/
 | Sheet | Contents |
 | --- | --- |
 | Cover | Dataset size, KPI scorecard, RSRP ranges, band mix, RSRP/RSRQ/SINR histograms |
-| RSRP / RSRQ / SINR | Histogram, CDF, quality-bin charts, coverage map |
-| Time Series | 10-minute mean line charts for all three KPIs |
+| RSRP / RSRQ / SINR | Statistics table and coverage map only |
+| RSRP vs KPIs | RSRP on the x-axis vs SINR and RSRQ (P1/P2 binned means, combined dual-axis, scatter + trend) |
 | Sample Log | Evenly spaced subset of the merged samples |
 
 Every sheet has freeze panes disabled and worksheet gridlines turned off (screen and print). Charts are native Excel objects, not just pictures.

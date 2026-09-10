@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 from openpyxl import Workbook, load_workbook
 from openpyxl.chart import BarChart, LineChart, Reference
+from openpyxl.chart.marker import Marker
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -359,6 +360,32 @@ def write_chart_data(ws: Worksheet, df: pd.DataFrame) -> dict:
         ws.cell(i, 23, None if pd.isna(row["RSRQ"]) else float(row["RSRQ"]))
         ws.cell(i, 24, None if pd.isna(row["SINR"]) else float(row["SINR"]))
     blocks["ts_n"] = len(ts)
+
+    rsrp_vs_bins = list(range(-80, -126, -1))
+    pair = df.copy()
+    pair["rsrp_bin"] = pd.to_numeric(pair["RSRP"], errors="coerce").round().astype("Int64")
+    ws.cell(1, 50, "RSRP_dBm")
+    ws.cell(1, 51, "P1 SINR")
+    ws.cell(1, 52, "P2 SINR")
+    ws.cell(1, 53, "P1 RSRQ")
+    ws.cell(1, 54, "P2 RSRQ")
+    ws.cell(1, 55, "SINR mean")
+    ws.cell(1, 56, "RSRQ mean")
+    grouped = pair.groupby(["Source", "rsrp_bin"], dropna=True)
+    sinr_by_src = grouped["SINR"].mean()
+    rsrq_by_src = grouped["RSRQ"].mean()
+    all_mean = pair.groupby("rsrp_bin")[["SINR", "RSRQ"]].mean()
+    for i, b in enumerate(rsrp_vs_bins, start=2):
+        ws.cell(i, 50, int(b))
+        for src, scol, rcol in (("P1", 51, 53), ("P2", 52, 54)):
+            s_val = sinr_by_src.get((src, b), np.nan)
+            r_val = rsrq_by_src.get((src, b), np.nan)
+            ws.cell(i, scol, None if pd.isna(s_val) else float(s_val))
+            ws.cell(i, rcol, None if pd.isna(r_val) else float(r_val))
+        if b in all_mean.index:
+            ws.cell(i, 55, None if pd.isna(all_mean.loc[b, "SINR"]) else float(all_mean.loc[b, "SINR"]))
+            ws.cell(i, 56, None if pd.isna(all_mean.loc[b, "RSRQ"]) else float(all_mean.loc[b, "RSRQ"]))
+    blocks["vs_n"] = len(rsrp_vs_bins)
     return blocks
 
 
@@ -405,9 +432,9 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
 
     write_cell(ws, 15, 1, "How to read this workbook", size=14, bold=True)
     notes = [
-        "Cover — dataset size and KPI scorecard for the merged Bogura log.",
-        "RSRP / RSRQ / SINR — histograms include a colour legend. RSRP coverage map uses the requested dBm ranges and has no lat/lon labels.",
-        "Time Series — 10-minute mean RSRP, RSRQ and SINR across the drive days.",
+        "Cover — dataset size, KPI scorecard, band mix, and overview histograms.",
+        "RSRP / RSRQ / SINR — statistics table and coverage map only (no histogram/CDF on those sheets).",
+        "RSRP vs KPIs — RSRP on the horizontal axis vs SINR and RSRQ (binned mean lines and scatter with trend).",
         "Sample Log — evenly spaced subset of the merged samples (full 1.07M rows stay in output/Bogura_merged.csv.gz).",
         "P1 is the split archive (part1–part5). P2 is the standalone archive. This report uses the concatenated final file.",
     ]
@@ -444,10 +471,11 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     # Histograms are added after _ChartData exists; see add_cover_charts().
 
 
-def build_kpi_sheet(ws, data_ws, df, name, color, unit, hist_spec, hist_colors, cdf_col, q_cat_col, q_n, map_path: Path | None):
-    banner(ws, f"  {name} report", f"  Unit: {unit}  |  Charts are native Excel objects  |  Gridlines off", last_col=10)
+def build_kpi_sheet(ws, df, name, color, unit, map_path: Path | None):
+    banner(ws, f"  {name} report", f"  Unit: {unit}  |  Statistics and coverage map  |  Gridlines off", last_col=10)
     set_widths(ws, {get_column_letter(i): 16 for i in range(1, 11)})
     ws.column_dimensions["A"].width = 28
+    ws.column_dimensions["B"].width = 18
 
     write_cell(ws, 4, 1, f"{name} statistics", size=14, bold=True)
     st = kpi_stats(df[name])
@@ -461,65 +489,142 @@ def build_kpi_sheet(ws, data_ws, df, name, color, unit, hist_spec, hist_colors, 
         num_formats={1: "0.00"},
     )
     ws.cell(6, 2).number_format = "#,##0"
-
-    add_stacked_col_chart(
-        data_ws,
-        ws,
-        "D4",
-        f"{name} histogram",
-        hist_spec["cat_col"],
-        hist_spec["data_min"],
-        hist_spec["data_max"],
-        2,
-        1 + hist_spec["n"],
-        "Samples",
-        f"{name} ({unit})",
-        hist_colors,
-        width=16,
-        height=8,
-    )
-    add_line_chart(
-        data_ws,
-        ws,
-        "D20",
-        f"{name} CDF",
-        color,
-        7,
-        cdf_col,
-        2,
-        1 + 51,
-        f"{name} ({unit})",
-        "Percentile",
-        width=16,
-        height=8,
-    )
-    add_col_chart(
-        data_ws,
-        ws,
-        "A20",
-        f"{name} quality bins" if name != "RSRP" else "RSRP ranges (dBm)",
-        color,
-        q_cat_col,
-        q_cat_col + 1,
-        2,
-        1 + q_n,
-        "Samples",
-        "",
-        width=12,
-        height=8,
-    )
     if map_path and map_path.exists():
-        write_cell(ws, 38, 1, f"{name} coverage map", size=14, bold=True)
-        add_image(ws, map_path, "A40", width=760, height=560)
+        write_cell(ws, 4, 4, f"{name} coverage map", size=14, bold=True)
+        add_image(ws, map_path, "D5", width=780, height=580)
 
 
-def build_time_sheet(ws, data_ws, ts_n: int) -> None:
-    banner(ws, "  RSRP / RSRQ / SINR vs time", "  10-minute mean of the merged Bogura log  |  Gridlines off", last_col=10)
-    set_widths(ws, {get_column_letter(i): 16 for i in range(1, 11)})
-    write_cell(ws, 4, 1, "Each chart is a native Excel line chart from the merged P1+P2 samples.", wrap=True)
-    add_line_chart(data_ws, ws, "A6", "RSRP vs time (10-min mean)", RSRP_COLOR, 21, 22, 2, 1 + ts_n, "RSRP (dBm)", "Time", width=22, height=8)
-    add_line_chart(data_ws, ws, "A22", "RSRQ vs time (10-min mean)", RSRQ_COLOR, 21, 23, 2, 1 + ts_n, "RSRQ (dB)", "Time", width=22, height=8)
-    add_line_chart(data_ws, ws, "A38", "SINR vs time (10-min mean)", SINR_COLOR, 21, 24, 2, 1 + ts_n, "SINR (dB)", "Time", width=22, height=8)
+def add_vs_line_chart(ws_data, ws_dest, anchor, title, cat_col, data_min, data_max, min_row, max_row, y_title, colors, width=16, height=8):
+    chart = LineChart()
+    chart.style = 10
+    chart.title = title
+    chart.y_axis.title = y_title
+    chart.x_axis.title = "RSRP (dBm)"
+    chart.width = width
+    chart.height = height
+    chart.legend.position = "b"
+    cats = Reference(ws_data, min_col=cat_col, min_row=min_row, max_row=max_row)
+    data = Reference(ws_data, min_col=data_min, max_col=data_max, min_row=min_row - 1, max_row=max_row)
+    chart.add_data(data, titles_from_data=True)
+    chart.set_categories(cats)
+    for i, color in enumerate(colors):
+        if i >= len(chart.series):
+            break
+        hexcol = color.lstrip("#")
+        chart.series[i].graphicalProperties.line.solidFill = hexcol
+        chart.series[i].graphicalProperties.line.width = 18000
+        chart.series[i].marker.symbol = "circle"
+        chart.series[i].marker.size = 6
+        chart.series[i].marker.graphicalProperties.solidFill = hexcol
+    ws_dest.add_chart(chart, anchor)
+    return chart
+
+
+def add_dual_axis_vs_chart(ws_data, ws_dest, anchor, n_rows, width=22, height=9):
+    cats = Reference(ws_data, min_col=50, min_row=2, max_row=1 + n_rows)
+    sinr = LineChart()
+    sinr.style = 10
+    sinr.title = "RSRP vs SINR vs RSRQ"
+    sinr.y_axis.title = "SINR (dB)"
+    sinr.x_axis.title = "RSRP (dBm)"
+    sinr.width = width
+    sinr.height = height
+    sinr.add_data(Reference(ws_data, min_col=55, min_row=1, max_row=1 + n_rows), titles_from_data=True)
+    sinr.set_categories(cats)
+    sinr.series[0].graphicalProperties.line.solidFill = SINR_COLOR
+    sinr.series[0].graphicalProperties.line.width = 20000
+    sinr.legend.position = "b"
+
+    rsrq = LineChart()
+    rsrq.y_axis.axId = 200
+    rsrq.y_axis.title = "RSRQ (dB)"
+    rsrq.add_data(Reference(ws_data, min_col=56, min_row=1, max_row=1 + n_rows), titles_from_data=True)
+    rsrq.series[0].graphicalProperties.line.solidFill = RSRQ_COLOR
+    rsrq.series[0].graphicalProperties.line.width = 20000
+    sinr.y_axis.crosses = "min"
+    rsrq.y_axis.crosses = "max"
+    sinr += rsrq
+    ws_dest.add_chart(sinr, anchor)
+
+
+def save_rsrp_scatter(df: pd.DataFrame, ycol: str, path: Path, ylabel: str, title: str, ylim=None) -> Path:
+    sample = downsample(df.dropna(subset=["RSRP", ycol]), 18000)
+    fig, ax = plt.subplots(figsize=(9.2, 6.2))
+    ax.scatter(sample["RSRP"], sample[ycol], s=6, alpha=0.22, c="#1F618D", linewidths=0)
+    x = sample["RSRP"].to_numpy()
+    y = sample[ycol].to_numpy()
+    if len(x) > 20:
+        coeff = np.polyfit(x, y, 1)
+        xs = np.linspace(np.nanmin(x), np.nanmax(x), 80)
+        ax.plot(xs, np.polyval(coeff, xs), color="#17202A", lw=1.8, label="Trend")
+        ax.legend(fontsize=8)
+    ax.set_xlabel("RSRP (dBm)")
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    ax.set_xlim(-50, -130)
+    if ylim:
+        ax.set_ylim(*ylim)
+    ax.grid(True, alpha=0.35)
+    fig.tight_layout()
+    fig.savefig(path, dpi=140, facecolor="white")
+    plt.close(fig)
+    return path
+
+
+def save_binned_vs_preview(df: pd.DataFrame, path: Path) -> Path:
+    pair = df.dropna(subset=["RSRP", "SINR"]).copy()
+    pair["rsrp_bin"] = pair["RSRP"].round().astype(int)
+    fig, ax = plt.subplots(figsize=(11, 5.5))
+    colors = {"P1": "#2E86C1", "P2": "#E67E22"}
+    for src in ("P1", "P2"):
+        g = pair.loc[pair["Source"] == src].groupby("rsrp_bin")["SINR"].mean().sort_index(ascending=False)
+        g = g.loc[(g.index <= -80) & (g.index >= -125)]
+        ax.plot(g.index, g.values, marker="o", ms=4, color=colors[src], label=f"{src} SINR")
+    ax.set_title("RSRP vs SINR")
+    ax.set_xlabel("RSRP (dBm)")
+    ax.set_ylabel("SINR (dB)")
+    ax.set_xlim(-80, -125)
+    ax.legend()
+    ax.grid(True, alpha=0.35)
+    fig.tight_layout()
+    fig.savefig(path, dpi=140, facecolor="white")
+    plt.close(fig)
+    return path
+
+
+def build_rsrp_vs_sheet(ws, data_ws, n_rows: int, scatter_sinr: Path, scatter_rsrq: Path) -> None:
+    banner(
+        ws,
+        "  RSRP vs SINR / RSRQ",
+        "  RSRP on the horizontal axis  |  Binned mean lines (P1 vs P2) and scatter with trend  |  Gridlines off",
+        last_col=12,
+    )
+    set_widths(ws, {get_column_letter(i): 14 for i in range(1, 13)})
+    write_cell(
+        ws,
+        4,
+        1,
+        "Binned 1 dBm means (like a cluster line chart). Worse RSRP is to the right. Scatter plots below include a trend line.",
+        wrap=True,
+    )
+    ws.merge_cells(start_row=4, start_column=1, end_row=4, end_column=12)
+    add_vs_line_chart(
+        data_ws, ws, "A6", "RSRP vs SINR",
+        50, 51, 52, 2, 1 + n_rows, "SINR (dB)",
+        ["2E86C1", "E67E22"], width=15, height=8,
+    )
+    add_vs_line_chart(
+        data_ws, ws, "I6", "RSRP vs RSRQ",
+        50, 53, 54, 2, 1 + n_rows, "RSRQ (dB)",
+        ["2E86C1", "E67E22"], width=15, height=8,
+    )
+    add_dual_axis_vs_chart(data_ws, ws, "A22", n_rows)
+    write_cell(ws, 40, 1, "RSRP vs SINR scatter (trend line)", size=14, bold=True)
+    write_cell(ws, 40, 8, "RSRP vs RSRQ scatter (trend line)", size=14, bold=True)
+    if scatter_sinr.exists():
+        add_image(ws, scatter_sinr, "A42", width=520, height=350)
+    if scatter_rsrq.exists():
+        add_image(ws, scatter_rsrq, "H42", width=520, height=350)
 
 
 def build_sample_log(ws: Worksheet, df: pd.DataFrame, n: int = 8000) -> None:
@@ -670,6 +775,9 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
     rsrp_map = plot_rsrp_coverage_map(df, PLOTS_DIR / "excel_route_rsrp.png")
     rsrq_map = save_route_plot(df, "RSRQ", PLOTS_DIR / "excel_route_rsrq.png", -20, -6, "RdYlGn", "dB")
     sinr_map = save_route_plot(df, "SINR", PLOTS_DIR / "excel_route_sinr.png", -5, 25, "RdYlGn", "dB")
+    scatter_sinr = save_rsrp_scatter(df, "SINR", PLOTS_DIR / "excel_scatter_rsrp_sinr.png", "SINR (dB)", "RSRP vs SINR", ylim=(-10, 32))
+    scatter_rsrq = save_rsrp_scatter(df, "RSRQ", PLOTS_DIR / "excel_scatter_rsrp_rsrq.png", "RSRQ (dB)", "RSRP vs RSRQ", ylim=(-24, 0))
+    save_binned_vs_preview(df, PLOTS_DIR / "excel_rsrp_vs_sinr_lines.png")
     save_report_preview(df, PLOTS_DIR / "excel_rsrp_rsrq_sinr_histograms.png")
 
     wb = Workbook()
@@ -678,7 +786,7 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
     rsrp_ws = wb.create_sheet("RSRP")
     rsrq_ws = wb.create_sheet("RSRQ")
     sinr_ws = wb.create_sheet("SINR")
-    time_ws = wb.create_sheet("Time Series")
+    time_ws = wb.create_sheet("RSRP vs KPIs")
     sample_ws = wb.create_sheet("Sample Log")
     data_ws = wb.create_sheet("_ChartData")
     data_ws.sheet_state = "hidden"
@@ -686,49 +794,10 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
     blocks = write_chart_data(data_ws, df)
     build_cover(cover, df)
     add_cover_charts(cover, data_ws, blocks)
-    build_kpi_sheet(
-        rsrp_ws,
-        data_ws,
-        df,
-        "RSRP",
-        RSRP_COLOR,
-        "dBm",
-        blocks["RSRP"],
-        MAP_RSRP_COLORS,
-        8,
-        12,
-        blocks["rsrp_q_n"],
-        rsrp_map,
-    )
-    build_kpi_sheet(
-        rsrq_ws,
-        data_ws,
-        df,
-        "RSRQ",
-        RSRQ_COLOR,
-        "dB",
-        blocks["RSRQ"],
-        RSRQ_STACK_COLORS,
-        9,
-        15,
-        4,
-        rsrq_map,
-    )
-    build_kpi_sheet(
-        sinr_ws,
-        data_ws,
-        df,
-        "SINR",
-        SINR_COLOR,
-        "dB",
-        blocks["SINR"],
-        SINR_STACK_COLORS,
-        10,
-        18,
-        4,
-        sinr_map,
-    )
-    build_time_sheet(time_ws, data_ws, blocks["ts_n"])
+    build_kpi_sheet(rsrp_ws, df, "RSRP", RSRP_COLOR, "dBm", rsrp_map)
+    build_kpi_sheet(rsrq_ws, df, "RSRQ", RSRQ_COLOR, "dB", rsrq_map)
+    build_kpi_sheet(sinr_ws, df, "SINR", SINR_COLOR, "dB", sinr_map)
+    build_rsrp_vs_sheet(time_ws, data_ws, blocks["vs_n"], scatter_sinr, scatter_rsrq)
     build_sample_log(sample_ws, df)
 
     for ws in wb.worksheets:
