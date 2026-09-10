@@ -80,24 +80,24 @@ python merge_and_analyze.py --from-merged
 
 RSRP ranges used in the report (dBm): **≥ -85**, **-85 to -95**, **-95 to -105**, **-105 to -110**, **-110 to -115**, **-115 to -120**, **-120 to -125**, **<-125**.
 
-## Download Excel report (v1.4)
+## Download Excel report (v1.5)
 
-**v1.4 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.4.xlsx
+**v1.5 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.5.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.4.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.5.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.4.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.5.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
-Cover sheet shows **Version 1.4** and the generated timestamp. Bump `REPORT_VERSION` in `generate_excel_report.py` when the file is updated again.
+Cover sheet shows **Version 1.5** and the generated timestamp. Bump `REPORT_VERSION` in `generate_excel_report.py` when the file is updated again.
 
 | Sheet | Contents |
 | --- | --- |
 | Cover | Dataset size, KPI scorecard, RSRP ranges, band mix, RSRP/RSRQ/SINR histograms with axis titles and tick levels |
-| RSRP / RSRQ / SINR | Statistics table and coverage map (Longitude on X, Latitude on Y) |
+| RSRP / RSRQ / SINR | Statistics table and coverage map with a discrete range legend (same style on all three KPI sheets) |
 | RSRP vs KPIs | RSRP levels on the horizontal axis vs SINR/RSRQ on the vertical axis (P1/P2 binned means, combined dual-axis, scatter + trend) |
 | Sample Log | Evenly spaced subset of the merged samples |
 

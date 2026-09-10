@@ -12,7 +12,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from matplotlib.ticker import FormatStrFormatter, MaxNLocator
 import numpy as np
 import pandas as pd
 
@@ -105,6 +104,33 @@ MAP_RSRP_COLORS = [
     "#67001f",
 ]
 
+# RSRQ / SINR coverage maps use the same discrete legend style as RSRP
+# (better values at the top, no vertical colorbar).
+MAP_RSRQ_LABELS = [
+    "≥ -10",
+    "-15 to -10",
+    "-20 to -15",
+    "< -20",
+]
+MAP_RSRQ_COLORS = [
+    "#1a9850",
+    "#d9ef8b",
+    "#fc8d59",
+    "#d73027",
+]
+MAP_SINR_LABELS = [
+    "≥ 20",
+    "13 to 20",
+    "0 to 13",
+    "< 0",
+]
+MAP_SINR_COLORS = [
+    "#1a9850",
+    "#2A9D8F",
+    "#E9C46A",
+    "#9B2226",
+]
+
 
 def rsrp_range_counts(series: pd.Series) -> pd.Series:
     binned = pd.cut(
@@ -134,47 +160,66 @@ def rsrp_map_class(series: pd.Series) -> pd.Series:
     return pd.Series(classified, index=v.index).where(v.notna(), other=pd.NA)
 
 
-def style_geo_axes(ax) -> None:
-    """Longitude on X and Latitude on Y, with visible tick levels."""
-    ax.set_xlabel("Longitude")
-    ax.set_ylabel("Latitude")
-    ax.tick_params(
-        axis="both",
-        which="major",
-        labelsize=8,
-        labelbottom=True,
-        labelleft=True,
-        length=4,
-        direction="out",
+def rsrq_map_class(series: pd.Series) -> pd.Series:
+    v = pd.to_numeric(series, errors="coerce")
+    classified = np.select(
+        [v >= -10, v >= -15, v >= -20],
+        MAP_RSRQ_LABELS[:-1],
+        default="< -20",
     )
-    ax.xaxis.set_major_locator(MaxNLocator(nbins=6))
-    ax.yaxis.set_major_locator(MaxNLocator(nbins=6))
-    ax.xaxis.set_major_formatter(FormatStrFormatter("%.4f"))
-    ax.yaxis.set_major_formatter(FormatStrFormatter("%.4f"))
+    return pd.Series(classified, index=v.index).where(v.notna(), other=pd.NA)
+
+
+def sinr_map_class(series: pd.Series) -> pd.Series:
+    v = pd.to_numeric(series, errors="coerce")
+    classified = np.select(
+        [v >= 20, v >= 13, v >= 0],
+        MAP_SINR_LABELS[:-1],
+        default="< 0",
+    )
+    return pd.Series(classified, index=v.index).where(v.notna(), other=pd.NA)
+
+
+def hide_map_axes(ax) -> None:
+    """Bare coverage map: no lon/lat ticks, matching the RSRP snapshot style."""
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_xlabel("")
+    ax.set_ylabel("")
+    ax.tick_params(labelbottom=False, labelleft=False, length=0)
     for spine in ax.spines.values():
-        spine.set_visible(True)
-        spine.set_color("#7F8C8D")
+        spine.set_visible(False)
 
 
-def plot_rsrp_coverage_map(df: pd.DataFrame, path: Path, max_points: int = 25000) -> Path:
-    """Discrete RSRP coverage map with Longitude / Latitude axis levels."""
+def plot_discrete_coverage_map(
+    df: pd.DataFrame,
+    path: Path,
+    column: str,
+    class_series: pd.Series,
+    labels: list[str],
+    colors: list[str],
+    title: str,
+    legend_title: str,
+    max_points: int = 25000,
+) -> Path:
+    """Drive route colored by discrete KPI ranges, with an RSRP-style side legend."""
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
-    geo = df.dropna(subset=["Longitude", "Latitude", "RSRP"]).copy()
+    geo = df.dropna(subset=["Longitude", "Latitude", column]).copy()
     sample = downsample(geo, max_points=max_points)
-    sample["rsrp_class"] = rsrp_map_class(sample["RSRP"])
+    classes = class_series.reindex(sample.index)
     fig, ax = plt.subplots(figsize=(8.0, 9.2))
-    for label, color in zip(reversed(MAP_RSRP_LABELS), reversed(MAP_RSRP_COLORS)):
-        part = sample[sample["rsrp_class"] == label]
+    for label, color in zip(reversed(labels), reversed(colors)):
+        part = sample[classes == label]
         if part.empty:
             continue
         ax.scatter(part["Longitude"], part["Latitude"], s=5, c=color, linewidths=0, rasterized=True)
     handles = [
         Line2D([0], [0], marker="o", color="none", markerfacecolor=c, markeredgecolor="none", markersize=8, label=lab)
-        for lab, c in zip(MAP_RSRP_LABELS, MAP_RSRP_COLORS)
+        for lab, c in zip(labels, colors)
     ]
     ax.legend(
         handles=handles,
-        title="RSRP (dBm)",
+        title=legend_title,
         loc="center left",
         bbox_to_anchor=(1.02, 0.5),
         frameon=True,
@@ -182,12 +227,55 @@ def plot_rsrp_coverage_map(df: pd.DataFrame, path: Path, max_points: int = 25000
         title_fontsize=10,
     )
     ax.set_aspect("equal", adjustable="box")
-    ax.set_title("Bogura coverage map — RSRP")
-    style_geo_axes(ax)
+    ax.set_title(title)
+    hide_map_axes(ax)
     fig.tight_layout()
     fig.savefig(path, dpi=140, facecolor="white", bbox_inches="tight")
     plt.close(fig)
     return path
+
+
+def plot_rsrp_coverage_map(df: pd.DataFrame, path: Path, max_points: int = 25000) -> Path:
+    """Discrete RSRP coverage map with a range legend (no lon/lat chrome)."""
+    return plot_discrete_coverage_map(
+        df,
+        path,
+        column="RSRP",
+        class_series=rsrp_map_class(df["RSRP"]),
+        labels=MAP_RSRP_LABELS,
+        colors=MAP_RSRP_COLORS,
+        title="Bogura coverage map — RSRP",
+        legend_title="RSRP (dBm)",
+        max_points=max_points,
+    )
+
+
+def plot_rsrq_coverage_map(df: pd.DataFrame, path: Path, max_points: int = 25000) -> Path:
+    return plot_discrete_coverage_map(
+        df,
+        path,
+        column="RSRQ",
+        class_series=rsrq_map_class(df["RSRQ"]),
+        labels=MAP_RSRQ_LABELS,
+        colors=MAP_RSRQ_COLORS,
+        title="Bogura coverage map — RSRQ",
+        legend_title="RSRQ (dB)",
+        max_points=max_points,
+    )
+
+
+def plot_sinr_coverage_map(df: pd.DataFrame, path: Path, max_points: int = 25000) -> Path:
+    return plot_discrete_coverage_map(
+        df,
+        path,
+        column="SINR",
+        class_series=sinr_map_class(df["SINR"]),
+        labels=MAP_SINR_LABELS,
+        colors=MAP_SINR_COLORS,
+        title="Bogura coverage map — SINR",
+        legend_title="SINR (dB)",
+        max_points=max_points,
+    )
 
 
 def require_unrar() -> str:

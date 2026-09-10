@@ -40,12 +40,13 @@ from merge_and_analyze import (
     downsample,
     earfcn_to_band,
     plot_rsrp_coverage_map,
+    plot_rsrq_coverage_map,
+    plot_sinr_coverage_map,
     rsrp_map_class,
     rsrp_range_counts,
-    style_geo_axes,
 )
 
-REPORT_VERSION = "1.4"
+REPORT_VERSION = "1.5"
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
@@ -139,32 +140,6 @@ def kpi_stats(series: pd.Series) -> dict[str, float]:
 def quality_counts(series: pd.Series, bins, labels) -> pd.Series:
     binned = pd.cut(pd.to_numeric(series, errors="coerce"), bins=bins, labels=labels, right=False)
     return binned.value_counts(dropna=False).reindex(labels, fill_value=0)
-
-
-def save_route_plot(df: pd.DataFrame, column: str, path: Path, vmin: float, vmax: float, cmap: str, unit: str) -> Path:
-    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
-    geo = df.dropna(subset=["Longitude", "Latitude", column])
-    sample = downsample(geo, max_points=25000)
-    fig, ax = plt.subplots(figsize=(8.0, 9.2))
-    sc = ax.scatter(
-        sample["Longitude"],
-        sample["Latitude"],
-        c=sample[column],
-        s=4,
-        cmap=cmap,
-        vmin=vmin,
-        vmax=vmax,
-        linewidths=0,
-    )
-    fig.colorbar(sc, ax=ax, label=f"{column} ({unit})")
-    ax.set_title(f"Bogura coverage map — {column}")
-    ax.set_aspect("equal", adjustable="box")
-    ax.grid(False)
-    style_geo_axes(ax)
-    fig.tight_layout()
-    fig.savefig(path, dpi=140, facecolor="white", bbox_inches="tight")
-    plt.close(fig)
-    return path
 
 
 def add_image(ws: Worksheet, path: Path, anchor: str, width: int, height: int) -> None:
@@ -526,7 +501,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     write_cell(ws, 15, 1, "How to read this workbook", size=14, bold=True)
     notes = [
         "Cover — dataset size, KPI scorecard, band mix, and overview histograms.",
-        "RSRP / RSRQ / SINR — statistics table and coverage map (Longitude / Latitude levels on both axes).",
+        "RSRP / RSRQ / SINR — statistics table and coverage map (discrete range legend).",
         "RSRP vs KPIs — RSRP levels on the horizontal axis, SINR/RSRQ levels on the vertical axis.",
         "Sample Log — evenly spaced subset of the merged samples (full 1.07M rows stay in output/Bogura_merged.csv.gz).",
         "P1 is the split archive (part1–part5). P2 is the standalone archive. This report uses the concatenated final file.",
@@ -943,8 +918,8 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
         df["Band"] = df["DL EARFCN"].map(earfcn_to_band)
 
     rsrp_map = plot_rsrp_coverage_map(df, PLOTS_DIR / "excel_route_rsrp.png")
-    rsrq_map = save_route_plot(df, "RSRQ", PLOTS_DIR / "excel_route_rsrq.png", -20, -6, "RdYlGn", "dB")
-    sinr_map = save_route_plot(df, "SINR", PLOTS_DIR / "excel_route_sinr.png", -5, 25, "RdYlGn", "dB")
+    rsrq_map = plot_rsrq_coverage_map(df, PLOTS_DIR / "excel_route_rsrq.png")
+    sinr_map = plot_sinr_coverage_map(df, PLOTS_DIR / "excel_route_sinr.png")
     scatter_sinr = save_rsrp_scatter(df, "SINR", PLOTS_DIR / "excel_scatter_rsrp_sinr.png", "SINR (dB)", "RSRP vs SINR", ylim=(-10, 32))
     scatter_rsrq = save_rsrp_scatter(df, "RSRQ", PLOTS_DIR / "excel_scatter_rsrp_rsrq.png", "RSRQ (dB)", "RSRP vs RSRQ", ylim=(-24, 0))
     save_binned_vs_preview(df, PLOTS_DIR / "excel_rsrp_vs_sinr_lines.png")
