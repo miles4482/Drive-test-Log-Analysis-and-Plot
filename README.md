@@ -53,7 +53,9 @@ Split RAR volumes are not concatenated with `cat`. `unrar` reads `Bogura_P1.part
 
 After a successful run:
 
-- `output/plots/01_route_rsrp.png` — drive route colored by RSRP
+- `output/plots/01_route_rsrp.png` — drive route colored by RSRP (map legend)
+- `output/plots/01_route_rsrq.png` — drive route colored by RSRQ (map legend)
+- `output/plots/01_route_sinr.png` — drive route colored by SINR (map legend)
 - `output/plots/02_kpi_histograms.png` — RSRP / RSRQ / SINR histograms
 - `output/plots/03_kpi_vs_time.png` — KPIs over time
 - `output/plots/04_rsrp_quality_bins.png` — coverage quality bins
@@ -78,19 +80,27 @@ python merge_and_analyze.py --from-merged
 | Dominant bands | B3 1800 (50.5%), B1 2100 (42.3%), B41 2500 (6.5%), B8 900 (0.7%) |
 | Unique Cell Ids | 2,521 |
 
-RSRP ranges used in the report (dBm): **≥ -85**, **-85 to -95**, **-95 to -105**, **-105 to -110**, **-110 to -115**, **-115 to -120**, **-120 to -125**, **<-125**.
+RSRP / RSRQ / SINR coverage maps use the Page 1 legend:
 
-## Download Excel report (v1.10)
+**RSRP (dBm):** `-90 <= X < Max` blue, `-100 <= X < -90` dark green, `-110 <= X < -100` light green, `-115 <= X < -110` yellow, `-120 <= X < -115` magenta, `-Min <= X < -120` red.
 
-**v1.10 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.10.xlsx
+**RSRQ (dB):** `X >= -5` blue, `-10 <= X < -5` dark green, `-15 <= X < -10` light green, `-20 <= X < -15` yellow, `X < -20` red.
+
+**SINR (dB):** `15 <= X < Max` blue, `10 <= X < 15` dark green, `5 <= X < 10` cyan, `0 <= X < 5` yellow, `-5 <= X < 0` orange, `Min < X < -5` red.
+
+Throughput (PDCP DL) and CQI are on the same legend sheet but are not in these IDLE logs, so those maps are not drawn yet.
+
+## Download Excel report (v1.11)
+
+**v1.11 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.11.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.10.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.11.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.10.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.11.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
 Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 

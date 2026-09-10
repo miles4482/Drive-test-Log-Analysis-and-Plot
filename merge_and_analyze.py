@@ -47,137 +47,102 @@ EARFCN_BANDS = {
     41: (39650, 41589, "B41 2500 MHz"),
 }
 
-# Requested RSRP ranges. pd.cut needs increasing edges (right=False).
-# <-125; [-125, -120); [-120, -115); [-115, -110); [-110, -105);
-# [-105, -95); [-95, -85); [-85, inf).
-RSRP_BINS = [-np.inf, -125, -120, -115, -110, -105, -95, -85, np.inf]
-RSRP_CUT_LABELS = [
-    "<-125",
-    "-120 to -125",
-    "-115 to -120",
-    "-110 to -115",
-    "-105 to -110",
-    "-95 to -105",
-    "-85 to -95",
-    "≥ -85",
-]
-# Display order: requested list, with ≥ -85 first so strong samples are not dropped.
-RSRP_LABELS = [
-    "≥ -85",
-    "-85 to -95",
-    "-95 to -105",
-    "-105 to -110",
-    "-110 to -115",
-    "-115 to -120",
-    "-120 to -125",
-    "<-125",
-]
-RSRP_COLORS = [
-    "#1a9850",
-    "#91cf60",
-    "#d9ef8b",
-    "#fee08b",
-    "#fc8d59",
-    "#e34a33",
-    "#b30000",
-    "#67001f",
-]
+# Coverage-map legend (Excel Page 1 colour table). Best bin is listed first.
+# Colours match the standard Office fills used in that table.
+LEGEND_BLUE = "#0070C0"
+LEGEND_DARK_GREEN = "#00B050"
+LEGEND_LIGHT_GREEN = "#92D050"
+LEGEND_YELLOW = "#FFFF00"
+LEGEND_MAGENTA = "#FF00FF"
+LEGEND_RED = "#FF0000"
+LEGEND_CYAN = "#00B0F0"
+LEGEND_ORANGE = "#FF6600"
 
-# Coverage-map / histogram legend requested for the Excel RSRP plot.
-# ≥ -85 is drawn in the same colour as "-85 to -95".
 MAP_RSRP_LABELS = [
-    "-85 to -95",
-    "-95 to -105",
-    "-105 to -110",
-    "-110 to -115",
-    "-115 to -120",
-    "-120 to -125",
-    "<-125",
+    "-90 <= X < Max",
+    "-100 <= X < -90",
+    "-110 <= X < -100",
+    "-115 <= X < -110",
+    "-120 <= X < -115",
+    "-Min <= X < -120",
 ]
+MAP_RSRP_THRESHOLDS = [-90, -100, -110, -115, -120]
 MAP_RSRP_COLORS = [
-    "#1a9850",
-    "#91cf60",
-    "#d9ef8b",
-    "#fee08b",
-    "#fc8d59",
-    "#d73027",
-    "#67001f",
+    LEGEND_BLUE,
+    LEGEND_DARK_GREEN,
+    LEGEND_LIGHT_GREEN,
+    LEGEND_YELLOW,
+    LEGEND_MAGENTA,
+    LEGEND_RED,
 ]
 
-# RSRQ / SINR coverage maps use the same discrete legend style as RSRP
-# (better values at the top, no vertical colorbar).
+# Source table listed RSRQ worst-first and wrote "X < -5" for the blue bin.
+# Blue is the best colour, so that row is X >= -5; red is X < -20.
 MAP_RSRQ_LABELS = [
-    "≥ -10",
-    "-15 to -10",
-    "-20 to -15",
-    "< -20",
+    "X >= -5",
+    "-10 <= X < -5",
+    "-15 <= X < -10",
+    "-20 <= X < -15",
+    "X < -20",
 ]
+MAP_RSRQ_THRESHOLDS = [-5, -10, -15, -20]
 MAP_RSRQ_COLORS = [
-    "#1a9850",
-    "#d9ef8b",
-    "#fc8d59",
-    "#d73027",
+    LEGEND_BLUE,
+    LEGEND_DARK_GREEN,
+    LEGEND_LIGHT_GREEN,
+    LEGEND_YELLOW,
+    LEGEND_RED,
 ]
+
 MAP_SINR_LABELS = [
-    "≥ 20",
-    "13 to 20",
-    "0 to 13",
-    "< 0",
+    "15 <= X < Max",
+    "10 <= X < 15",
+    "5 <= X < 10",
+    "0 <= X < 5",
+    "-5 <= X < 0",
+    "Min < X < -5",
 ]
+MAP_SINR_THRESHOLDS = [15, 10, 5, 0, -5]
 MAP_SINR_COLORS = [
-    "#1a9850",
-    "#2A9D8F",
-    "#E9C46A",
-    "#9B2226",
+    LEGEND_BLUE,
+    LEGEND_DARK_GREEN,
+    LEGEND_CYAN,
+    LEGEND_YELLOW,
+    LEGEND_ORANGE,
+    LEGEND_RED,
 ]
 
+# Cover / summary tables use the same bins as the maps.
+RSRP_LABELS = MAP_RSRP_LABELS
+RSRP_COLORS = MAP_RSRP_COLORS
 
-def rsrp_range_counts(series: pd.Series) -> pd.Series:
-    binned = pd.cut(
-        pd.to_numeric(series, errors="coerce"),
-        bins=RSRP_BINS,
-        labels=RSRP_CUT_LABELS,
-        right=False,
+
+def _map_class(series: pd.Series, thresholds: list[float], labels: list[str]) -> pd.Series:
+    """Assign legend labels; thresholds are inclusive lower bounds, best first."""
+    v = pd.to_numeric(series, errors="coerce")
+    classified = np.select(
+        [v >= t for t in thresholds],
+        labels[:-1],
+        default=labels[-1],
     )
-    return binned.value_counts(dropna=False).reindex(RSRP_LABELS, fill_value=0)
+    return pd.Series(classified, index=v.index).where(v.notna(), other=pd.NA)
 
 
 def rsrp_map_class(series: pd.Series) -> pd.Series:
     """Classify RSRP into the coverage-map legend bins."""
-    v = pd.to_numeric(series, errors="coerce")
-    classified = np.select(
-        [
-            v >= -95,
-            v >= -105,
-            v >= -110,
-            v >= -115,
-            v >= -120,
-            v >= -125,
-        ],
-        MAP_RSRP_LABELS[:-1],
-        default="<-125",
-    )
-    return pd.Series(classified, index=v.index).where(v.notna(), other=pd.NA)
+    return _map_class(series, MAP_RSRP_THRESHOLDS, MAP_RSRP_LABELS)
 
 
 def rsrq_map_class(series: pd.Series) -> pd.Series:
-    v = pd.to_numeric(series, errors="coerce")
-    classified = np.select(
-        [v >= -10, v >= -15, v >= -20],
-        MAP_RSRQ_LABELS[:-1],
-        default="< -20",
-    )
-    return pd.Series(classified, index=v.index).where(v.notna(), other=pd.NA)
+    return _map_class(series, MAP_RSRQ_THRESHOLDS, MAP_RSRQ_LABELS)
 
 
 def sinr_map_class(series: pd.Series) -> pd.Series:
-    v = pd.to_numeric(series, errors="coerce")
-    classified = np.select(
-        [v >= 20, v >= 13, v >= 0],
-        MAP_SINR_LABELS[:-1],
-        default="< 0",
-    )
-    return pd.Series(classified, index=v.index).where(v.notna(), other=pd.NA)
+    return _map_class(series, MAP_SINR_THRESHOLDS, MAP_SINR_LABELS)
+
+
+def rsrp_range_counts(series: pd.Series) -> pd.Series:
+    return rsrp_map_class(series).value_counts(dropna=True).reindex(MAP_RSRP_LABELS, fill_value=0)
 
 
 def hide_map_axes(ax) -> None:
@@ -214,7 +179,17 @@ def plot_discrete_coverage_map(
             continue
         ax.scatter(part["Longitude"], part["Latitude"], s=5, c=color, linewidths=0, rasterized=True)
     handles = [
-        Line2D([0], [0], marker="o", color="none", markerfacecolor=c, markeredgecolor="none", markersize=8, label=lab)
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="none",
+            markerfacecolor=c,
+            markeredgecolor="#333333",
+            markeredgewidth=0.4,
+            markersize=8,
+            label=lab,
+        )
         for lab, c in zip(labels, colors)
     ]
     ax.legend(
@@ -438,20 +413,15 @@ def style_axes(ax, title: str, xlabel: str, ylabel: str) -> None:
     ax.grid(True, alpha=0.3)
 
 
-def plot_all(df: pd.DataFrame) -> None:
-    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
-    geo = df.dropna(subset=["Longitude", "Latitude", "RSRP"])
-    plot_rsrp_coverage_map(geo, PLOTS_DIR / "01_route_rsrp.png")
-
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5.2))
-    rsrp_bins = np.arange(-140, -40, 2)
-    cls = rsrp_map_class(df["RSRP"])
-    bottom = np.zeros(len(rsrp_bins) - 1)
-    widths = np.diff(rsrp_bins)
-    for lab, color in zip(MAP_RSRP_LABELS, MAP_RSRP_COLORS):
-        counts, _ = np.histogram(df.loc[cls == lab, "RSRP"].dropna(), bins=rsrp_bins)
-        axes[0].bar(
-            rsrp_bins[:-1],
+def plot_stacked_map_hist(ax, values, classifier, labels, colors, bins, title, xlabel, legend_title, xlim) -> None:
+    v = pd.to_numeric(values, errors="coerce")
+    cls = classifier(v)
+    bottom = np.zeros(len(bins) - 1)
+    widths = np.diff(bins)
+    for lab, color in zip(labels, colors):
+        counts, _ = np.histogram(v[cls == lab].dropna(), bins=bins)
+        ax.bar(
+            bins[:-1],
             counts,
             width=widths,
             align="edge",
@@ -461,17 +431,31 @@ def plot_all(df: pd.DataFrame) -> None:
             label=lab,
         )
         bottom += counts
-    axes[0].legend(title="RSRP (dBm)", fontsize=7, loc="upper right")
-    style_axes(axes[0], "RSRP distribution", "RSRP (dBm)", "Samples")
-    axes[0].set_xlim(-140, -50)
-    for ax, col, bins, xlim in (
-        (axes[1], "RSRQ", np.arange(-30, 0, 0.5), (-24, -3)),
-        (axes[2], "SINR", np.arange(-20, 32, 1), (-15, 30)),
-    ):
-        ax.hist(df[col].dropna(), bins=bins, color="#2a6f97", edgecolor="none", label=f"{col} samples")
-        ax.legend(fontsize=8)
-        style_axes(ax, f"{col} distribution", col, "Samples")
-        ax.set_xlim(*xlim)
+    ax.legend(title=legend_title, fontsize=6, loc="upper right")
+    style_axes(ax, title, xlabel, "Samples")
+    ax.set_xlim(*xlim)
+
+
+def plot_all(df: pd.DataFrame) -> None:
+    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    geo = df.dropna(subset=["Longitude", "Latitude", "RSRP"])
+    plot_rsrp_coverage_map(geo, PLOTS_DIR / "01_route_rsrp.png")
+    plot_rsrq_coverage_map(geo, PLOTS_DIR / "01_route_rsrq.png")
+    plot_sinr_coverage_map(geo, PLOTS_DIR / "01_route_sinr.png")
+
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5.2))
+    plot_stacked_map_hist(
+        axes[0], df["RSRP"], rsrp_map_class, MAP_RSRP_LABELS, MAP_RSRP_COLORS,
+        np.arange(-140, -40, 2), "RSRP distribution", "RSRP (dBm)", "RSRP (dBm)", (-140, -50),
+    )
+    plot_stacked_map_hist(
+        axes[1], df["RSRQ"], rsrq_map_class, MAP_RSRQ_LABELS, MAP_RSRQ_COLORS,
+        np.arange(-30, 0, 0.5), "RSRQ distribution", "RSRQ (dB)", "RSRQ (dB)", (-24, -3),
+    )
+    plot_stacked_map_hist(
+        axes[2], df["SINR"], sinr_map_class, MAP_SINR_LABELS, MAP_SINR_COLORS,
+        np.arange(-20, 32, 1), "SINR distribution", "SINR (dB)", "SINR (dB)", (-15, 30),
+    )
     fig.tight_layout()
     fig.savefig(PLOTS_DIR / "02_kpi_histograms.png", dpi=140)
     plt.close(fig)

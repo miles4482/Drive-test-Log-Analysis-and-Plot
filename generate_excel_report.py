@@ -37,16 +37,23 @@ from merge_and_analyze import (
     PLOTS_DIR,
     MAP_RSRP_COLORS,
     MAP_RSRP_LABELS,
+    MAP_RSRQ_COLORS,
+    MAP_RSRQ_LABELS,
+    MAP_SINR_COLORS,
+    MAP_SINR_LABELS,
     downsample,
     earfcn_to_band,
     plot_rsrp_coverage_map,
     plot_rsrq_coverage_map,
     plot_sinr_coverage_map,
+    plot_stacked_map_hist,
     rsrp_map_class,
     rsrp_range_counts,
+    rsrq_map_class,
+    sinr_map_class,
 )
 
-REPORT_VERSION = "1.10"
+REPORT_VERSION = "1.11"
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
@@ -66,23 +73,6 @@ THIN = Border(
     top=Side(style="thin", color="D5D8DC"),
     bottom=Side(style="thin", color="D5D8DC"),
 )
-
-RSRQ_BINS = [-np.inf, -20, -15, -10, np.inf]
-RSRQ_LABELS = [
-    "Poor (<-20)",
-    "Fair (-20 to -15)",
-    "Good (-15 to -10)",
-    "Excellent (>-10)",
-]
-SINR_BINS = [-np.inf, 0, 13, 20, np.inf]
-SINR_LABELS = [
-    "Poor (<0)",
-    "Fair (0 to 13)",
-    "Good (13 to 20)",
-    "Excellent (>20)",
-]
-RSRQ_STACK_COLORS = ["9B2226", "E07A3D", "90BE6D", "2A9D8F"]
-SINR_STACK_COLORS = ["9B2226", "E9C46A", "2A9D8F", "1A9850"]
 
 
 def apply_sheet_view(ws: Worksheet) -> None:
@@ -140,9 +130,8 @@ def kpi_stats(series: pd.Series) -> dict[str, float]:
     }
 
 
-def quality_counts(series: pd.Series, bins, labels) -> pd.Series:
-    binned = pd.cut(pd.to_numeric(series, errors="coerce"), bins=bins, labels=labels, right=False)
-    return binned.value_counts(dropna=False).reindex(labels, fill_value=0)
+def map_range_counts(series: pd.Series, classifier, labels) -> pd.Series:
+    return classifier(series).value_counts(dropna=True).reindex(labels, fill_value=0)
 
 
 def add_image(ws: Worksheet, path: Path, anchor: str, width: int, height: int) -> None:
@@ -405,13 +394,13 @@ def write_chart_data(ws: Worksheet, df: pd.DataFrame) -> dict:
     sinr_bins = np.arange(-15, 31, 1)
 
     rsrp_cls = rsrp_map_class(df["RSRP"])
-    rsrq_cls = pd.cut(df["RSRQ"], bins=RSRQ_BINS, labels=RSRQ_LABELS, right=False)
-    sinr_cls = pd.cut(df["SINR"], bins=SINR_BINS, labels=SINR_LABELS, right=False)
+    rsrq_cls = rsrq_map_class(df["RSRQ"])
+    sinr_cls = sinr_map_class(df["SINR"])
 
     blocks = {
         "RSRP": write_stacked_hist(ws, 26, df["RSRP"], rsrp_bins, rsrp_cls, MAP_RSRP_LABELS),
-        "RSRQ": write_stacked_hist(ws, 35, df["RSRQ"], rsrq_bins, rsrq_cls, RSRQ_LABELS),
-        "SINR": write_stacked_hist(ws, 41, df["SINR"], sinr_bins, sinr_cls, SINR_LABELS),
+        "RSRQ": write_stacked_hist(ws, 35, df["RSRQ"], rsrq_bins, rsrq_cls, MAP_RSRQ_LABELS),
+        "SINR": write_stacked_hist(ws, 41, df["SINR"], sinr_bins, sinr_cls, MAP_SINR_LABELS),
     }
 
     percentiles = list(range(0, 101, 2))
@@ -441,12 +430,12 @@ def write_chart_data(ws: Worksheet, df: pd.DataFrame) -> dict:
     blocks["rsrp_q_n"] = len(rsrp_q)
     ws.cell(1, 15, "RSRQ_quality")
     ws.cell(1, 16, "RSRQ_quality_n")
-    for i, (label, n) in enumerate(quality_counts(df["RSRQ"], RSRQ_BINS, RSRQ_LABELS).items(), start=2):
+    for i, (label, n) in enumerate(map_range_counts(df["RSRQ"], rsrq_map_class, MAP_RSRQ_LABELS).items(), start=2):
         ws.cell(i, 15, str(label))
         ws.cell(i, 16, int(n))
     ws.cell(1, 18, "SINR_quality")
     ws.cell(1, 19, "SINR_quality_n")
-    for i, (label, n) in enumerate(quality_counts(df["SINR"], SINR_BINS, SINR_LABELS).items(), start=2):
+    for i, (label, n) in enumerate(map_range_counts(df["SINR"], sinr_map_class, MAP_SINR_LABELS).items(), start=2):
         ws.cell(i, 18, str(label))
         ws.cell(i, 19, int(n))
 
@@ -498,6 +487,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     set_widths(ws, {get_column_letter(i): 14 for i in range(1, last_col + 1)})
     ws.column_dimensions["A"].width = 26
     ws.column_dimensions["B"].width = 18
+    ws.column_dimensions["E"].width = 20
     section_bar(ws, 3, "IDLE Mode", 1, last_col)
 
     write_cell(ws, 5, 1, "Dataset", size=14, bold=True)
@@ -567,7 +557,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
         ws,
         36,
         5,
-        "≥ -85 holds samples stronger than -85. Other bins: lower ≤ RSRP < upper (<-125 is RSRP < -125).",
+        "Ranges match the coverage-map legend: -90 <= X < Max (blue) down to RSRP < -120 (red).",
         size=9,
         wrap=True,
     )
@@ -898,13 +888,13 @@ def add_cover_charts(cover, data_ws, blocks) -> None:
         data_ws, cover, "R6", "RSRQ histogram",
         blocks["RSRQ"]["cat_col"], blocks["RSRQ"]["data_min"], blocks["RSRQ"]["data_max"],
         2, 1 + blocks["RSRQ"]["n"],
-        "Samples", "RSRQ (dB)", RSRQ_STACK_COLORS, width=11, height=7,
+        "Samples", "RSRQ (dB)", MAP_RSRQ_COLORS, width=11, height=7,
     )
     add_stacked_col_chart(
         data_ws, cover, "L23", "SINR histogram",
         blocks["SINR"]["cat_col"], blocks["SINR"]["data_min"], blocks["SINR"]["data_max"],
         2, 1 + blocks["SINR"]["n"],
-        "Samples", "SINR (dB)", SINR_STACK_COLORS, width=11, height=7,
+        "Samples", "SINR (dB)", MAP_SINR_COLORS, width=11, height=7,
     )
     add_col_chart(
         data_ws, cover, "R23", "RSRP ranges (dBm)", RSRP_COLOR,
@@ -915,40 +905,19 @@ def add_cover_charts(cover, data_ws, blocks) -> None:
 
 def save_report_preview(df: pd.DataFrame, path: Path) -> Path:
     fig, axes = plt.subplots(1, 3, figsize=(16, 5.2))
-    rsrp_bins = np.arange(-140, -48, 2)
-    cls = rsrp_map_class(df["RSRP"])
-    bottom = np.zeros(len(rsrp_bins) - 1)
-    widths = np.diff(rsrp_bins)
-    for lab, color in zip(MAP_RSRP_LABELS, MAP_RSRP_COLORS):
-        counts, _ = np.histogram(df.loc[cls == lab, "RSRP"].dropna(), bins=rsrp_bins)
-        axes[0].bar(
-            rsrp_bins[:-1],
-            counts,
-            width=widths,
-            align="edge",
-            bottom=bottom,
-            color=color,
-            edgecolor="none",
-            label=lab,
-        )
-        bottom += counts
-    axes[0].legend(title="RSRP (dBm)", fontsize=7, loc="upper right")
-    axes[0].set_title("RSRP histogram")
-    axes[0].set_xlabel("RSRP (dBm)")
-    axes[0].set_ylabel("Samples")
-    axes[0].set_xlim(-140, -50)
-    axes[0].grid(False)
-
-    for ax, col, bins, xlim, color, unit in (
-        (axes[1], "RSRQ", np.arange(-24, -2.5, 0.5), (-24, -3), RSRQ_COLOR, "dB"),
-        (axes[2], "SINR", np.arange(-15, 31, 1), (-15, 30), SINR_COLOR, "dB"),
-    ):
-        ax.hist(df[col].dropna(), bins=bins, color=f"#{color}", edgecolor="none", label=f"{col} samples")
-        ax.legend(fontsize=8)
-        ax.set_title(f"{col} histogram")
-        ax.set_xlabel(f"{col} ({unit})")
-        ax.set_ylabel("Samples")
-        ax.set_xlim(*xlim)
+    plot_stacked_map_hist(
+        axes[0], df["RSRP"], rsrp_map_class, MAP_RSRP_LABELS, MAP_RSRP_COLORS,
+        np.arange(-140, -48, 2), "RSRP histogram", "RSRP (dBm)", "RSRP (dBm)", (-140, -50),
+    )
+    plot_stacked_map_hist(
+        axes[1], df["RSRQ"], rsrq_map_class, MAP_RSRQ_LABELS, MAP_RSRQ_COLORS,
+        np.arange(-24, -2.5, 0.5), "RSRQ histogram", "RSRQ (dB)", "RSRQ (dB)", (-24, -3),
+    )
+    plot_stacked_map_hist(
+        axes[2], df["SINR"], sinr_map_class, MAP_SINR_LABELS, MAP_SINR_COLORS,
+        np.arange(-15, 31, 1), "SINR histogram", "SINR (dB)", "SINR (dB)", (-15, 30),
+    )
+    for ax in axes:
         ax.grid(False)
         ax.set_facecolor("white")
     fig.suptitle("Bogura Drive-Test Report — RSRP / RSRQ / SINR", fontsize=13, fontweight="bold")
