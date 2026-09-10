@@ -12,6 +12,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from matplotlib.ticker import FormatStrFormatter, MaxNLocator
 import numpy as np
 import pandas as pd
 
@@ -133,8 +134,30 @@ def rsrp_map_class(series: pd.Series) -> pd.Series:
     return pd.Series(classified, index=v.index).where(v.notna(), other=pd.NA)
 
 
+def style_geo_axes(ax) -> None:
+    """Longitude on X and Latitude on Y, with visible tick levels."""
+    ax.set_xlabel("Longitude")
+    ax.set_ylabel("Latitude")
+    ax.tick_params(
+        axis="both",
+        which="major",
+        labelsize=8,
+        labelbottom=True,
+        labelleft=True,
+        length=4,
+        direction="out",
+    )
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=6))
+    ax.yaxis.set_major_locator(MaxNLocator(nbins=6))
+    ax.xaxis.set_major_formatter(FormatStrFormatter("%.4f"))
+    ax.yaxis.set_major_formatter(FormatStrFormatter("%.4f"))
+    for spine in ax.spines.values():
+        spine.set_visible(True)
+        spine.set_color("#7F8C8D")
+
+
 def plot_rsrp_coverage_map(df: pd.DataFrame, path: Path, max_points: int = 25000) -> Path:
-    """Discrete RSRP coverage map: range legend, no lat/lon ticks or labels."""
+    """Discrete RSRP coverage map with Longitude / Latitude axis levels."""
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
     geo = df.dropna(subset=["Longitude", "Latitude", "RSRP"]).copy()
     sample = downsample(geo, max_points=max_points)
@@ -159,13 +182,8 @@ def plot_rsrp_coverage_map(df: pd.DataFrame, path: Path, max_points: int = 25000
         title_fontsize=10,
     )
     ax.set_aspect("equal", adjustable="box")
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.set_xlabel("")
-    ax.set_ylabel("")
     ax.set_title("Bogura coverage map — RSRP")
-    for spine in ax.spines.values():
-        spine.set_visible(False)
+    style_geo_axes(ax)
     fig.tight_layout()
     fig.savefig(path, dpi=140, facecolor="white", bbox_inches="tight")
     plt.close(fig)

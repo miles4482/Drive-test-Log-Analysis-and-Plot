@@ -80,25 +80,25 @@ python merge_and_analyze.py --from-merged
 
 RSRP ranges used in the report (dBm): **≥ -85**, **-85 to -95**, **-95 to -105**, **-105 to -110**, **-110 to -115**, **-115 to -120**, **-120 to -125**, **<-125**.
 
-## Download Excel report (v2)
+## Download Excel report (v1.4)
 
-**v2 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v2.xlsx
+**v1.4 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.4.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v2.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.4.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v2.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.4.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
-Cover sheet shows **Version 2** and the generated timestamp. Bump `REPORT_VERSION` in `generate_excel_report.py` when the file is updated again.
+Cover sheet shows **Version 1.4** and the generated timestamp. Bump `REPORT_VERSION` in `generate_excel_report.py` when the file is updated again.
 
 | Sheet | Contents |
 | --- | --- |
-| Cover | Dataset size, KPI scorecard, RSRP ranges, band mix, RSRP/RSRQ/SINR histograms |
-| RSRP / RSRQ / SINR | Statistics table and coverage map only |
-| RSRP vs KPIs | RSRP on the x-axis vs SINR and RSRQ (P1/P2 binned means, combined dual-axis, scatter + trend) |
+| Cover | Dataset size, KPI scorecard, RSRP ranges, band mix, RSRP/RSRQ/SINR histograms with axis titles and tick levels |
+| RSRP / RSRQ / SINR | Statistics table and coverage map (Longitude on X, Latitude on Y) |
+| RSRP vs KPIs | RSRP levels on the horizontal axis vs SINR/RSRQ on the vertical axis (P1/P2 binned means, combined dual-axis, scatter + trend) |
 | Sample Log | Evenly spaced subset of the merged samples |
 
 Every sheet has freeze panes disabled and worksheet gridlines turned off (screen and print). Charts are native Excel objects, not just pictures.

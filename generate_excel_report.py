@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+import re
 import shutil
+import zipfile
 
 import matplotlib
 
@@ -18,10 +20,14 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.ticker import MultipleLocator
 from openpyxl import Workbook, load_workbook
 from openpyxl.chart import BarChart, LineChart, Reference
+from openpyxl.chart.layout import Layout, ManualLayout
 from openpyxl.chart.marker import Marker
+from openpyxl.chart.text import RichText
 from openpyxl.drawing.image import Image as XLImage
+from openpyxl.drawing.text import CharacterProperties, Paragraph, ParagraphProperties, RichTextProperties
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
@@ -36,9 +42,10 @@ from merge_and_analyze import (
     plot_rsrp_coverage_map,
     rsrp_map_class,
     rsrp_range_counts,
+    style_geo_axes,
 )
 
-REPORT_VERSION = "2"
+REPORT_VERSION = "1.4"
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
@@ -151,14 +158,9 @@ def save_route_plot(df: pd.DataFrame, column: str, path: Path, vmin: float, vmax
     )
     fig.colorbar(sc, ax=ax, label=f"{column} ({unit})")
     ax.set_title(f"Bogura coverage map — {column}")
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.set_xlabel("")
-    ax.set_ylabel("")
     ax.set_aspect("equal", adjustable="box")
     ax.grid(False)
-    for spine in ax.spines.values():
-        spine.set_visible(False)
+    style_geo_axes(ax)
     fig.tight_layout()
     fig.savefig(path, dpi=140, facecolor="white", bbox_inches="tight")
     plt.close(fig)
@@ -199,6 +201,89 @@ def write_table(ws, start_row: int, start_col: int, headers: list[str], rows: li
     return start_row + len(rows)
 
 
+def _title_outside(title_obj) -> None:
+    if title_obj is None:
+        return
+    try:
+        title_obj.overlay = False
+    except Exception:
+        pass
+
+
+def reserve_plot_area(chart, left=0.14, top=0.16, width=0.78, height=0.60) -> None:
+    """Keep plot area inside the frame so axis titles and tick levels stay visible."""
+    chart.layout = Layout(
+        manualLayout=ManualLayout(
+            xMode="edge",
+            yMode="edge",
+            x=left,
+            y=top,
+            w=width,
+            h=height,
+        )
+    )
+
+
+def apply_xy_levels(
+    chart,
+    x_title: str,
+    y_title: str,
+    y_min=None,
+    y_max=None,
+    show_all_x_ticks=True,
+    rotate_x=False,
+    y_major_unit=None,
+    y_ax_pos="l",
+    layout=True,
+    y_num_fmt=None,
+) -> None:
+    """Put category levels on the bottom (X) and value levels on the left (Y).
+
+    openpyxl defaults both axes to axPos='l', which Excel then draws without
+    horizontal tick labels or a usable vertical scale — the bug in the v1.3 charts.
+    """
+    chart.x_axis.title = x_title
+    chart.y_axis.title = y_title
+    _title_outside(getattr(chart, "title", None))
+    _title_outside(chart.x_axis.title)
+    _title_outside(chart.y_axis.title)
+    chart.x_axis.delete = False
+    chart.y_axis.delete = False
+    chart.x_axis.axPos = "b"
+    chart.y_axis.axPos = y_ax_pos
+    chart.x_axis.tickLblPos = "nextTo"
+    chart.y_axis.tickLblPos = "nextTo"
+    chart.x_axis.majorTickMark = "out"
+    chart.y_axis.majorTickMark = "out"
+    chart.x_axis.minorTickMark = "none"
+    chart.y_axis.minorTickMark = "none"
+    if y_num_fmt:
+        chart.y_axis.numFmt = y_num_fmt
+    if show_all_x_ticks:
+        try:
+            chart.x_axis.tickLblSkip = 1
+            chart.x_axis.tickMarkSkip = 1
+        except Exception:
+            pass
+    if y_min is not None:
+        chart.y_axis.scaling.min = y_min
+    if y_max is not None:
+        chart.y_axis.scaling.max = y_max
+    if y_major_unit is not None:
+        try:
+            chart.y_axis.majorUnit = y_major_unit
+        except Exception:
+            pass
+    if rotate_x:
+        # Rotation only — do not add an empty text run, which blanks tick labels.
+        chart.x_axis.txPr = RichText(
+            bodyPr=RichTextProperties(rot="-5400000", wrap="square", anchor="ctr"),
+            p=[Paragraph(pPr=ParagraphProperties(defRPr=CharacterProperties(sz=700)))],
+        )
+    if layout:
+        reserve_plot_area(chart)
+
+
 def style_chart(chart, color: str, title: str, y_title: str, x_title: str, width=14, height=8, show_legend=False) -> None:
     chart.title = title
     chart.y_axis.title = y_title
@@ -213,6 +298,7 @@ def style_chart(chart, color: str, title: str, y_title: str, x_title: str, width
     if chart.series:
         chart.series[0].graphicalProperties.solidFill = color
         chart.series[0].graphicalProperties.line.solidFill = color
+    apply_xy_levels(chart, x_title, y_title, show_all_x_ticks=False, rotate_x=False)
 
 
 def add_col_chart(ws_data, ws_dest, anchor, title, color, cat_col, data_col, min_row, max_row, y_title, x_title, width=14, height=8, show_legend=False):
@@ -244,6 +330,7 @@ def add_stacked_col_chart(ws_data, ws_dest, anchor, title, cat_col, data_min, da
     chart.width = width
     chart.height = height
     chart.legend.position = "b"
+    apply_xy_levels(chart, x_title, y_title, show_all_x_ticks=False, rotate_x=False)
     for i, color in enumerate(colors):
         if i < len(chart.series):
             hexcol = color.lstrip("#")
@@ -439,8 +526,8 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     write_cell(ws, 15, 1, "How to read this workbook", size=14, bold=True)
     notes = [
         "Cover — dataset size, KPI scorecard, band mix, and overview histograms.",
-        "RSRP / RSRQ / SINR — statistics table and coverage map only (no histogram/CDF on those sheets).",
-        "RSRP vs KPIs — RSRP on the horizontal axis vs SINR and RSRQ (binned mean lines and scatter with trend).",
+        "RSRP / RSRQ / SINR — statistics table and coverage map (Longitude / Latitude levels on both axes).",
+        "RSRP vs KPIs — RSRP levels on the horizontal axis, SINR/RSRQ levels on the vertical axis.",
         "Sample Log — evenly spaced subset of the merged samples (full 1.07M rows stay in output/Bogura_merged.csv.gz).",
         "P1 is the split archive (part1–part5). P2 is the standalone archive. This report uses the concatenated final file.",
     ]
@@ -521,6 +608,20 @@ def add_vs_line_chart(ws_data, ws_dest, anchor, title, cat_col, data_min, data_m
         chart.series[i].graphicalProperties.line.width = 18000
         chart.series[i].marker = Marker(symbol="circle", size=6)
         chart.series[i].marker.graphicalProperties.solidFill = hexcol
+    if "SINR" in y_title:
+        apply_xy_levels(
+            chart, "RSRP (dBm)", y_title,
+            y_min=-10, y_max=35, show_all_x_ticks=True, rotate_x=True, y_major_unit=5,
+            y_num_fmt="0",
+        )
+    elif "RSRQ" in y_title:
+        apply_xy_levels(
+            chart, "RSRP (dBm)", y_title,
+            y_min=-22, y_max=0, show_all_x_ticks=True, rotate_x=True, y_major_unit=2,
+            y_num_fmt="0.0",
+        )
+    else:
+        apply_xy_levels(chart, "RSRP (dBm)", y_title, show_all_x_ticks=True, rotate_x=True)
     ws_dest.add_chart(chart, anchor)
     return chart
 
@@ -548,6 +649,26 @@ def add_dual_axis_vs_chart(ws_data, ws_dest, anchor, n_rows, width=22, height=9)
     rsrq.series[0].graphicalProperties.line.width = 20000
     sinr.y_axis.crosses = "min"
     rsrq.y_axis.crosses = "max"
+    apply_xy_levels(
+        sinr, "RSRP (dBm)", "SINR (dB)",
+        y_min=-10, y_max=35, show_all_x_ticks=True, rotate_x=True, y_major_unit=5,
+        layout=False, y_num_fmt="0",
+    )
+    reserve_plot_area(sinr, left=0.12, top=0.14, width=0.74, height=0.58)
+    rsrq.y_axis.delete = False
+    rsrq.y_axis.axPos = "r"
+    rsrq.y_axis.tickLblPos = "nextTo"
+    rsrq.y_axis.majorTickMark = "out"
+    rsrq.y_axis.minorTickMark = "none"
+    rsrq.y_axis.title = "RSRQ (dB)"
+    _title_outside(rsrq.y_axis.title)
+    rsrq.y_axis.scaling.min = -22
+    rsrq.y_axis.scaling.max = 0
+    rsrq.y_axis.numFmt = "0.0"
+    try:
+        rsrq.y_axis.majorUnit = 2
+    except Exception:
+        pass
     sinr += rsrq
     ws_dest.add_chart(sinr, anchor)
 
@@ -569,6 +690,9 @@ def save_rsrp_scatter(df: pd.DataFrame, ycol: str, path: Path, ylabel: str, titl
     ax.set_xlim(-50, -130)
     if ylim:
         ax.set_ylim(*ylim)
+    ax.xaxis.set_major_locator(MultipleLocator(5))
+    ax.yaxis.set_major_locator(MultipleLocator(5 if "SINR" in ylabel else 2))
+    ax.tick_params(axis="both", labelsize=8)
     ax.grid(True, alpha=0.35)
     fig.tight_layout()
     fig.savefig(path, dpi=140, facecolor="white")
@@ -589,6 +713,11 @@ def save_binned_vs_preview(df: pd.DataFrame, path: Path) -> Path:
     ax.set_xlabel("RSRP (dBm)")
     ax.set_ylabel("SINR (dB)")
     ax.set_xlim(-80, -125)
+    ax.set_ylim(-10, 35)
+    ax.set_xticks(range(-80, -126, -5))
+    ax.yaxis.set_major_locator(MultipleLocator(5))
+    ax.tick_params(axis="x", rotation=90, labelsize=7)
+    ax.tick_params(axis="y", labelsize=8)
     ax.legend()
     ax.grid(True, alpha=0.35)
     fig.tight_layout()
@@ -623,7 +752,7 @@ def build_rsrp_vs_sheet(ws, data_ws, n_rows: int, scatter_sinr: Path, scatter_rs
         50, 53, 54, 2, 1 + n_rows, "RSRQ (dB)",
         ["2E86C1", "E67E22"], width=15, height=8,
     )
-    add_dual_axis_vs_chart(data_ws, ws, "A22", n_rows)
+    add_dual_axis_vs_chart(data_ws, ws, "A24", n_rows, width=24, height=10)
     write_cell(ws, 40, 1, "RSRP vs SINR scatter (trend line)", size=14, bold=True)
     write_cell(ws, 40, 8, "RSRP vs RSRQ scatter (trend line)", size=14, bold=True)
     if scatter_sinr.exists():
@@ -663,9 +792,18 @@ def build_sample_log(ws: Worksheet, df: pd.DataFrame, n: int = 8000) -> None:
                 cell.number_format = "0.000"
 
 
+def _chart_title_text(title) -> str | None:
+    if title is None:
+        return None
+    try:
+        return str(title.tx.rich.p[0].r[0].t)
+    except Exception:
+        return str(title)
+
+
 def verify_report(path: Path) -> dict:
     wb = load_workbook(path)
-    info = {"sheets": {}, "chart_titles": [], "problems": []}
+    info = {"sheets": {}, "chart_titles": [], "axis_check": [], "problems": []}
     for name in wb.sheetnames:
         ws = wb[name]
         freeze = ws.freeze_panes
@@ -687,14 +825,41 @@ def verify_report(path: Path) -> dict:
         if print_grid:
             info["problems"].append(f"{name}: print gridlines on")
         for ch in ws._charts:
-            title = None
-            if ch.title is not None:
-                try:
-                    title = str(ch.title.tx.rich.p[0].r[0].t)
-                except Exception:
-                    title = str(ch.title)
+            title = _chart_title_text(getattr(ch, "title", None))
+            x_title = _chart_title_text(getattr(ch.x_axis, "title", None))
+            y_title = _chart_title_text(getattr(ch.y_axis, "title", None))
+            x_pos = getattr(ch.x_axis, "axPos", None)
+            y_pos = getattr(ch.y_axis, "axPos", None)
             info["chart_titles"].append((name, title, type(ch).__name__))
+            info["axis_check"].append((name, title, x_title, y_title, x_pos, y_pos))
+            if x_pos != "b":
+                info["problems"].append(f"{name}/{title}: x axPos={x_pos} (expected b)")
+            if y_pos not in ("l", "r"):
+                info["problems"].append(f"{name}/{title}: y axPos={y_pos} (expected l/r)")
+            if not x_title:
+                info["problems"].append(f"{name}/{title}: missing horizontal axis title")
+            if not y_title:
+                info["problems"].append(f"{name}/{title}: missing vertical axis title")
     wb.close()
+    with zipfile.ZipFile(path) as zf:
+        for item in zf.namelist():
+            if not item.startswith("xl/charts/chart"):
+                continue
+            xml = zf.read(item).decode("utf-8")
+            for cat in re.findall(r"<catAx>.*?</catAx>", xml):
+                pos = re.search(r'<axPos val="([^"]+)"', cat)
+                if not pos or pos.group(1) != "b":
+                    info["problems"].append(f"{item}: category axis axPos is {pos.group(1) if pos else 'missing'} (need b)")
+                if 'tickLblPos val="none"' in cat:
+                    info["problems"].append(f"{item}: category tick labels hidden")
+            for val in re.findall(r"<valAx>.*?</valAx>", xml):
+                pos = re.search(r'<axPos val="([^"]+)"', val)
+                if not pos or pos.group(1) not in ("l", "r"):
+                    info["problems"].append(f"{item}: value axis axPos is {pos.group(1) if pos else 'missing'}")
+                if 'tickLblPos val="none"' in val:
+                    info["problems"].append(f"{item}: value tick labels hidden")
+            if "<a:t></a:t>" in xml or "<a:t/>" in xml:
+                info["problems"].append(f"{item}: empty text run would blank axis labels")
     return info
 
 
