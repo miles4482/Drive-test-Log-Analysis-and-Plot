@@ -513,8 +513,7 @@ def add_vs_line_chart(ws_data, ws_dest, anchor, title, cat_col, data_min, data_m
         hexcol = color.lstrip("#")
         chart.series[i].graphicalProperties.line.solidFill = hexcol
         chart.series[i].graphicalProperties.line.width = 18000
-        chart.series[i].marker.symbol = "circle"
-        chart.series[i].marker.size = 6
+        chart.series[i].marker = Marker(symbol="circle", size=6)
         chart.series[i].marker.graphicalProperties.solidFill = hexcol
     ws_dest.add_chart(chart, anchor)
     return chart
