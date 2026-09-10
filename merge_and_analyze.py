@@ -11,6 +11,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
 
@@ -82,6 +83,27 @@ RSRP_COLORS = [
     "#67001f",
 ]
 
+# Coverage-map / histogram legend requested for the Excel RSRP plot.
+# ≥ -85 is drawn in the same colour as "-85 to -95".
+MAP_RSRP_LABELS = [
+    "-85 to -95",
+    "-95 to -105",
+    "-105 to -110",
+    "-110 to -115",
+    "-115 to -120",
+    "-120 to -125",
+    "<-125",
+]
+MAP_RSRP_COLORS = [
+    "#1a9850",
+    "#91cf60",
+    "#d9ef8b",
+    "#fee08b",
+    "#fc8d59",
+    "#d73027",
+    "#67001f",
+]
+
 
 def rsrp_range_counts(series: pd.Series) -> pd.Series:
     binned = pd.cut(
@@ -91,6 +113,63 @@ def rsrp_range_counts(series: pd.Series) -> pd.Series:
         right=False,
     )
     return binned.value_counts(dropna=False).reindex(RSRP_LABELS, fill_value=0)
+
+
+def rsrp_map_class(series: pd.Series) -> pd.Series:
+    """Classify RSRP into the coverage-map legend bins."""
+    v = pd.to_numeric(series, errors="coerce")
+    classified = np.select(
+        [
+            v >= -95,
+            v >= -105,
+            v >= -110,
+            v >= -115,
+            v >= -120,
+            v >= -125,
+        ],
+        MAP_RSRP_LABELS[:-1],
+        default="<-125",
+    )
+    return pd.Series(classified, index=v.index).where(v.notna(), other=pd.NA)
+
+
+def plot_rsrp_coverage_map(df: pd.DataFrame, path: Path, max_points: int = 25000) -> Path:
+    """Discrete RSRP coverage map: range legend, no lat/lon ticks or labels."""
+    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    geo = df.dropna(subset=["Longitude", "Latitude", "RSRP"]).copy()
+    sample = downsample(geo, max_points=max_points)
+    sample["rsrp_class"] = rsrp_map_class(sample["RSRP"])
+    fig, ax = plt.subplots(figsize=(8.0, 9.2))
+    for label, color in zip(reversed(MAP_RSRP_LABELS), reversed(MAP_RSRP_COLORS)):
+        part = sample[sample["rsrp_class"] == label]
+        if part.empty:
+            continue
+        ax.scatter(part["Longitude"], part["Latitude"], s=5, c=color, linewidths=0, rasterized=True)
+    handles = [
+        Line2D([0], [0], marker="o", color="none", markerfacecolor=c, markeredgecolor="none", markersize=8, label=lab)
+        for lab, c in zip(MAP_RSRP_LABELS, MAP_RSRP_COLORS)
+    ]
+    ax.legend(
+        handles=handles,
+        title="RSRP (dBm)",
+        loc="center left",
+        bbox_to_anchor=(1.02, 0.5),
+        frameon=True,
+        fontsize=9,
+        title_fontsize=10,
+    )
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_xlabel("")
+    ax.set_ylabel("")
+    ax.set_title("Bogura coverage map — RSRP")
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    fig.tight_layout()
+    fig.savefig(path, dpi=140, facecolor="white", bbox_inches="tight")
+    plt.close(fig)
+    return path
 
 
 def require_unrar() -> str:
@@ -256,33 +335,35 @@ def style_axes(ax, title: str, xlabel: str, ylabel: str) -> None:
 def plot_all(df: pd.DataFrame) -> None:
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
     geo = df.dropna(subset=["Longitude", "Latitude", "RSRP"])
-    sample = downsample(geo)
+    plot_rsrp_coverage_map(geo, PLOTS_DIR / "01_route_rsrp.png")
 
-    fig, ax = plt.subplots(figsize=(10, 8))
-    sc = ax.scatter(
-        sample["Longitude"],
-        sample["Latitude"],
-        c=sample["RSRP"],
-        s=4,
-        cmap="RdYlGn",
-        vmin=-120,
-        vmax=-70,
-        linewidths=0,
-    )
-    fig.colorbar(sc, ax=ax, label="RSRP (dBm)")
-    style_axes(ax, "Bogura drive-test route (RSRP)", "Longitude", "Latitude")
-    ax.set_aspect("equal", adjustable="box")
-    fig.tight_layout()
-    fig.savefig(PLOTS_DIR / "01_route_rsrp.png", dpi=140)
-    plt.close(fig)
-
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4.5))
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5.2))
+    rsrp_bins = np.arange(-140, -40, 2)
+    cls = rsrp_map_class(df["RSRP"])
+    bottom = np.zeros(len(rsrp_bins) - 1)
+    widths = np.diff(rsrp_bins)
+    for lab, color in zip(MAP_RSRP_LABELS, MAP_RSRP_COLORS):
+        counts, _ = np.histogram(df.loc[cls == lab, "RSRP"].dropna(), bins=rsrp_bins)
+        axes[0].bar(
+            rsrp_bins[:-1],
+            counts,
+            width=widths,
+            align="edge",
+            bottom=bottom,
+            color=color,
+            edgecolor="none",
+            label=lab,
+        )
+        bottom += counts
+    axes[0].legend(title="RSRP (dBm)", fontsize=7, loc="upper right")
+    style_axes(axes[0], "RSRP distribution", "RSRP (dBm)", "Samples")
+    axes[0].set_xlim(-140, -50)
     for ax, col, bins, xlim in (
-        (axes[0], "RSRP", np.arange(-140, -40, 2), (-140, -50)),
         (axes[1], "RSRQ", np.arange(-30, 0, 0.5), (-24, -3)),
         (axes[2], "SINR", np.arange(-20, 32, 1), (-15, 30)),
     ):
-        ax.hist(df[col].dropna(), bins=bins, color="#2a6f97", edgecolor="none")
+        ax.hist(df[col].dropna(), bins=bins, color="#2a6f97", edgecolor="none", label=f"{col} samples")
+        ax.legend(fontsize=8)
         style_axes(ax, f"{col} distribution", col, "Samples")
         ax.set_xlim(*xlim)
     fig.tight_layout()

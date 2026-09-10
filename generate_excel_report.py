@@ -26,8 +26,12 @@ from openpyxl.worksheet.worksheet import Worksheet
 from merge_and_analyze import (
     OUTPUT_DIR,
     PLOTS_DIR,
+    MAP_RSRP_COLORS,
+    MAP_RSRP_LABELS,
     downsample,
     earfcn_to_band,
+    plot_rsrp_coverage_map,
+    rsrp_map_class,
     rsrp_range_counts,
 )
 
@@ -61,6 +65,8 @@ SINR_LABELS = [
     "Good (13 to 20)",
     "Excellent (>20)",
 ]
+RSRQ_STACK_COLORS = ["9B2226", "E07A3D", "90BE6D", "2A9D8F"]
+SINR_STACK_COLORS = ["9B2226", "E9C46A", "2A9D8F", "1A9850"]
 
 
 def apply_sheet_view(ws: Worksheet) -> None:
@@ -127,7 +133,7 @@ def save_route_plot(df: pd.DataFrame, column: str, path: Path, vmin: float, vmax
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
     geo = df.dropna(subset=["Longitude", "Latitude", column])
     sample = downsample(geo, max_points=25000)
-    fig, ax = plt.subplots(figsize=(9.5, 7.2))
+    fig, ax = plt.subplots(figsize=(8.0, 9.2))
     sc = ax.scatter(
         sample["Longitude"],
         sample["Latitude"],
@@ -139,15 +145,17 @@ def save_route_plot(df: pd.DataFrame, column: str, path: Path, vmin: float, vmax
         linewidths=0,
     )
     fig.colorbar(sc, ax=ax, label=f"{column} ({unit})")
-    ax.set_title(f"Bogura drive route — {column}")
-    ax.set_xlabel("Longitude")
-    ax.set_ylabel("Latitude")
+    ax.set_title(f"Bogura coverage map — {column}")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_xlabel("")
+    ax.set_ylabel("")
     ax.set_aspect("equal", adjustable="box")
     ax.grid(False)
     for spine in ax.spines.values():
-        spine.set_color("#BFBFBF")
+        spine.set_visible(False)
     fig.tight_layout()
-    fig.savefig(path, dpi=140, facecolor="white")
+    fig.savefig(path, dpi=140, facecolor="white", bbox_inches="tight")
     plt.close(fig)
     return path
 
@@ -186,28 +194,56 @@ def write_table(ws, start_row: int, start_col: int, headers: list[str], rows: li
     return start_row + len(rows)
 
 
-def style_chart(chart, color: str, title: str, y_title: str, x_title: str, width=14, height=8) -> None:
+def style_chart(chart, color: str, title: str, y_title: str, x_title: str, width=14, height=8, show_legend=False) -> None:
     chart.title = title
     chart.y_axis.title = y_title
     chart.x_axis.title = x_title
     chart.style = 10
-    chart.legend = None
     chart.width = width
     chart.height = height
+    if show_legend:
+        chart.legend.position = "b"
+    else:
+        chart.legend = None
     if chart.series:
         chart.series[0].graphicalProperties.solidFill = color
         chart.series[0].graphicalProperties.line.solidFill = color
 
 
-def add_col_chart(ws_data, ws_dest, anchor, title, color, cat_col, data_col, min_row, max_row, y_title, x_title, width=14, height=8):
+def add_col_chart(ws_data, ws_dest, anchor, title, color, cat_col, data_col, min_row, max_row, y_title, x_title, width=14, height=8, show_legend=False):
     chart = BarChart()
     chart.type = "col"
     cats = Reference(ws_data, min_col=cat_col, min_row=min_row, max_row=max_row)
     data = Reference(ws_data, min_col=data_col, min_row=min_row - 1, max_row=max_row)
     chart.add_data(data, titles_from_data=True)
     chart.set_categories(cats)
-    style_chart(chart, color, title, y_title, x_title, width=width, height=height)
+    style_chart(chart, color, title, y_title, x_title, width=width, height=height, show_legend=show_legend)
     chart.shape = 4
+    ws_dest.add_chart(chart, anchor)
+    return chart
+
+
+def add_stacked_col_chart(ws_data, ws_dest, anchor, title, cat_col, data_min, data_max, min_row, max_row, y_title, x_title, colors, width=14, height=8):
+    chart = BarChart()
+    chart.type = "col"
+    chart.grouping = "stacked"
+    chart.overlap = 100
+    cats = Reference(ws_data, min_col=cat_col, min_row=min_row, max_row=max_row)
+    data = Reference(ws_data, min_col=data_min, max_col=data_max, min_row=min_row - 1, max_row=max_row)
+    chart.add_data(data, titles_from_data=True)
+    chart.set_categories(cats)
+    chart.title = title
+    chart.y_axis.title = y_title
+    chart.x_axis.title = x_title
+    chart.style = 10
+    chart.width = width
+    chart.height = height
+    chart.legend.position = "b"
+    for i, color in enumerate(colors):
+        if i < len(chart.series):
+            hexcol = color.lstrip("#")
+            chart.series[i].graphicalProperties.solidFill = hexcol
+            chart.series[i].graphicalProperties.line.solidFill = hexcol
     ws_dest.add_chart(chart, anchor)
     return chart
 
@@ -227,25 +263,44 @@ def add_line_chart(ws_data, ws_dest, anchor, title, color, cat_col, data_col, mi
     return chart
 
 
+def write_stacked_hist(ws, start_col, values, fine_bins, class_series, class_labels):
+    values = pd.to_numeric(values, errors="coerce")
+    mask = values.notna()
+    values = values[mask]
+    classes = class_series.reindex(values.index).astype(str)
+    ws.cell(1, start_col, "bin")
+    for j, lab in enumerate(class_labels):
+        ws.cell(1, start_col + 1 + j, str(lab))
+    lefts = fine_bins[:-1]
+    for i, left in enumerate(lefts, start=2):
+        ws.cell(i, start_col, float(left))
+    for j, lab in enumerate(class_labels):
+        subset = values[classes == str(lab)]
+        counts, _ = np.histogram(subset.to_numpy(), bins=fine_bins)
+        for i, n in enumerate(counts, start=2):
+            ws.cell(i, start_col + 1 + j, int(n))
+    return {
+        "cat_col": start_col,
+        "data_min": start_col + 1,
+        "data_max": start_col + len(class_labels),
+        "n": len(lefts),
+    }
+
+
 def write_chart_data(ws: Worksheet, df: pd.DataFrame) -> dict:
     """Hidden sheet holding all series used by Excel charts."""
     rsrp_bins = np.arange(-140, -48, 2)
     rsrq_bins = np.arange(-24, -2.5, 0.5)
     sinr_bins = np.arange(-15, 31, 1)
 
-    def hist_block(col, bins, start_col, name):
-        counts, edges = np.histogram(df[col].dropna(), bins=bins)
-        ws.cell(1, start_col, f"{name}_bin")
-        ws.cell(1, start_col + 1, f"{name}_samples")
-        for i, (left, n) in enumerate(zip(edges[:-1], counts), start=2):
-            ws.cell(i, start_col, float(left))
-            ws.cell(i, start_col + 1, int(n))
-        return {"col": start_col, "n": len(counts)}
+    rsrp_cls = rsrp_map_class(df["RSRP"])
+    rsrq_cls = pd.cut(df["RSRQ"], bins=RSRQ_BINS, labels=RSRQ_LABELS, right=False)
+    sinr_cls = pd.cut(df["SINR"], bins=SINR_BINS, labels=SINR_LABELS, right=False)
 
     blocks = {
-        "RSRP": hist_block("RSRP", rsrp_bins, 1, "RSRP"),
-        "RSRQ": hist_block("RSRQ", rsrq_bins, 3, "RSRQ"),
-        "SINR": hist_block("SINR", sinr_bins, 5, "SINR"),
+        "RSRP": write_stacked_hist(ws, 26, df["RSRP"], rsrp_bins, rsrp_cls, MAP_RSRP_LABELS),
+        "RSRQ": write_stacked_hist(ws, 35, df["RSRQ"], rsrq_bins, rsrq_cls, RSRQ_LABELS),
+        "SINR": write_stacked_hist(ws, 41, df["SINR"], sinr_bins, sinr_cls, SINR_LABELS),
     }
 
     percentiles = list(range(0, 101, 2))
@@ -351,7 +406,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     write_cell(ws, 15, 1, "How to read this workbook", size=14, bold=True)
     notes = [
         "Cover — dataset size and KPI scorecard for the merged Bogura log.",
-        "RSRP / RSRQ / SINR — Excel charts (histogram, CDF, RSRP ranges, quality bins) plus a coverage map. No freeze, no gridlines.",
+        "RSRP / RSRQ / SINR — histograms include a colour legend. RSRP coverage map uses the requested dBm ranges and has no lat/lon labels.",
         "Time Series — 10-minute mean RSRP, RSRQ and SINR across the drive days.",
         "Sample Log — evenly spaced subset of the merged samples (full 1.07M rows stay in output/Bogura_merged.csv.gz).",
         "P1 is the split archive (part1–part5). P2 is the standalone archive. This report uses the concatenated final file.",
@@ -389,7 +444,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     # Histograms are added after _ChartData exists; see add_cover_charts().
 
 
-def build_kpi_sheet(ws, data_ws, df, name, color, unit, hist_col, hist_n, cdf_col, q_cat_col, q_n, map_path: Path | None):
+def build_kpi_sheet(ws, data_ws, df, name, color, unit, hist_spec, hist_colors, cdf_col, q_cat_col, q_n, map_path: Path | None):
     banner(ws, f"  {name} report", f"  Unit: {unit}  |  Charts are native Excel objects  |  Gridlines off", last_col=10)
     set_widths(ws, {get_column_letter(i): 16 for i in range(1, 11)})
     ws.column_dimensions["A"].width = 28
@@ -407,18 +462,19 @@ def build_kpi_sheet(ws, data_ws, df, name, color, unit, hist_col, hist_n, cdf_co
     )
     ws.cell(6, 2).number_format = "#,##0"
 
-    add_col_chart(
+    add_stacked_col_chart(
         data_ws,
         ws,
         "D4",
         f"{name} histogram",
-        color,
-        hist_col,
-        hist_col + 1,
+        hist_spec["cat_col"],
+        hist_spec["data_min"],
+        hist_spec["data_max"],
         2,
-        1 + hist_n,
+        1 + hist_spec["n"],
         "Samples",
         f"{name} ({unit})",
+        hist_colors,
         width=16,
         height=8,
     )
@@ -533,38 +589,64 @@ def verify_report(path: Path) -> dict:
 
 
 def add_cover_charts(cover, data_ws, blocks) -> None:
-    write_cell(cover, 35, 1, "RSRP, RSRQ and SINR plots (native Excel charts)", size=14, bold=True)
-    add_col_chart(
-        data_ws, cover, "A37", "RSRP histogram", RSRP_COLOR,
-        blocks["RSRP"]["col"], blocks["RSRP"]["col"] + 1, 2, 1 + blocks["RSRP"]["n"],
-        "Samples", "RSRP (dBm)", width=12, height=7,
+    write_cell(cover, 35, 1, "RSRP, RSRQ and SINR plots (native Excel charts with legends)", size=14, bold=True)
+    add_stacked_col_chart(
+        data_ws, cover, "A37", "RSRP histogram",
+        blocks["RSRP"]["cat_col"], blocks["RSRP"]["data_min"], blocks["RSRP"]["data_max"],
+        2, 1 + blocks["RSRP"]["n"],
+        "Samples", "RSRP (dBm)", MAP_RSRP_COLORS, width=14, height=8,
+    )
+    add_stacked_col_chart(
+        data_ws, cover, "H37", "RSRQ histogram",
+        blocks["RSRQ"]["cat_col"], blocks["RSRQ"]["data_min"], blocks["RSRQ"]["data_max"],
+        2, 1 + blocks["RSRQ"]["n"],
+        "Samples", "RSRQ (dB)", RSRQ_STACK_COLORS, width=14, height=8,
+    )
+    add_stacked_col_chart(
+        data_ws, cover, "A56", "SINR histogram",
+        blocks["SINR"]["cat_col"], blocks["SINR"]["data_min"], blocks["SINR"]["data_max"],
+        2, 1 + blocks["SINR"]["n"],
+        "Samples", "SINR (dB)", SINR_STACK_COLORS, width=14, height=8,
     )
     add_col_chart(
-        data_ws, cover, "G37", "RSRQ histogram", RSRQ_COLOR,
-        blocks["RSRQ"]["col"], blocks["RSRQ"]["col"] + 1, 2, 1 + blocks["RSRQ"]["n"],
-        "Samples", "RSRQ (dB)", width=12, height=7,
-    )
-    add_col_chart(
-        data_ws, cover, "A54", "SINR histogram", SINR_COLOR,
-        blocks["SINR"]["col"], blocks["SINR"]["col"] + 1, 2, 1 + blocks["SINR"]["n"],
-        "Samples", "SINR (dB)", width=12, height=7,
-    )
-    add_col_chart(
-        data_ws, cover, "G54", "RSRP ranges (dBm)", RSRP_COLOR,
+        data_ws, cover, "H56", "RSRP ranges (dBm)", RSRP_COLOR,
         12, 13, 2, 1 + blocks["rsrp_q_n"],
-        "Samples", "RSRP range", width=12, height=7,
+        "Samples", "RSRP range", width=14, height=8, show_legend=True,
     )
 
 
 def save_report_preview(df: pd.DataFrame, path: Path) -> Path:
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4.6))
-    specs = (
-        ("RSRP", np.arange(-140, -48, 2), (-140, -50), RSRP_COLOR, "dBm"),
-        ("RSRQ", np.arange(-24, -2.5, 0.5), (-24, -3), RSRQ_COLOR, "dB"),
-        ("SINR", np.arange(-15, 31, 1), (-15, 30), SINR_COLOR, "dB"),
-    )
-    for ax, (col, bins, xlim, color, unit) in zip(axes, specs):
-        ax.hist(df[col].dropna(), bins=bins, color=f"#{color}", edgecolor="none")
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5.2))
+    rsrp_bins = np.arange(-140, -48, 2)
+    cls = rsrp_map_class(df["RSRP"])
+    bottom = np.zeros(len(rsrp_bins) - 1)
+    widths = np.diff(rsrp_bins)
+    for lab, color in zip(MAP_RSRP_LABELS, MAP_RSRP_COLORS):
+        counts, _ = np.histogram(df.loc[cls == lab, "RSRP"].dropna(), bins=rsrp_bins)
+        axes[0].bar(
+            rsrp_bins[:-1],
+            counts,
+            width=widths,
+            align="edge",
+            bottom=bottom,
+            color=color,
+            edgecolor="none",
+            label=lab,
+        )
+        bottom += counts
+    axes[0].legend(title="RSRP (dBm)", fontsize=7, loc="upper right")
+    axes[0].set_title("RSRP histogram")
+    axes[0].set_xlabel("RSRP (dBm)")
+    axes[0].set_ylabel("Samples")
+    axes[0].set_xlim(-140, -50)
+    axes[0].grid(False)
+
+    for ax, col, bins, xlim, color, unit in (
+        (axes[1], "RSRQ", np.arange(-24, -2.5, 0.5), (-24, -3), RSRQ_COLOR, "dB"),
+        (axes[2], "SINR", np.arange(-15, 31, 1), (-15, 30), SINR_COLOR, "dB"),
+    ):
+        ax.hist(df[col].dropna(), bins=bins, color=f"#{color}", edgecolor="none", label=f"{col} samples")
+        ax.legend(fontsize=8)
         ax.set_title(f"{col} histogram")
         ax.set_xlabel(f"{col} ({unit})")
         ax.set_ylabel("Samples")
@@ -585,7 +667,7 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
         df = df.copy()
         df["Band"] = df["DL EARFCN"].map(earfcn_to_band)
 
-    rsrp_map = save_route_plot(df, "RSRP", PLOTS_DIR / "excel_route_rsrp.png", -120, -70, "RdYlGn", "dBm")
+    rsrp_map = plot_rsrp_coverage_map(df, PLOTS_DIR / "excel_route_rsrp.png")
     rsrq_map = save_route_plot(df, "RSRQ", PLOTS_DIR / "excel_route_rsrq.png", -20, -6, "RdYlGn", "dB")
     sinr_map = save_route_plot(df, "SINR", PLOTS_DIR / "excel_route_sinr.png", -5, 25, "RdYlGn", "dB")
     save_report_preview(df, PLOTS_DIR / "excel_rsrp_rsrq_sinr_histograms.png")
@@ -611,8 +693,8 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
         "RSRP",
         RSRP_COLOR,
         "dBm",
-        blocks["RSRP"]["col"],
-        blocks["RSRP"]["n"],
+        blocks["RSRP"],
+        MAP_RSRP_COLORS,
         8,
         12,
         blocks["rsrp_q_n"],
@@ -625,8 +707,8 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
         "RSRQ",
         RSRQ_COLOR,
         "dB",
-        blocks["RSRQ"]["col"],
-        blocks["RSRQ"]["n"],
+        blocks["RSRQ"],
+        RSRQ_STACK_COLORS,
         9,
         15,
         4,
@@ -639,8 +721,8 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
         "SINR",
         SINR_COLOR,
         "dB",
-        blocks["SINR"]["col"],
-        blocks["SINR"]["n"],
+        blocks["SINR"],
+        SINR_STACK_COLORS,
         10,
         18,
         4,
