@@ -80,25 +80,25 @@ python merge_and_analyze.py --from-merged
 
 RSRP ranges used in the report (dBm): **≥ -85**, **-85 to -95**, **-95 to -105**, **-105 to -110**, **-110 to -115**, **-115 to -120**, **-120 to -125**, **<-125**.
 
-## Download Excel report (v1.7)
+## Download Excel report (v1.8)
 
-**v1.7 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.7.xlsx
+**v1.8 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.8.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.7.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.8.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.7.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.8.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
-Cover sheet shows **Version 1.7** and the generated timestamp. Bump `REPORT_VERSION` in `generate_excel_report.py` when the file is updated again.
+Sheet banners use **IDLE Mode** (no version number inside the workbook). The filename still carries the version when the report is updated.
 
 | Sheet | Contents |
 | --- | --- |
-| Cover | Dataset size, KPI scorecard, RSRP ranges, band mix, RSRP/RSRQ/SINR histograms with axis titles and tick levels |
-| RSRP / RSRQ / SINR | Statistics table and coverage map with a discrete range legend (same style on all three KPI sheets) |
-| RSRP vs KPIs | Two charts: smooth RSRP vs SINR, and dual-axis RSRP vs SINR vs RSRQ (merged P1+P2) |
+| Cover | Dataset size, KPI scorecard, RSRP ranges, band mix, RSRP/RSRQ/SINR histograms |
+| RSRP / RSRQ / SINR | Statistics table and coverage map with a discrete range legend |
+| RSRP vs KPIs | RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter plots with trend |
 | Sample Log | Evenly spaced subset of the merged samples |
 
 Every sheet has freeze panes disabled and worksheet gridlines turned off (screen and print). Charts are native Excel objects, not just pictures.

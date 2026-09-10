@@ -46,7 +46,7 @@ from merge_and_analyze import (
     rsrp_range_counts,
 )
 
-REPORT_VERSION = "1.7"
+REPORT_VERSION = "1.8"
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
@@ -455,15 +455,15 @@ def write_chart_data(ws: Worksheet, df: pd.DataFrame) -> dict:
 def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     banner(
         ws,
-        f"  Bogura LTE Drive-Test Report  (v{REPORT_VERSION})",
-        f"  Version {REPORT_VERSION}  |  Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}  |  Gridlines off  |  Freeze panes off",
+        "  Bogura Drive-Test Report IDLE Mode",
+        f"  Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}  |  IDLE Mode  |  Gridlines off  |  Freeze panes off",
         last_col=10,
     )
     set_widths(ws, {"A": 28, "B": 18, "C": 18, "D": 18, "E": 18, "F": 18, "G": 18, "H": 18, "I": 18, "J": 18})
 
     write_cell(ws, 4, 1, "Dataset", size=14, bold=True)
     info_rows = [
-        ["Report version", f"v{REPORT_VERSION}"],
+        ["Mode", "IDLE"],
         ["Generated", datetime.now().strftime("%Y-%m-%d %H:%M")],
         ["P1 samples", int((df["Source"] == "P1").sum())],
         ["P2 samples", int((df["Source"] == "P2").sum())],
@@ -499,7 +499,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     notes = [
         "Cover — dataset size, KPI scorecard, band mix, and overview histograms.",
         "RSRP / RSRQ / SINR — statistics table and coverage map (discrete range legend).",
-        "RSRP vs KPIs — merged P1+P2 as one SINR line, plus a dual-axis SINR/RSRQ chart.",
+        "RSRP vs KPIs — RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter with trend.",
         "Sample Log — evenly spaced subset of the merged samples (full 1.07M rows stay in output/Bogura_merged.csv.gz).",
         "P1 is the split archive (part1–part5). P2 is the standalone archive. This report uses the concatenated final file.",
     ]
@@ -537,7 +537,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
 
 
 def build_kpi_sheet(ws, df, name, color, unit, map_path: Path | None):
-    banner(ws, f"  {name} report  (v{REPORT_VERSION})", f"  Unit: {unit}  |  Statistics and coverage map  |  Gridlines off", last_col=10)
+    banner(ws, f"  {name} Report IDLE Mode", f"  Unit: {unit}  |  Statistics and coverage map  |  Gridlines off", last_col=10)
     set_widths(ws, {get_column_letter(i): 16 for i in range(1, 11)})
     ws.column_dimensions["A"].width = 28
     ws.column_dimensions["B"].width = 18
@@ -584,10 +584,14 @@ def add_vs_line_chart(ws_data, ws_dest, anchor, title, cat_col, data_min, data_m
         if i >= len(chart.series):
             break
         style_smooth_line(chart.series[i], color)
+    if "RSRQ" in y_title:
+        y_min, y_max, y_major, y_fmt = -20, 0, 5, "0.0"
+    else:
+        y_min, y_max, y_major, y_fmt = 0, 30, 5, "0"
     apply_xy_levels(
         chart, "RSRP (dBm)", y_title,
-        y_min=0, y_max=30, show_all_x_ticks=False, x_tick_skip=5, rotate_x=False,
-        y_major_unit=5, y_num_fmt="0",
+        y_min=y_min, y_max=y_max, show_all_x_ticks=False, x_tick_skip=5, rotate_x=False,
+        y_major_unit=y_major, y_num_fmt=y_fmt,
     )
     reserve_plot_area(chart, left=0.12, top=0.14, width=0.82, height=0.70)
     ws_dest.add_chart(chart, anchor)
@@ -671,7 +675,7 @@ def save_binned_vs_preview(df: pd.DataFrame, path: Path) -> Path:
     pair["rsrp_bin"] = pair["RSRP"].round().astype(int)
     g = pair.groupby("rsrp_bin")[["SINR", "RSRQ"]].mean()
     g = g.loc[(g.index <= -80) & (g.index >= -125)].sort_index(ascending=False)
-    fig, axes = plt.subplots(1, 2, figsize=(16.4, 5.4))
+    fig, axes = plt.subplots(1, 3, figsize=(18.6, 5.2))
 
     ax = axes[0]
     ax.plot(g.index, g["SINR"], color=f"#{VS_SINR_LINE}", lw=2.4)
@@ -687,6 +691,19 @@ def save_binned_vs_preview(df: pd.DataFrame, path: Path) -> Path:
     ax.spines["right"].set_visible(False)
 
     ax = axes[1]
+    ax.plot(g.index, g["RSRQ"], color=f"#{VS_RSRQ_LINE}", lw=2.4)
+    ax.set_title("RSRP vs RSRQ")
+    ax.set_xlabel("RSRP (dBm)")
+    ax.set_ylabel("RSRQ (dB)")
+    ax.set_xlim(-80, -125)
+    ax.set_ylim(-20, 0)
+    ax.set_xticks(range(-80, -126, -5))
+    ax.yaxis.set_major_locator(MultipleLocator(5))
+    ax.grid(True, axis="y", color="#D5D8DC", lw=0.8)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    ax = axes[2]
     ax.plot(g.index, g["SINR"], color=f"#{VS_SINR_LINE}", lw=2.4, label="SINR")
     ax.set_ylim(0, 30)
     ax.set_ylabel("SINR (dB)")
@@ -711,24 +728,35 @@ def save_binned_vs_preview(df: pd.DataFrame, path: Path) -> Path:
     return path
 
 
-def build_rsrp_vs_sheet(ws, data_ws, n_rows: int) -> None:
+def build_rsrp_vs_sheet(ws, data_ws, n_rows: int, scatter_sinr: Path, scatter_rsrq: Path) -> None:
     banner(
         ws,
-        "  RSRP vs SINR / RSRQ",
-        f"  Merged P1+P2  |  Version {REPORT_VERSION}  |  Smooth mean lines  |  Gridlines off",
-        last_col=18,
+        "  RSRP vs KPIs IDLE Mode",
+        "  Merged P1+P2  |  Smooth mean lines and scatter with trend  |  Gridlines off",
+        last_col=12,
     )
-    set_widths(ws, {get_column_letter(i): 12 for i in range(1, 19)})
+    set_widths(ws, {get_column_letter(i): 14 for i in range(1, 13)})
     add_vs_line_chart(
         data_ws, ws, "A4", "RSRP vs SINR",
         50, 51, 51, 2, 1 + n_rows, "SINR (dB)",
-        [VS_SINR_LINE], width=16, height=9,
+        [VS_SINR_LINE], width=15, height=8,
     )
-    add_dual_axis_vs_chart(data_ws, ws, "J4", n_rows, width=16, height=9)
+    add_vs_line_chart(
+        data_ws, ws, "I4", "RSRP vs RSRQ",
+        50, 52, 52, 2, 1 + n_rows, "RSRQ (dB)",
+        [VS_RSRQ_LINE], width=15, height=8,
+    )
+    add_dual_axis_vs_chart(data_ws, ws, "A22", n_rows, width=24, height=10)
+    write_cell(ws, 40, 1, "RSRP vs SINR scatter (trend line)", size=14, bold=True)
+    write_cell(ws, 40, 8, "RSRP vs RSRQ scatter (trend line)", size=14, bold=True)
+    if scatter_sinr.exists():
+        add_image(ws, scatter_sinr, "A42", width=520, height=350)
+    if scatter_rsrq.exists():
+        add_image(ws, scatter_rsrq, "H42", width=520, height=350)
 
 
 def build_sample_log(ws: Worksheet, df: pd.DataFrame, n: int = 8000) -> None:
-    banner(ws, "  Sample drive log", "  Evenly spaced subset for inspection  |  Full merged file is CSV  |  No freeze / no gridlines", last_col=10)
+    banner(ws, "  Sample Drive Log IDLE Mode", "  Evenly spaced subset for inspection  |  Full merged file is CSV  |  No freeze / no gridlines", last_col=10)
     sample = downsample(df, max_points=n).copy()
     cols = ["Time", "RSRP", "RSRQ", "SINR", "Longitude", "Latitude", "Cell Id", "DL EARFCN", "Source", "Band"]
     sample = sample[cols]
@@ -911,6 +939,8 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
     rsrp_map = plot_rsrp_coverage_map(df, PLOTS_DIR / "excel_route_rsrp.png")
     rsrq_map = plot_rsrq_coverage_map(df, PLOTS_DIR / "excel_route_rsrq.png")
     sinr_map = plot_sinr_coverage_map(df, PLOTS_DIR / "excel_route_sinr.png")
+    scatter_sinr = save_rsrp_scatter(df, "SINR", PLOTS_DIR / "excel_scatter_rsrp_sinr.png", "SINR (dB)", "RSRP vs SINR", ylim=(-10, 32))
+    scatter_rsrq = save_rsrp_scatter(df, "RSRQ", PLOTS_DIR / "excel_scatter_rsrp_rsrq.png", "RSRQ (dB)", "RSRP vs RSRQ", ylim=(-24, 0))
     save_binned_vs_preview(df, PLOTS_DIR / "excel_rsrp_vs_sinr_lines.png")
     save_report_preview(df, PLOTS_DIR / "excel_rsrp_rsrq_sinr_histograms.png")
 
@@ -931,16 +961,16 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
     build_kpi_sheet(rsrp_ws, df, "RSRP", RSRP_COLOR, "dBm", rsrp_map)
     build_kpi_sheet(rsrq_ws, df, "RSRQ", RSRQ_COLOR, "dB", rsrq_map)
     build_kpi_sheet(sinr_ws, df, "SINR", SINR_COLOR, "dB", sinr_map)
-    build_rsrp_vs_sheet(time_ws, data_ws, blocks["vs_n"])
+    build_rsrp_vs_sheet(time_ws, data_ws, blocks["vs_n"], scatter_sinr, scatter_rsrq)
     build_sample_log(sample_ws, df)
 
     for ws in wb.worksheets:
         apply_sheet_view(ws)
 
-    wb.properties.title = f"Bogura LTE Drive-Test Report v{REPORT_VERSION}"
-    wb.properties.subject = f"Version {REPORT_VERSION}"
+    wb.properties.title = "Bogura Drive-Test Report IDLE Mode"
+    wb.properties.subject = "IDLE Mode"
     wb.properties.description = (
-        f"Bogura drive-test report v{REPORT_VERSION}. "
+        "Bogura drive-test report, IDLE Mode. "
         "KPI sheets: statistics and coverage map. Analysis: RSRP vs SINR/RSRQ."
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
