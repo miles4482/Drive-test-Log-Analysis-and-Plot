@@ -65,7 +65,7 @@ python merge_and_analyze.py --from-merged
 | Item | Value |
 | --- | --- |
 | Archive | Borga_Idle_V2.0.7z (15 CSVs) |
-| Scanner detections | ~1.18 million (11–21 May 2026) |
+| Scanner detections | 1,178,276 (11–21 May 2026) |
 | Operator | Robi |
 | Layers | L900 / L1800 / L2100 / L2600 |
 | Dominant bands | B3 1800 (50.5%), B1 2100 (42.3%), B41 2500 (6.5%), B8 900 (0.7%) |
