@@ -359,9 +359,7 @@ def plot_discrete_coverage_map(
         pad_lat = 0.02 * (lat_max - lat_min)
         ax.set_xlim(lon_min - pad_lon, lon_max + pad_lon)
         ax.set_ylim(lat_min - pad_lat, lat_max + pad_lat)
-    if not geo.empty:
-        draw_site_pies(ax, geo, layer=layer)
-    else:
+    if geo.empty:
         ax.text(
             0.5,
             0.5,

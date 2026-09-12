@@ -61,7 +61,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.17"
+REPORT_VERSION = "1.18"
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
@@ -535,7 +535,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     write_cell(ws, 18, 1, "How to read this workbook", size=14, bold=True)
     notes = [
         "Cover — dataset and KPI tables on the left, IDLE Mode plots on the right, Active Mode section at the bottom.",
-        "RSRP / RSRQ / SINR — all-band IDLE map on the left, then L900 / L1800 / L2100 / L2600 IDLE maps; Active Mode stays blank until those logs are provided.",
+        "RSRP / RSRQ / SINR — all-band and L900 / L1800 / L2100 / L2600 IDLE maps (no site pies); Active Mode stays blank until those logs are provided.",
         "Bad Spot Analysis — every dense poor stretch on the full IDLE maps is circled and numbered. Physical sites use outline-only three-arm pies (most-common azimuth per sector).",
         "RSRP vs KPIs — RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter with trend.",
         "Sample Log — evenly spaced subset of the merged samples (full 1.07M rows stay in output/Bogura_merged.csv.gz).",
