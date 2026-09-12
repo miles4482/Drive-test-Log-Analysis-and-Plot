@@ -911,8 +911,8 @@ def plot_bad_spot_map(
     handles = _coverage_legend_handles(labels, colors)
     handles.extend(
         [
-            Line2D([0], [0], color="#C0392B", lw=2.0, linestyle=(0, (6, 3)), label="Consecutive ≥ 200 m"),
-            Line2D([0], [0], color="#6C3483", lw=2.6, linestyle="-", label="Discrete area ≥ 1 km²"),
+            Line2D([0], [0], color="#000000", lw=0.8, linestyle=(0, (3, 2)), label="Consecutive ≥ 200 m"),
+            Line2D([0], [0], color="#000000", lw=0.8, linestyle=(0, (1, 1.4)), label="Discrete area ≥ 1 km²"),
         ]
     )
     ax.legend(
@@ -954,9 +954,7 @@ def plot_bad_spot_map(
                     max_diameter_km=disc_max_km,
                 )
                 angle = 0.0
-                edge = "#6C3483"
-                style = "-"
-                lw = 2.8
+                style = (0, (1.0, 1.4))
             else:
                 length_km = None if pd.isna(spot.get("length_m", np.nan)) else float(spot["length_m"]) / 1000.0
                 if box_poor.empty:
@@ -969,19 +967,18 @@ def plot_bad_spot_map(
                         max_km=consec_max_km,
                         length_km=length_km,
                     )
-                edge = "#C0392B"
-                style = (0, (7, 3))
-                lw = 2.4
+                style = (0, (3.0, 2.0))
             ax.add_patch(
                 Ellipse(
-                    (cx, cy), width=w, height=h, angle=angle, fill=False,
-                    edgecolor="white", linestyle="-", linewidth=lw + 2.4, zorder=5, alpha=0.95,
-                )
-            )
-            ax.add_patch(
-                Ellipse(
-                    (cx, cy), width=w, height=h, angle=angle, fill=False,
-                    edgecolor=edge, linestyle=style, linewidth=lw, zorder=6,
+                    (cx, cy),
+                    width=w,
+                    height=h,
+                    angle=angle,
+                    fill=False,
+                    edgecolor="#000000",
+                    linestyle=style,
+                    linewidth=0.7,
+                    zorder=6,
                 )
             )
             ax.text(

@@ -62,7 +62,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.21"
+REPORT_VERSION = "1.22"
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
@@ -677,8 +677,8 @@ def build_bad_spot_sheet(
         4,
         1,
         "RSRP poor if \u2264 -115 dBm. RSRQ poor if \u2264 -20 dB. SINR poor if \u2264 0 dB. "
-        "A consecutive bad spot is a drive stretch of at least 200 m of poor samples (red dashed oval). "
-        "If poor samples cover at least 1 km\u00b2 but never form a 200 m consecutive stretch, a large purple circle marks that discrete area. "
+        "A consecutive bad spot is a drive stretch of at least 200 m of poor samples (thin black dashed oval). "
+        "If poor samples cover at least 1 km\u00b2 but never form a 200 m consecutive stretch, a thin black dotted circle marks that discrete area. "
         "Site maps are not drawn on this sheet.",
         size=11,
         wrap=True,
@@ -744,8 +744,8 @@ def build_bad_spot_sheet(
         note_row,
         1,
         "Rule 1: mark samples at or below the KPI threshold. "
-        "Rule 2: consecutive poor path length of at least 200 m (numbered red dashed oval). "
-        "Rule 3: leftover poor samples covering at least 1 km\u00b2 without a 200 m consecutive stretch (numbered large purple circle). "
+        "Rule 2: consecutive poor path length of at least 200 m (numbered thin black dashed oval). "
+        "Rule 3: leftover poor samples covering at least 1 km\u00b2 without a 200 m consecutive stretch (numbered thin black dotted circle). "
         "SINR uses \u2264 0 dB (the same 200 m / 1 km\u00b2 rules).",
         size=9,
         wrap=True,
