@@ -13,7 +13,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from matplotlib.patches import Ellipse
+from matplotlib.patches import Ellipse, Patch, Polygon
 import numpy as np
 import pandas as pd
 
@@ -28,6 +28,7 @@ P1_XLSX = EXTRACT_DIR / "Bogura_P1.xlsx"
 P2_XLSX = EXTRACT_DIR / "Bogura_P2.xlsx"
 MERGED_CSV = OUTPUT_DIR / "Bogura_merged.csv.gz"
 SUMMARY_MD = OUTPUT_DIR / "analysis_summary.md"
+SITE_DB_PATH = ROOT / "Physical_Site_Database_V1.0.xlsb"
 
 COLUMNS = [
     "Time",
@@ -158,6 +159,211 @@ def hide_map_axes(ax) -> None:
         spine.set_visible(False)
 
 
+# Three-sector pie colours (A / B / C). Extra suffixes fall back to gray.
+SECTOR_PIE_COLORS = {
+    "A": "#E74C3C",
+    "B": "#27AE60",
+    "C": "#2980B9",
+}
+SECTOR_PIE_FALLBACK = "#7F8C8D"
+_SITE_SECTORS: pd.DataFrame | None = None
+
+
+def _most_common_azimuth(series: pd.Series) -> float:
+    """Mode of azimuth; ties keep the first most-frequent value."""
+    s = pd.to_numeric(series, errors="coerce").dropna()
+    if s.empty:
+        return float("nan")
+    rounded = s.round().astype(int)
+    return float(rounded.value_counts().idxmax())
+
+
+def _sector_key(name: object) -> str:
+    text = str(name).strip().upper()
+    return text[-1] if text else ""
+
+
+def load_site_sectors(path: Path | None = None) -> pd.DataFrame:
+    """One row per site+sector: most-common azimuth when a sector has many cells."""
+    global _SITE_SECTORS
+    if _SITE_SECTORS is not None:
+        return _SITE_SECTORS
+    db_path = path or SITE_DB_PATH
+    if not db_path.exists():
+        _SITE_SECTORS = pd.DataFrame()
+        return _SITE_SECTORS
+    from pyxlsb import open_workbook
+
+    rows: list[list] = []
+    cols: list[str] = []
+    with open_workbook(str(db_path)) as wb:
+        sheet = wb.get_sheet(wb.sheets[0])
+        for i, row in enumerate(sheet.rows()):
+            vals = [c.v for c in row]
+            if i == 0:
+                cols = [str(v) for v in vals]
+                continue
+            rows.append(vals)
+    cells = pd.DataFrame(rows, columns=cols)
+    rename = {c: c.strip() for c in cells.columns}
+    cells = cells.rename(columns=rename)
+    for col in ("Lat", "Lon", "Azimuth"):
+        if col in cells.columns:
+            cells[col] = pd.to_numeric(cells[col], errors="coerce")
+    need = {"SiteName", "Sector", "Lat", "Lon", "Azimuth"}
+    if not need.issubset(cells.columns):
+        _SITE_SECTORS = pd.DataFrame()
+        return _SITE_SECTORS
+    cells = cells.dropna(subset=["SiteName", "Sector", "Lat", "Lon"])
+    grouped = (
+        cells.groupby(["SiteName", "Sector"], sort=False)
+        .agg(
+            lat=("Lat", "median"),
+            lon=("Lon", "median"),
+            azimuth=("Azimuth", _most_common_azimuth),
+            n_cells=("Sector", "size"),
+        )
+        .reset_index()
+    )
+    grouped["sector_key"] = grouped["Sector"].map(_sector_key)
+    grouped["color"] = grouped["sector_key"].map(lambda k: SECTOR_PIE_COLORS.get(k, SECTOR_PIE_FALLBACK))
+    n_sec = grouped.groupby("SiteName")["Sector"].transform("nunique")
+    grouped["n_sectors"] = n_sec
+    _SITE_SECTORS = grouped.dropna(subset=["lat", "lon", "azimuth"])
+    return _SITE_SECTORS
+
+
+def _sites_near_drive(sectors: pd.DataFrame, drive: pd.DataFrame, radius_km: float = 2.5) -> pd.DataFrame:
+    """Keep sites within about radius_km of a logged drive sample."""
+    if sectors.empty or drive.empty:
+        return sectors
+    grid = 0.01  # ~1.1 km
+    lat = pd.to_numeric(drive["Latitude"], errors="coerce")
+    lon = pd.to_numeric(drive["Longitude"], errors="coerce")
+    mask = lat.notna() & lon.notna()
+    cells = set(
+        zip(
+            np.floor(lat[mask] / grid).astype(int),
+            np.floor(lon[mask] / grid).astype(int),
+        )
+    )
+    steps = max(1, int(round(radius_km / (grid * 111.32))))
+    expanded: set[tuple[int, int]] = set()
+    for y, x in cells:
+        for dy in range(-steps, steps + 1):
+            for dx in range(-steps, steps + 1):
+                if dy * dy + dx * dx <= steps * steps + 1:
+                    expanded.add((y + dy, x + dx))
+    sy = np.floor(sectors["lat"] / grid).astype(int)
+    sx = np.floor(sectors["lon"] / grid).astype(int)
+    keep = [(int(y), int(x)) in expanded for y, x in zip(sy, sx)]
+    return sectors.loc[keep].copy()
+
+
+def _clockwise_arc(az_start: float, az_end: float, n: int = 22) -> np.ndarray:
+    span = (az_end - az_start) % 360.0
+    if span <= 1e-6:
+        span = 360.0
+    return (az_start + np.linspace(0.0, span, n)) % 360.0
+
+
+def _pie_slice_azimuths(azimuths: list[float]) -> list[tuple[float, float, float]]:
+    """(azimuth, start_az, end_az) clockwise so wedges fill an exact pie."""
+    az = np.array(sorted(a % 360.0 for a in azimuths), dtype=float)
+    n = len(az)
+    if n == 0:
+        return []
+    if n == 1:
+        a = float(az[0])
+        return [(a, (a - 60.0) % 360.0, (a + 60.0) % 360.0)]
+    out = []
+    for i in range(n):
+        prev_az = float(az[i - 1])
+        this_az = float(az[i])
+        next_az = float(az[(i + 1) % n])
+        d_prev = (this_az - prev_az) % 360.0
+        d_next = (next_az - this_az) % 360.0
+        start = (this_az - d_prev / 2.0) % 360.0
+        end = (this_az + d_next / 2.0) % 360.0
+        out.append((this_az, start, end))
+    return out
+
+
+def _wedge_polygon(lat: float, lon: float, az_start: float, az_end: float, radius_km: float) -> np.ndarray:
+    """Wedge in lon/lat degrees so pies stay round on equal-aspect coverage maps."""
+    r = radius_km / 111.32
+    arc = _clockwise_arc(az_start, az_end)
+    lons = lon + r * np.sin(np.radians(arc))
+    lats = lat + r * np.cos(np.radians(arc))
+    ring = np.column_stack([lons, lats])
+    return np.vstack([[lon, lat], ring, [lon, lat]])
+
+
+def draw_site_pies(
+    ax,
+    drive: pd.DataFrame,
+    radius_km: float = 0.9,
+    label_sites: bool = True,
+) -> list:
+    """Draw exact three-sector pies (grouped by sector name) on a coverage map."""
+    sectors = load_site_sectors()
+    if sectors.empty:
+        return []
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+    vis = sectors[sectors["lat"].between(ylim[0], ylim[1]) & sectors["lon"].between(xlim[0], xlim[1])]
+    vis = _sites_near_drive(vis, drive, radius_km=2.5)
+    if vis.empty:
+        return []
+    extras = []
+    for site_name, part in vis.groupby("SiteName", sort=False):
+        part = part.drop_duplicates(subset=["Sector"]).sort_values("azimuth")
+        lat = float(part["lat"].median())
+        lon = float(part["lon"].median())
+        slices = _pie_slice_azimuths(part["azimuth"].tolist())
+        for (_, row), (_az, start, end) in zip(part.iterrows(), slices):
+            poly = _wedge_polygon(lat, lon, start, end, radius_km)
+            ax.add_patch(
+                Polygon(
+                    poly,
+                    closed=True,
+                    facecolor=row["color"],
+                    edgecolor="#1B1B1B",
+                    linewidth=0.35,
+                    zorder=3,
+                    alpha=0.92,
+                )
+            )
+        ax.plot(
+            lon,
+            lat,
+            marker="o",
+            markersize=1.6,
+            color="white",
+            markeredgecolor="#1B1B1B",
+            markeredgewidth=0.3,
+            zorder=4,
+        )
+        if label_sites:
+            ax.text(
+                lon + 0.010,
+                lat + 0.006,
+                str(site_name),
+                fontsize=3.4,
+                color="#1A5276",
+                ha="left",
+                va="bottom",
+                zorder=4,
+                clip_on=True,
+            )
+    extras = [
+        Patch(facecolor=SECTOR_PIE_COLORS["A"], edgecolor="#1B1B1B", label="Sector A"),
+        Patch(facecolor=SECTOR_PIE_COLORS["B"], edgecolor="#1B1B1B", label="Sector B"),
+        Patch(facecolor=SECTOR_PIE_COLORS["C"], edgecolor="#1B1B1B", label="Sector C"),
+    ]
+    return extras
+
+
 def plot_discrete_coverage_map(
     df: pd.DataFrame,
     path: Path,
@@ -179,7 +385,14 @@ def plot_discrete_coverage_map(
         part = sample[classes == label]
         if part.empty:
             continue
-        ax.scatter(part["Longitude"], part["Latitude"], s=5, c=color, linewidths=0, rasterized=True)
+        ax.scatter(part["Longitude"], part["Latitude"], s=5, c=color, linewidths=0, rasterized=True, zorder=2)
+    lon_min, lon_max = float(geo["Longitude"].min()), float(geo["Longitude"].max())
+    lat_min, lat_max = float(geo["Latitude"].min()), float(geo["Latitude"].max())
+    pad_lon = 0.02 * (lon_max - lon_min)
+    pad_lat = 0.02 * (lat_max - lat_min)
+    ax.set_xlim(lon_min - pad_lon, lon_max + pad_lon)
+    ax.set_ylim(lat_min - pad_lat, lat_max + pad_lat)
+    site_handles = draw_site_pies(ax, geo)
     handles = [
         Line2D(
             [0],
@@ -195,12 +408,12 @@ def plot_discrete_coverage_map(
         for lab, c in zip(labels, colors)
     ]
     ax.legend(
-        handles=handles,
+        handles=handles + site_handles,
         title=legend_title,
         loc="center left",
         bbox_to_anchor=(1.02, 0.5),
         frameon=True,
-        fontsize=9,
+        fontsize=8,
         title_fontsize=10,
     )
     ax.set_aspect("equal", adjustable="box")
@@ -503,8 +716,12 @@ def plot_bad_spot_map(
         )
         for lab, c in zip(labels, colors)
     ]
+    ax.set_xlim(lon_min, lon_max)
+    ax.set_ylim(lat_min, lat_max)
+    ax.set_aspect("equal", adjustable="box")
+    site_handles = draw_site_pies(ax, geo)
     ax.legend(
-        handles=handles,
+        handles=handles + site_handles,
         title=legend_title,
         loc="center left",
         bbox_to_anchor=(1.02, 0.5),
@@ -512,9 +729,6 @@ def plot_bad_spot_map(
         fontsize=8,
         title_fontsize=9,
     )
-    ax.set_xlim(lon_min, lon_max)
-    ax.set_ylim(lat_min, lat_max)
-    ax.set_aspect("equal", adjustable="box")
 
     if spots is not None and not spots.empty:
         threshold = float(spots["threshold"].iloc[0])

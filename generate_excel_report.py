@@ -57,7 +57,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.13"
+REPORT_VERSION = "1.14"
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
@@ -531,8 +531,8 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     write_cell(ws, 18, 1, "How to read this workbook", size=14, bold=True)
     notes = [
         "Cover — dataset and KPI tables on the left, IDLE Mode plots on the right, Active Mode section at the bottom.",
-        "RSRP / RSRQ / SINR — IDLE Mode coverage map on the left; Active Mode map on the right when those logs are provided.",
-        "Bad Spot Analysis — every dense poor stretch on the full IDLE maps is circled and numbered. Site icons will be added when the site database is provided.",
+        "RSRP / RSRQ / SINR — IDLE Mode coverage map on the left with three-sector site pies; Active Mode map on the right when those logs are provided.",
+        "Bad Spot Analysis — every dense poor stretch on the full IDLE maps is circled and numbered. Physical sites use three-sector pies (most-common azimuth per sector).",
         "RSRP vs KPIs — RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter with trend.",
         "Sample Log — evenly spaced subset of the merged samples (full 1.07M rows stay in output/Bogura_merged.csv.gz).",
         "These files are IDLE Mode. Active Mode coverage maps will be added when those logs are provided.",
@@ -631,7 +631,7 @@ def build_bad_spot_sheet(
         ws,
         4,
         1,
-        "Site locations are not plotted yet. When the site database is provided, sites will be mapped onto these bad-spot plots.",
+        "Physical sites are drawn as three-sector pies (Sector A/B/C). One sector can have many cells; the pie uses the most common azimuth for that sector name.",
         size=11,
         wrap=True,
     )
@@ -689,7 +689,7 @@ def build_bad_spot_sheet(
         note_row,
         1,
         "Every numbered oval is a dense cluster of poor samples on the full drive (RSRP < -115 dBm, RSRQ < -15 dB, or SINR < 0 dB). "
-        "Site names and sector icons will be added when the site database is provided.",
+        "Site pies group cells by sector name and use the most common azimuth when a sector has more than one cell.",
         size=9,
         wrap=True,
     )

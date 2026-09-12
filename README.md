@@ -91,27 +91,29 @@ RSRP / RSRQ / SINR coverage maps use the Page 1 legend:
 
 Throughput (PDCP DL) and CQI are on the same legend sheet but are not in these IDLE logs, so those maps are not drawn yet.
 
-**Bad Spot Analysis** circles **every dense poor stretch** on the full drive maps (RSRP < −115 dBm, RSRQ < −15 dB, SINR < 0 dB). Numbered ovals match the table. Site names and sector icons are **not** drawn yet — those will be mapped when the site database is provided.
+**Coverage maps** overlay physical sites from `Physical_Site_Database_V1.0.xlsb` as three-sector pies. Cells are grouped by sector name; if a sector has several azimuths, the pie uses the most common one.
 
-## Download Excel report (v1.13)
+**Bad Spot Analysis** circles **every dense poor stretch** on the full drive maps (RSRP < −115 dBm, RSRQ < −15 dB, SINR < 0 dB). Numbered ovals match the table. Site pies are drawn on those maps too.
 
-**v1.13 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.13.xlsx
+## Download Excel report (v1.14)
+
+**v1.14 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.14.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.13.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.14.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.13.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.14.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
 Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 
 | Sheet | Contents |
 | --- | --- |
 | Cover | IDLE Mode bar, dataset/KPI tables on the left, histograms on the right, Active Mode bar at the bottom |
-| RSRP / RSRQ / SINR | IDLE Mode coverage map on the left and Active Mode placeholder on the right (no statistics table) |
-| Bad Spot Analysis | Full-drive IDLE maps with every dense poor stretch circled for RSRP, RSRQ and SINR (site icons later) |
+| RSRP / RSRQ / SINR | IDLE Mode coverage map with three-sector site pies on the left; Active Mode placeholder on the right |
+| Bad Spot Analysis | Full-drive IDLE maps with poor-stretch ovals and three-sector site pies |
 | RSRP vs KPIs | RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter plots with trend |
 | Sample Log | Evenly spaced subset of the merged samples |
 
