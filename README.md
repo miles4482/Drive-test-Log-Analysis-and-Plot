@@ -87,20 +87,20 @@ Throughput (PDCP DL) and CQI are on the same legend sheet but are not in these I
 
 - **RSRP** < −115 dBm (magenta and red only; yellow is not a bad-spot colour), **RSRQ** < −20 dB (red), **SINR** < 0 dB
 - A stretch is circled only when the zoomed box is mostly those poor colours, so a winding poor route does not wrap a blue/green city grid
-- **Consecutive:** at least 200 m of poor coverage along the drive (thin black dashed oval)
+- **Consecutive:** at least 200 m of poor coverage along the drive (thin black dashed oval covering the whole poor stretch)
 - **Discrete area:** leftover poor samples covering at least 1 km² that also look poor on that coverage map (thin black dotted circle)
 
-## Download Excel report (v1.24)
+## Download Excel report (v1.25)
 
-**v1.24 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.24.xlsx
+**v1.25 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.25.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.24.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.25.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.24.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.25.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
 Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 

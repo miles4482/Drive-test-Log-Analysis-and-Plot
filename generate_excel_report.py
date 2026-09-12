@@ -63,7 +63,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.24"
+REPORT_VERSION = "1.25"
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
@@ -683,6 +683,7 @@ def build_bad_spot_sheet(
         "RSRP is poor only below -115 dBm (magenta and red; yellow is not a bad-spot colour). "
         "RSRQ is poor below -20 dB (red). SINR is poor below 0 dB (orange and red). "
         "A location is circled only when that zoomed view is mostly those poor colours. "
+        "The dashed oval is sized to cover the whole poor stretch (all magenta/red in that spot), not only the middle. "
         "Consecutive poor coverage of at least 200 m is a thin black dashed oval. "
         "A discrete patch of at least 1 km\u00b2 that is also poor on that coverage map is a thin black dotted circle. Numbers are not drawn on the maps.",
         size=11,
