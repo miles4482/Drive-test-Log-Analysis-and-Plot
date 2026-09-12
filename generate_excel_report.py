@@ -48,6 +48,7 @@ from merge_and_analyze import (
     earfcn_to_layer,
     filter_by_layer,
     find_bad_spots,
+    best_server,
     plot_rsrp_bad_spot_map,
     plot_rsrp_coverage_map,
     plot_rsrq_bad_spot_map,
@@ -61,7 +62,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.18"
+REPORT_VERSION = "1.19"
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
@@ -500,10 +501,10 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
 
     write_cell(ws, 5, 1, "Dataset", size=14, bold=True)
     info_rows = [
-        ["Mode", "IDLE"],
+        ["Mode", "IDLE (scanner)"],
         ["Generated", datetime.now().strftime("%Y-%m-%d %H:%M")],
-        ["P1 samples", int((df["Source"] == "P1").sum())],
-        ["P2 samples", int((df["Source"] == "P2").sum())],
+        ["Archive", "Borga_Idle_V2.0.7z"],
+        ["CSV files", int(df["Source"].nunique())],
         ["Merged samples", int(len(df))],
         ["Start time", df["Time"].min()],
         ["End time", df["Time"].max()],
@@ -535,10 +536,10 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     write_cell(ws, 18, 1, "How to read this workbook", size=14, bold=True)
     notes = [
         "Cover — dataset and KPI tables on the left, IDLE Mode plots on the right, Active Mode section at the bottom.",
-        "RSRP / RSRQ / SINR — all-band and L900 / L1800 / L2100 / L2600 IDLE maps (no site pies); Active Mode stays blank until those logs are provided.",
+        "RSRP / RSRQ / SINR — Idle V2.0 scanner: all-band and L900 / L1800 / L2100 / L2600 IDLE maps (best RSRP per time, no site pies); Active Mode stays blank until those logs are provided.",
         "Bad Spot Analysis — every dense poor stretch on the full IDLE maps is circled and numbered. Physical sites use outline-only three-arm pies (most-common azimuth per sector).",
         "RSRP vs KPIs — RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter with trend.",
-        "Sample Log — evenly spaced subset of the merged samples (full 1.07M rows stay in output/Bogura_merged.csv.gz).",
+        "Sample Log — evenly spaced subset of the merged samples (full merged scanner log stays in output/Bogura_merged.csv.gz).",
         "These files are IDLE Mode. Active Mode coverage maps will be added when those logs are provided.",
     ]
     for i, text in enumerate(notes):
@@ -902,7 +903,7 @@ def build_rsrp_vs_sheet(ws, data_ws, n_rows: int, scatter_sinr: Path, scatter_rs
     banner(
         ws,
         "  RSRP vs KPIs IDLE Mode",
-        "  Merged P1+P2  |  Smooth mean lines and scatter with trend  |  Gridlines off",
+        "  Idle V2.0 scanner  |  Smooth mean lines and scatter with trend  |  Gridlines off",
         last_col=12,
     )
     set_widths(ws, {get_column_letter(i): 14 for i in range(1, 13)})
@@ -1095,14 +1096,15 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
 
     placeholder = save_active_placeholder(PLOTS_DIR / "active_mode_placeholder.png")
     extent = coverage_extent(df)
-    rsrp_map = plot_rsrp_coverage_map(df, PLOTS_DIR / "excel_route_rsrp.png")
-    rsrq_map = plot_rsrq_coverage_map(df, PLOTS_DIR / "excel_route_rsrq.png")
-    sinr_map = plot_sinr_coverage_map(df, PLOTS_DIR / "excel_route_sinr.png")
+    map_df = best_server(df)
+    rsrp_map = plot_rsrp_coverage_map(map_df, PLOTS_DIR / "excel_route_rsrp.png")
+    rsrq_map = plot_rsrq_coverage_map(map_df, PLOTS_DIR / "excel_route_rsrq.png")
+    sinr_map = plot_sinr_coverage_map(map_df, PLOTS_DIR / "excel_route_sinr.png")
     rsrp_band: dict[str, Path] = {}
     rsrq_band: dict[str, Path] = {}
     sinr_band: dict[str, Path] = {}
     for layer in REPORT_LAYERS:
-        part = filter_by_layer(df, layer)
+        part = best_server(filter_by_layer(df, layer))
         rsrp_band[layer] = plot_rsrp_coverage_map(
             part, PLOTS_DIR / f"excel_route_rsrp_{layer}.png", layer=layer, extent=extent
         )
@@ -1114,12 +1116,12 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
         )
     scatter_sinr = save_rsrp_scatter(df, "SINR", PLOTS_DIR / "excel_scatter_rsrp_sinr.png", "SINR (dB)", "RSRP vs SINR", ylim=(-10, 32))
     scatter_rsrq = save_rsrp_scatter(df, "RSRQ", PLOTS_DIR / "excel_scatter_rsrp_rsrq.png", "RSRQ (dB)", "RSRP vs RSRQ", ylim=(-24, 0))
-    rsrp_spots = find_bad_spots(df, "RSRP")
-    rsrq_spots = find_bad_spots(df, "RSRQ")
-    sinr_spots = find_bad_spots(df, "SINR")
-    rsrp_bad = plot_rsrp_bad_spot_map(df, rsrp_spots, PLOTS_DIR / "excel_bad_spots_rsrp.png")
-    rsrq_bad = plot_rsrq_bad_spot_map(df, rsrq_spots, PLOTS_DIR / "excel_bad_spots_rsrq.png")
-    sinr_bad = plot_sinr_bad_spot_map(df, sinr_spots, PLOTS_DIR / "excel_bad_spots_sinr.png")
+    rsrp_spots = find_bad_spots(map_df, "RSRP")
+    rsrq_spots = find_bad_spots(map_df, "RSRQ")
+    sinr_spots = find_bad_spots(map_df, "SINR")
+    rsrp_bad = plot_rsrp_bad_spot_map(map_df, rsrp_spots, PLOTS_DIR / "excel_bad_spots_rsrp.png")
+    rsrq_bad = plot_rsrq_bad_spot_map(map_df, rsrq_spots, PLOTS_DIR / "excel_bad_spots_rsrq.png")
+    sinr_bad = plot_sinr_bad_spot_map(map_df, sinr_spots, PLOTS_DIR / "excel_bad_spots_sinr.png")
     shutil.copy2(rsrp_bad, PLOTS_DIR / "08_bad_spots_rsrp.png")
     shutil.copy2(rsrq_bad, PLOTS_DIR / "08_bad_spots_rsrq.png")
     shutil.copy2(sinr_bad, PLOTS_DIR / "08_bad_spots_sinr.png")

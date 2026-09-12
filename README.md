@@ -1,45 +1,37 @@
 # Drive-test Log Analysis and Plot
 
-LTE drive-test logs from **Bogura**, split across two capture files that must be joined before analysis.
+LTE **IDLE Mode scanner** logs from **Bogura** (Robi). The current source is `Borga_Idle_V2.0.7z`.
 
 ## What these files are
 
-The repository originally contained only compressed archives. They are **not** six independent datasets. They are two Excel workbooks, one of which was split so it could be uploaded.
-
 | File(s) | Role | After extract |
 | --- | --- | --- |
-| `Bogura_P1.part1.rar` … `Bogura_P1.part5.rar` | One multi-volume RAR (parts 1–5 of the same archive) | `Bogura_P1.xlsx` (~1.015 million rows) |
-| `Bogura_P2.rar` | Standalone RAR | `Bogura_P2.xlsx` (~60 thousand rows) |
+| `Borga_Idle_V2.0.7z` | IDLE Mode scanner export | `extracted/Borga_Idle_V2.0/1.csv` … `15.csv` |
+| `Physical_Site_Database_V1.0.xlsb` | Physical site / sector database | Used on Bad Spot maps only |
 
-P1 and P2 use the **same 8 columns**:
-
-`Time`, `RSRP`, `RSRQ`, `SINR`, `Longitude`, `Latitude`, `Cell Id`, `DL EARFCN`
-
-They are two drive sessions (P1 around 11 May 2026, P2 around 21 May 2026) in the Bogura area. The final log is P1 and P2 concatenated, then sorted by time.
+Scanner columns include `Time`, `Longitude`, `Latitude`, `Cell Id`, `DL EARFCN`, `NB RSRP`, `NB RSRQ`, `NB RS SINR` (mapped to RSRP / RSRQ / SINR). Campaign is **Scanner**. Files 1–15 cover 11–21 May 2026.
 
 ```
-Bogura_P1.part1 + part2 + part3 + part4 + part5  -->  Bogura_P1.xlsx
-Bogura_P2.rar                                    -->  Bogura_P2.xlsx
-Bogura_P1.xlsx  +  Bogura_P2.xlsx                 -->  Bogura_merged.csv.gz  (final file)
+Borga_Idle_V2.0.7z  -->  1.csv … 15.csv
+1.csv + … + 15.csv  -->  output/Bogura_merged.csv.gz  (final file)
 ```
 
 ## How to rebuild the final file and plots
 
-Needs `unrar` plus Python packages in `requirements.txt`.
+Needs `p7zip-full` plus Python packages in `requirements.txt`.
 
 ```bash
-sudo apt-get install unrar
+sudo apt-get install p7zip-full
 pip install -r requirements.txt
 python merge_and_analyze.py
 ```
 
 The script:
 
-1. Extracts the five P1 volumes into `extracted/Bogura_P1.xlsx`
-2. Extracts P2 into `extracted/Bogura_P2.xlsx`
-3. Merges them into `output/Bogura_merged.csv.gz` (gzip CSV; a full `.xlsx` of 1M+ rows is impractical)
-4. Writes KPI plots under `output/plots/` and a text summary in `output/analysis_summary.md`
-5. Writes `output/Bogura_DriveTest_Report.xlsx` — Excel report with native RSRP, RSRQ and SINR charts, **freeze panes off** and **gridlines off** on every sheet
+1. Extracts `Borga_Idle_V2.0.7z` into `extracted/Borga_Idle_V2.0/`
+2. Merges the 15 CSVs into `output/Bogura_merged.csv.gz`
+3. Writes KPI plots under `output/plots/` and a text summary in `output/analysis_summary.md`
+4. Writes `output/Bogura_DriveTest_Report.xlsx` — freeze panes off and gridlines off on every sheet
 
 You can rebuild only the Excel report from the merged CSV:
 
@@ -47,24 +39,22 @@ You can rebuild only the Excel report from the merged CSV:
 python generate_excel_report.py
 ```
 
-Split RAR volumes are not concatenated with `cat`. `unrar` reads `Bogura_P1.part1.rar` and automatically consumes part2–part5.
-
 ## Plots
 
 After a successful run:
 
-- `output/plots/01_route_rsrp.png` — drive route colored by RSRP (map legend)
-- `output/plots/01_route_rsrq.png` — drive route colored by RSRQ (map legend)
-- `output/plots/01_route_sinr.png` — drive route colored by SINR (map legend)
+- `output/plots/01_route_rsrp.png` — best-server route colored by RSRP
+- `output/plots/01_route_rsrq.png` — best-server route colored by RSRQ
+- `output/plots/01_route_sinr.png` — best-server route colored by SINR
 - `output/plots/02_kpi_histograms.png` — RSRP / RSRQ / SINR histograms
 - `output/plots/03_kpi_vs_time.png` — KPIs over time
 - `output/plots/04_rsrp_quality_bins.png` — coverage quality bins
 - `output/plots/05_band_counts.png` — LTE band from DL EARFCN
 - `output/plots/06_top_cells.png` — most-seen Cell Ids
-- `output/plots/07_p1_vs_p2_counts.png` — sample counts by source file
-- `output/plots/08_bad_spots_rsrp.png` / `_rsrq.png` / `_sinr.png` — bad-spot maps with dashed ovals (no sites yet)
+- `output/plots/07_p1_vs_p2_counts.png` — sample counts by CSV file
+- `output/plots/08_bad_spots_rsrp.png` / `_rsrq.png` / `_sinr.png` — bad-spot maps with site pies
 
-If `output/Bogura_merged.csv.gz` already exists, skip Excel reload with:
+If `output/Bogura_merged.csv.gz` already exists, skip extract with:
 
 ```bash
 python merge_and_analyze.py --from-merged
@@ -74,10 +64,10 @@ python merge_and_analyze.py --from-merged
 
 | Item | Value |
 | --- | --- |
-| P1 samples | 1,015,226 (11–20 May 2026) |
-| P2 samples | 60,159 (21 May 2026) |
-| Merged | 1,075,385 |
-| Mean RSRP / RSRQ / SINR | −99.1 dBm / −10.9 dB / 8.4 dB |
+| Archive | Borga_Idle_V2.0.7z (15 CSVs) |
+| Scanner detections | ~1.18 million (11–21 May 2026) |
+| Operator | Robi |
+| Layers | L900 / L1800 / L2100 / L2600 |
 | Dominant bands | B3 1800 (50.5%), B1 2100 (42.3%), B41 2500 (6.5%), B8 900 (0.7%) |
 | Unique Cell Ids | 2,521 |
 
@@ -95,17 +85,17 @@ Throughput (PDCP DL) and CQI are on the same legend sheet but are not in these I
 
 **Bad Spot Analysis** circles **every dense poor stretch** on the full drive maps (RSRP < −115 dBm, RSRQ < −15 dB, SINR < 0 dB). Numbered ovals match the table. Outline-only site pies from `Physical_Site_Database_V1.0.xlsb` are drawn on these maps only.
 
-## Download Excel report (v1.18)
+## Download Excel report (v1.19)
 
-**v1.18 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.18.xlsx
+**v1.19 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.19.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.18.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.19.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.18.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.19.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
 Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 

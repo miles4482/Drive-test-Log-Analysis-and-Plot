@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract split Bogura drive-test archives, merge P1+P2, and plot KPIs."""
+"""Extract Bogura idle scanner logs, merge CSVs, and plot KPIs."""
 
 from __future__ import annotations
 
@@ -23,13 +23,17 @@ EXTRACT_DIR = ROOT / "extracted"
 OUTPUT_DIR = ROOT / "output"
 PLOTS_DIR = OUTPUT_DIR / "plots"
 
-P1_PARTS = [ROOT / f"Bogura_P1.part{i}.rar" for i in range(1, 6)]
-P2_RAR = ROOT / "Bogura_P2.rar"
-P1_XLSX = EXTRACT_DIR / "Bogura_P1.xlsx"
-P2_XLSX = EXTRACT_DIR / "Bogura_P2.xlsx"
+IDLE_ARCHIVE = ROOT / "Borga_Idle_V2.0.7z"
+IDLE_DIR = EXTRACT_DIR / "Borga_Idle_V2.0"
 MERGED_CSV = OUTPUT_DIR / "Bogura_merged.csv.gz"
 SUMMARY_MD = OUTPUT_DIR / "analysis_summary.md"
 SITE_DB_PATH = ROOT / "Physical_Site_Database_V1.0.xlsb"
+
+SCANNER_RENAME = {
+    "NB RSRP": "RSRP",
+    "NB RSRQ": "RSRQ",
+    "NB RS SINR": "SINR",
+}
 
 COLUMNS = [
     "Time",
@@ -839,36 +843,34 @@ def plot_sinr_bad_spot_map(df: pd.DataFrame, spots: pd.DataFrame, path: Path) ->
     )
 
 
-def require_unrar() -> str:
+def require_7z() -> str:
     from shutil import which
 
-    exe = which("unrar")
+    exe = which("7z") or which("7za")
     if not exe:
-        sys.exit("unrar is required. Install it with: sudo apt-get install unrar")
+        sys.exit("7z is required. Install it with: sudo apt-get install p7zip-full")
     return exe
+
+
+def idle_csv_files() -> list[Path]:
+    if not IDLE_DIR.exists():
+        return []
+    return sorted(IDLE_DIR.glob("*.csv"), key=lambda p: int(p.stem) if p.stem.isdigit() else p.stem)
 
 
 def extract_archives() -> None:
     EXTRACT_DIR.mkdir(parents=True, exist_ok=True)
-    unrar = require_unrar()
-    missing = [p for p in P1_PARTS if not p.exists()]
-    if missing:
-        sys.exit(f"Missing P1 split volumes: {', '.join(p.name for p in missing)}")
-    if not P2_RAR.exists():
-        sys.exit(f"Missing {P2_RAR.name}")
-
-    print("Extracting Bogura_P1.part1–part5 -> Bogura_P1.xlsx")
+    if not IDLE_ARCHIVE.exists():
+        sys.exit(f"Missing idle archive: {IDLE_ARCHIVE.name}")
+    print(f"Extracting {IDLE_ARCHIVE.name} -> {IDLE_DIR}")
     subprocess.run(
-        [unrar, "x", "-o+", str(P1_PARTS[0]), str(EXTRACT_DIR) + "/"],
+        [require_7z(), "x", f"-o{EXTRACT_DIR}", str(IDLE_ARCHIVE), "-y"],
         check=True,
     )
-    print("Extracting Bogura_P2.rar -> Bogura_P2.xlsx")
-    subprocess.run(
-        [unrar, "x", "-o+", str(P2_RAR), str(EXTRACT_DIR) + "/"],
-        check=True,
-    )
-    if not P1_XLSX.exists() or not P2_XLSX.exists():
-        sys.exit("Extraction finished but expected xlsx files were not found.")
+    files = idle_csv_files()
+    if not files:
+        sys.exit(f"Extraction finished but no CSV files were found in {IDLE_DIR}")
+    print(f"  {len(files)} CSV files")
 
 
 def earfcn_to_layer(earfcn: object) -> str:
@@ -893,6 +895,19 @@ def filter_by_layer(df: pd.DataFrame, layer: str) -> pd.DataFrame:
     return df.loc[earfcn.map(earfcn_to_layer) == layer].copy()
 
 
+def best_server(df: pd.DataFrame, group_cols: tuple[str, ...] = ("Time",)) -> pd.DataFrame:
+    """Keep the strongest RSRP in each group (scanner: one best cell per timestamp)."""
+    work = df.dropna(subset=["RSRP", *group_cols]).copy()
+    if work.empty:
+        return work
+    work["RSRP"] = pd.to_numeric(work["RSRP"], errors="coerce")
+    work = work.dropna(subset=["RSRP"])
+    if work.empty:
+        return work
+    idx = work.groupby(list(group_cols), sort=False)["RSRP"].idxmax()
+    return work.loc[idx].reset_index(drop=True)
+
+
 def coverage_extent(df: pd.DataFrame) -> tuple[float, float, float, float]:
     """Padded lon/lat box so all-band and per-band maps share the same view."""
     geo = df.dropna(subset=["Longitude", "Latitude"])
@@ -913,28 +928,37 @@ def earfcn_to_band(earfcn: float) -> str:
     return f"EARFCN {value}"
 
 
-def load_part(path: Path, source: str) -> pd.DataFrame:
+def load_idle_csv(path: Path) -> pd.DataFrame:
     print(f"Loading {path.name} ...")
-    df = pd.read_excel(path, sheet_name="Sheet1", engine="openpyxl")
+    df = pd.read_csv(path)
+    df = df.rename(columns=SCANNER_RENAME)
     missing = [c for c in COLUMNS if c not in df.columns]
     if missing:
         sys.exit(f"{path.name} is missing columns: {missing}")
-    df = df[COLUMNS].copy()
+    keep = [c for c in df.columns if c in set(COLUMNS) | {
+        "Operator", "Technology Band", "eNB-Id", "Sector Id",
+        "Bin Name", "Collection", "Campaign",
+    }]
+    df = df[keep].copy()
     df["Time"] = pd.to_datetime(df["Time"], errors="coerce")
     for col in ("RSRP", "RSRQ", "SINR", "Longitude", "Latitude", "DL EARFCN"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df["Cell Id"] = pd.to_numeric(df["Cell Id"], errors="coerce").astype("Int64")
     df["DL EARFCN"] = df["DL EARFCN"].astype("Int64")
-    df["Source"] = source
+    df["Source"] = path.name
     df["Band"] = df["DL EARFCN"].map(earfcn_to_band)
+    df["Layer"] = df["DL EARFCN"].map(earfcn_to_layer)
     print(f"  {len(df):,} rows")
     return df
 
 
 def merge_parts() -> pd.DataFrame:
-    p1 = load_part(P1_XLSX, "P1")
-    p2 = load_part(P2_XLSX, "P2")
-    merged = pd.concat([p1, p2], ignore_index=True)
+    files = idle_csv_files()
+    if not files:
+        sys.exit(f"No idle CSV files in {IDLE_DIR}; run extract first")
+    frames = [load_idle_csv(p) for p in files]
+    merged = pd.concat(frames, ignore_index=True)
+    merged = merged.drop_duplicates(subset=["Time", "Cell Id", "DL EARFCN", "RSRP"], keep="first")
     merged = merged.sort_values(["Time", "Source"], kind="mergesort").reset_index(drop=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     merged.to_csv(MERGED_CSV, index=False, compression="gzip")
@@ -959,16 +983,14 @@ def write_summary(df: pd.DataFrame) -> None:
         "",
         "## What the source files are",
         "",
-        "- `Bogura_P1.part1.rar` … `Bogura_P1.part5.rar` are one split RAR volume set. Extracting them yields **Bogura_P1.xlsx** (Part 1 of the drive test).",
-        "- `Bogura_P2.rar` is already a complete archive. Extracting it yields **Bogura_P2.xlsx** (Part 2).",
-        "- Both workbooks use the same 8 columns: Time, RSRP, RSRQ, SINR, Longitude, Latitude, Cell Id, DL EARFCN.",
-        "- Concatenating P1 then P2 produces the **final log**: `output/Bogura_merged.csv.gz`.",
+        "- `Borga_Idle_V2.0.7z` is the IDLE Mode scanner export (folder `Borga_Idle_V2.0/` with `1.csv` … `15.csv`).",
+        "- Columns include Time, Longitude, Latitude, Cell Id, DL EARFCN, and scanner KPIs `NB RSRP` / `NB RSRQ` / `NB RS SINR` (renamed to RSRP / RSRQ / SINR).",
+        "- Concatenating the 15 CSVs produces the **final log**: `output/Bogura_merged.csv.gz`.",
         "",
         "## Row counts",
         "",
-        f"- P1: {int((df['Source'] == 'P1').sum()):,} samples",
-        f"- P2: {int((df['Source'] == 'P2').sum()):,} samples",
-        f"- Merged: {len(df):,} samples",
+        f"- CSV files: {df['Source'].nunique()}",
+        f"- Merged scanner detections: {len(df):,} samples",
         "",
         "## Time and area",
         "",
@@ -1006,9 +1028,8 @@ def write_summary(df: pd.DataFrame) -> None:
         "",
         "## Notes",
         "",
-        "- P1 covers multiple drive days (11–20 May 2026). P2 is a shorter session on 21 May 2026.",
-        "- About 24% of samples have no SINR (typical when the logger recorded neighbor cells).",
-        "- Band 41 (TDD 2500) appears as EARFCN ~40742 / 40940 / 41138.",
+        "- Campaign is **Scanner** (NB RSRP / NB RSRQ / NB RS SINR). Coverage maps use the strongest RSRP at each timestamp so weak neighbors do not paint over the route.",
+        "- Files 1.csv–15.csv cover 11–21 May 2026. Operator is Robi. Layers: L900 (B8), L1800 (B3), L2100 (B1), L2600 (B41).",
         "",
         "Plots are written to `output/plots/`.",
         "",
@@ -1056,16 +1077,16 @@ def plot_stacked_map_hist(ax, values, classifier, labels, colors, bins, title, x
 
 def plot_all(df: pd.DataFrame) -> None:
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
-    geo = df.dropna(subset=["Longitude", "Latitude", "RSRP"])
+    geo = best_server(df.dropna(subset=["Longitude", "Latitude", "RSRP"]))
     plot_rsrp_coverage_map(geo, PLOTS_DIR / "01_route_rsrp.png")
     plot_rsrq_coverage_map(geo, PLOTS_DIR / "01_route_rsrq.png")
     plot_sinr_coverage_map(geo, PLOTS_DIR / "01_route_sinr.png")
-    rsrp_spots = find_bad_spots(df, "RSRP")
-    rsrq_spots = find_bad_spots(df, "RSRQ")
-    sinr_spots = find_bad_spots(df, "SINR")
-    plot_rsrp_bad_spot_map(df, rsrp_spots, PLOTS_DIR / "08_bad_spots_rsrp.png")
-    plot_rsrq_bad_spot_map(df, rsrq_spots, PLOTS_DIR / "08_bad_spots_rsrq.png")
-    plot_sinr_bad_spot_map(df, sinr_spots, PLOTS_DIR / "08_bad_spots_sinr.png")
+    rsrp_spots = find_bad_spots(geo, "RSRP")
+    rsrq_spots = find_bad_spots(geo, "RSRQ")
+    sinr_spots = find_bad_spots(geo, "SINR")
+    plot_rsrp_bad_spot_map(geo, rsrp_spots, PLOTS_DIR / "08_bad_spots_rsrp.png")
+    plot_rsrq_bad_spot_map(geo, rsrq_spots, PLOTS_DIR / "08_bad_spots_rsrq.png")
+    plot_sinr_bad_spot_map(geo, sinr_spots, PLOTS_DIR / "08_bad_spots_sinr.png")
 
     fig, axes = plt.subplots(1, 3, figsize=(16, 5.2))
     plot_stacked_map_hist(
@@ -1113,15 +1134,18 @@ def plot_all(df: pd.DataFrame) -> None:
     fig, ax = plt.subplots(figsize=(10, 6))
     top_cells = df["Cell Id"].dropna().astype("int64").value_counts().head(15)
     ax.barh(top_cells.index.astype(str)[::-1], top_cells.values[::-1], color="#1d3557")
-    style_axes(ax, "Top 15 serving Cell Ids", "Samples", "Cell Id")
+    style_axes(ax, "Top 15 scanner Cell Ids", "Samples", "Cell Id")
     fig.tight_layout()
     fig.savefig(PLOTS_DIR / "06_top_cells.png", dpi=140)
     plt.close(fig)
 
-    fig, ax = plt.subplots(figsize=(7, 5))
-    source_counts = df["Source"].value_counts().reindex(["P1", "P2"])
-    ax.bar(source_counts.index, source_counts.values, color=["#2a6f97", "#e07a3d"])
-    style_axes(ax, "Merged log: P1 vs P2 samples", "Source file", "Samples")
+    fig, ax = plt.subplots(figsize=(10, 5))
+    source_counts = df["Source"].value_counts()
+    order = sorted(source_counts.index, key=lambda n: int(str(n).replace(".csv", "")) if str(n).replace(".csv", "").isdigit() else str(n))
+    source_counts = source_counts.reindex(order)
+    ax.bar(source_counts.index.astype(str), source_counts.values, color="#2a6f97")
+    ax.tick_params(axis="x", rotation=45)
+    style_axes(ax, "Merged idle log: samples by CSV", "Source file", "Samples")
     fig.tight_layout()
     fig.savefig(PLOTS_DIR / "07_p1_vs_p2_counts.png", dpi=140)
     plt.close(fig)
@@ -1136,6 +1160,7 @@ def load_merged_csv() -> pd.DataFrame:
     df["Cell Id"] = pd.to_numeric(df["Cell Id"], errors="coerce").astype("Int64")
     df["DL EARFCN"] = pd.to_numeric(df["DL EARFCN"], errors="coerce").astype("Int64")
     df["Band"] = df["DL EARFCN"].map(earfcn_to_band)
+    df["Layer"] = df["DL EARFCN"].map(earfcn_to_layer)
     return df
 
 
