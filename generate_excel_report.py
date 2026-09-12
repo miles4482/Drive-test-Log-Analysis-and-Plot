@@ -55,6 +55,7 @@ from merge_and_analyze import (
     plot_rsrq_coverage_map,
     plot_sinr_bad_spot_map,
     plot_sinr_coverage_map,
+    plot_bad_spot_zoom_grid,
     plot_stacked_map_hist,
     rsrp_map_class,
     rsrp_range_counts,
@@ -62,7 +63,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.22"
+REPORT_VERSION = "1.23"
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
@@ -537,7 +538,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     notes = [
         "Cover \u2014 dataset and KPI tables on the left, IDLE Mode plots on the right, Active Mode section at the bottom.",
         "RSRP / RSRQ / SINR \u2014 Idle V2.0 scanner: all-band and L900 / L1800 / L2100 / L2600 IDLE maps (best RSRP per time, no site pies); Active Mode stays blank until those logs are provided.",
-        "Bad Spot Analysis \u2014 uses the first all-band IDLE map from each KPI sheet (not band maps), then marks consecutive \u2265 200 m stretches and discrete \u2265 1 km\u00b2 areas. No site pies.",
+        "Bad Spot Analysis \u2014 first all-band IDLE maps (same as the RSRP / RSRQ / SINR top maps), zoomed local inspection, thin black outlines, no numbers.",
         "RSRP vs KPIs \u2014 RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter with trend.",
         "Sample Log \u2014 evenly spaced subset of the merged samples (full merged scanner log stays in output/Bogura_merged.csv.gz).",
         "These files are IDLE Mode. Active Mode coverage maps will be added when those logs are provided.",
@@ -631,9 +632,8 @@ def _bad_spot_table_rows(spots: pd.DataFrame) -> list[list]:
         area_km2 = s.get("area_km2", np.nan)
         rows.append(
             [
-                f"Bad Spot {int(s['spot'])}",
-                str(s["kpi"]),
                 _kind_label(s.get("kind")),
+                str(s["kpi"]),
                 float(s["lat"]),
                 float(s["lon"]),
                 int(s["n"]),
@@ -659,12 +659,15 @@ def build_bad_spot_sheet(
     rsrp_map: Path,
     rsrq_map: Path,
     sinr_map: Path,
+    rsrp_zooms: Path | None = None,
+    rsrq_zooms: Path | None = None,
+    sinr_zooms: Path | None = None,
 ) -> None:
     last_col = 16
     banner(
         ws,
         "  Bad Spot Analysis",
-        "  IDLE Mode  |  Consecutive \u2265 200 m  |  Discrete area \u2265 1 km\u00b2  |  No site pies",
+        "  IDLE Mode  |  First all-band coverage map  |  Zoomed spots  |  No numbering",
         last_col=last_col,
     )
     set_widths(ws, {get_column_letter(i): 13 for i in range(1, last_col + 1)})
@@ -676,10 +679,10 @@ def build_bad_spot_sheet(
         ws,
         4,
         1,
-        "RSRP poor if \u2264 -115 dBm. RSRQ poor if \u2264 -20 dB. SINR poor if \u2264 0 dB. "
-        "A consecutive bad spot is a drive stretch of at least 200 m of poor samples (thin black dashed oval). "
-        "If poor samples cover at least 1 km\u00b2 but never form a 200 m consecutive stretch, a thin black dotted circle marks that discrete area. "
-        "Site maps are not drawn on this sheet.",
+        "Bad spots are taken from the first all-band IDLE map on the RSRP / RSRQ / SINR sheets (best server, not band maps). "
+        "RSRP poor if \u2264 -115 dBm, RSRQ poor if \u2264 -20 dB, SINR poor if \u2264 0 dB. "
+        "Each location is inspected in a zoomed view. Consecutive poor coverage of at least 200 m is a thin black dashed oval. "
+        "A discrete patch of at least 1 km\u00b2 that is also poor on that coverage map is a thin black dotted circle. Numbers are not drawn on the maps.",
         size=11,
         wrap=True,
     )
@@ -688,21 +691,33 @@ def build_bad_spot_sheet(
     ws.row_dimensions[6].height = 18
 
     maps = [
-        (8, "RSRP bad spots  \u2014  \u2264 -115 dBm", rsrp_map),
-        (42, "RSRQ bad spots  \u2014  \u2264 -20 dB", rsrq_map),
-        (76, "SINR bad spots  \u2014  \u2264 0 dB", sinr_map),
+        (8, "RSRP coverage map \u2014 IDLE Mode  |  bad spots", rsrp_map, 34),
+        (42, "RSRQ coverage map \u2014 IDLE Mode  |  bad spots", rsrq_map, 34),
+        (76, "SINR coverage map \u2014 IDLE Mode  |  bad spots", sinr_map, 34),
     ]
-    for row, title, path in maps:
+    for row, title, path, _span in maps:
         section_bar(ws, row, title, 1, last_col)
         if path.exists():
             add_image(ws, path, f"A{row + 2}", width=720, height=620)
 
-    table_row = 110
+    zoom_row = 110
+    zoom_blocks = [
+        ("RSRP zoomed locations", rsrp_zooms),
+        ("RSRQ zoomed locations", rsrq_zooms),
+        ("SINR zoomed locations", sinr_zooms),
+    ]
+    for title, path in zoom_blocks:
+        if path is None or not path.exists():
+            continue
+        section_bar(ws, zoom_row, title, 1, last_col)
+        add_image(ws, path, f"A{zoom_row + 2}", width=820, height=760)
+        zoom_row += 42
+
+    table_row = zoom_row + 1
     write_cell(ws, table_row, 1, "Identified bad spots", size=14, bold=True)
     headers = [
-        "Spot",
-        "KPI",
         "Type",
+        "KPI",
         "Latitude",
         "Longitude",
         "Samples",
@@ -724,29 +739,27 @@ def build_bad_spot_sheet(
         headers,
         rows,
         num_formats={
+            2: "0.00000",
             3: "0.00000",
-            4: "0.00000",
+            4: "#,##0",
             5: "#,##0",
-            6: "#,##0",
-            7: "0.0%",
+            6: "0.0%",
+            7: "0.00",
             8: "0.00",
             9: "0.00",
             10: "0.00",
-            11: "0.00",
-            12: "#,##0",
-            13: "0.00",
+            11: "#,##0",
+            12: "0.00",
         },
     )
     note_row = table_row + 2 + len(rows)
-    ws.merge_cells(start_row=note_row, start_column=1, end_row=note_row + 1, end_column=15)
+    ws.merge_cells(start_row=note_row, start_column=1, end_row=note_row + 1, end_column=14)
     write_cell(
         ws,
         note_row,
         1,
-        "Rule 1: mark samples at or below the KPI threshold. "
-        "Rule 2: consecutive poor path length of at least 200 m (numbered thin black dashed oval). "
-        "Rule 3: leftover poor samples covering at least 1 km\u00b2 without a 200 m consecutive stretch (numbered thin black dotted circle). "
-        "SINR uses \u2264 0 dB (the same 200 m / 1 km\u00b2 rules).",
+        "Overview maps match the first all-band RSRP / RSRQ / SINR coverage maps. "
+        "Zoomed panels inspect each poor stretch locally. Outlines are thin black; map numbers are omitted so the coverage stays visible.",
         size=9,
         wrap=True,
     )
@@ -1146,6 +1159,21 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
     rsrp_bad = plot_rsrp_bad_spot_map(map_df, rsrp_spots, PLOTS_DIR / "excel_bad_spots_rsrp.png", extent=extent)
     rsrq_bad = plot_rsrq_bad_spot_map(map_df, rsrq_spots, PLOTS_DIR / "excel_bad_spots_rsrq.png", extent=extent)
     sinr_bad = plot_sinr_bad_spot_map(map_df, sinr_spots, PLOTS_DIR / "excel_bad_spots_sinr.png", extent=extent)
+    rsrp_zooms = plot_bad_spot_zoom_grid(
+        map_df, rsrp_spots, PLOTS_DIR / "excel_bad_spots_rsrp_zooms.png",
+        "RSRP", rsrp_map_class(map_df["RSRP"]), MAP_RSRP_LABELS, MAP_RSRP_COLORS,
+        "RSRP zoomed locations (first all-band map)",
+    )
+    rsrq_zooms = plot_bad_spot_zoom_grid(
+        map_df, rsrq_spots, PLOTS_DIR / "excel_bad_spots_rsrq_zooms.png",
+        "RSRQ", rsrq_map_class(map_df["RSRQ"]), MAP_RSRQ_LABELS, MAP_RSRQ_COLORS,
+        "RSRQ zoomed locations (first all-band map)",
+    )
+    sinr_zooms = plot_bad_spot_zoom_grid(
+        map_df, sinr_spots, PLOTS_DIR / "excel_bad_spots_sinr_zooms.png",
+        "SINR", sinr_map_class(map_df["SINR"]), MAP_SINR_LABELS, MAP_SINR_COLORS,
+        "SINR zoomed locations (first all-band map)",
+    )
     shutil.copy2(rsrp_bad, PLOTS_DIR / "08_bad_spots_rsrp.png")
     shutil.copy2(rsrq_bad, PLOTS_DIR / "08_bad_spots_rsrq.png")
     shutil.copy2(sinr_bad, PLOTS_DIR / "08_bad_spots_sinr.png")
@@ -1170,7 +1198,11 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
     build_kpi_sheet(rsrp_ws, "RSRP", "dBm", rsrp_map, placeholder, rsrp_band)
     build_kpi_sheet(rsrq_ws, "RSRQ", "dB", rsrq_map, placeholder, rsrq_band)
     build_kpi_sheet(sinr_ws, "SINR", "dB", sinr_map, placeholder, sinr_band)
-    build_bad_spot_sheet(bad_ws, rsrp_spots, rsrq_spots, sinr_spots, rsrp_bad, rsrq_bad, sinr_bad)
+    build_bad_spot_sheet(
+        bad_ws, rsrp_spots, rsrq_spots, sinr_spots,
+        rsrp_bad, rsrq_bad, sinr_bad,
+        rsrp_zooms, rsrq_zooms, sinr_zooms,
+    )
     build_rsrp_vs_sheet(time_ws, data_ws, blocks["vs_n"], scatter_sinr, scatter_rsrq)
     build_sample_log(sample_ws, df)
 

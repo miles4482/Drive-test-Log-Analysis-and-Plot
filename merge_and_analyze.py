@@ -521,6 +521,11 @@ BAD_SPOT_MAX_CONSEC = 30
 BAD_SPOT_MAX_DISCRETE = 15
 BAD_SPOT_DISCRETE_MIN_POOR = 60
 BAD_SPOT_DISCRETE_MAX_SPAN_KM = 3.2
+BAD_SPOT_MAP_POOR_SHARE = 0.30  # discrete area must look poor on the all-band map
+BAD_SPOT_ZOOM_PAD_KM = 1.3
+BAD_SPOT_ZOOM_MIN_KM = 2.4
+BAD_SPOT_ZOOM_COLS = 4
+BAD_SPOT_MAX_ZOOMS = 16
 BAD_SPOT_MAX = BAD_SPOT_MAX_CONSEC + BAD_SPOT_MAX_DISCRETE
 BAD_SPOT_RULES = {
     "RSRP": {"threshold": -115.0, "unit": "dBm"},
@@ -802,13 +807,19 @@ def _spot_extra_stats(df: pd.DataFrame, spot: pd.Series) -> dict:
 
 
 def find_bad_spots(df: pd.DataFrame, column: str, max_spots: int = BAD_SPOT_MAX) -> pd.DataFrame:
-    """Numbered bad spots: consecutive >= 200 m, then discrete areas >= 1 km²."""
+    """Bad spots on the same best-server all-band track used by the first coverage map."""
     rule = BAD_SPOT_RULES[column]
     threshold = rule["threshold"]
     track = _prepare_track(df, column)
     consec, used = _consecutive_bad_spots(track, column, threshold)
     leftover = track.iloc[np.flatnonzero(_poor_mask(track[column], threshold).to_numpy() & ~used)]
     discrete = _discrete_area_bad_spots(leftover, column, threshold)
+    if not discrete.empty:
+        keep = []
+        for _, row in discrete.iterrows():
+            share = _map_poor_share(track, row, column, threshold)
+            keep.append(share >= BAD_SPOT_MAP_POOR_SHARE)
+        discrete = discrete.loc[keep].reset_index(drop=True)
     spots = pd.concat([consec, discrete], ignore_index=True)
     if spots.empty:
         return spots
@@ -824,7 +835,20 @@ def find_bad_spots(df: pd.DataFrame, column: str, max_spots: int = BAD_SPOT_MAX)
     spots["mean_rsrq"] = [e["mean_rsrq"] for e in extras]
     spots["mean_sinr"] = [e["mean_sinr"] for e in extras]
     spots["top_cell"] = [e["top_cell"] for e in extras]
+    spots["map_poor_share"] = [_map_poor_share(track, row, column, threshold) for _, row in spots.iterrows()]
     return spots
+
+
+def _map_poor_share(df: pd.DataFrame, spot: pd.Series, column: str, threshold: float) -> float:
+    """Share of all-band best-server samples in the spot box that are poor."""
+    box = df[
+        df["Latitude"].between(spot["lat_min"], spot["lat_max"])
+        & df["Longitude"].between(spot["lon_min"], spot["lon_max"])
+    ]
+    vals = pd.to_numeric(box[column], errors="coerce").dropna()
+    if vals.empty:
+        return 0.0
+    return float((vals <= threshold).mean())
 
 
 def _ellipse_from_points(
@@ -882,6 +906,60 @@ def add_map_scale_bar(ax, km: float = 4.0) -> None:
     ax.text(lon0 + width / 2, lat, f"  {km:.0f} km", ha="center", va="bottom", fontsize=8, color="#1B1B1B", zorder=6)
 
 
+def _spot_outline(spot: pd.Series) -> tuple[float, float, float, float, float, tuple]:
+    """Tight black outline sized to the actual poor stretch / area on the coverage map."""
+    kind = str(spot.get("kind", "consecutive"))
+    lon0 = float(spot["lon"])
+    lat0 = float(spot["lat"])
+    km_lon = _km_per_deg_lon(lat0)
+    width_km = max((float(spot["lon_max"]) - float(spot["lon_min"])) * km_lon * 1.35, 0.28)
+    height_km = max((float(spot["lat_max"]) - float(spot["lat_min"])) * 111.32 * 1.35, 0.28)
+    if kind == "discrete":
+        diameter_km = min(max(width_km, height_km, 1.15), 4.0)
+        return lon0, lat0, diameter_km / km_lon, diameter_km / 111.32, 0.0, (0, (1.0, 1.4))
+    length_km = 0.0 if pd.isna(spot.get("length_m", np.nan)) else float(spot["length_m"]) / 1000.0
+    major = min(max(width_km, height_km, length_km * 1.15, 0.28), 6.0)
+    if width_km >= height_km:
+        width_km = major
+        height_km = min(max(height_km, 0.22), major)
+    else:
+        height_km = major
+        width_km = min(max(width_km, 0.22), major)
+    return lon0, lat0, width_km / km_lon, height_km / 111.32, 0.0, (0, (3.0, 2.0))
+
+
+def _add_spot_outline(ax, spot: pd.Series) -> None:
+    cx, cy, w, h, angle, style = _spot_outline(spot)
+    ax.add_patch(
+        Ellipse(
+            (cx, cy),
+            width=w,
+            height=h,
+            angle=angle,
+            fill=False,
+            edgecolor="#000000",
+            linestyle=style,
+            linewidth=0.7,
+            zorder=6,
+        )
+    )
+
+
+def _zoom_extent(spot: pd.Series) -> tuple[float, float, float, float]:
+    lat0 = float(spot["lat"])
+    lon0 = float(spot["lon"])
+    km_lon = _km_per_deg_lon(lat0)
+    span_lat_km = max((float(spot["lat_max"]) - float(spot["lat_min"])) * 111.32, 0.2)
+    span_lon_km = max((float(spot["lon_max"]) - float(spot["lon_min"])) * km_lon, 0.2)
+    half = max(BAD_SPOT_ZOOM_MIN_KM, span_lat_km, span_lon_km) / 2.0 + BAD_SPOT_ZOOM_PAD_KM
+    return (
+        lon0 - half / km_lon,
+        lon0 + half / km_lon,
+        lat0 - half / 111.32,
+        lat0 + half / 111.32,
+    )
+
+
 def plot_bad_spot_map(
     df: pd.DataFrame,
     path: Path,
@@ -895,7 +973,7 @@ def plot_bad_spot_map(
     max_points: int = 25000,
     extent: tuple[float, float, float, float] | None = None,
 ) -> Path:
-    """First all-band coverage map, with consecutive ovals and discrete-area circles on top."""
+    """First all-band coverage map with tight, unnumbered black outlines on poor stretches."""
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
     geo = df.dropna(subset=["Longitude", "Latitude", column]).copy()
     fig, ax = plt.subplots(figsize=(8.0, 9.2))
@@ -924,82 +1002,61 @@ def plot_bad_spot_map(
         fontsize=8,
         title_fontsize=10,
     )
-
-    xlim = ax.get_xlim()
-    ylim = ax.get_ylim()
-    map_lat_km = (ylim[1] - ylim[0]) * 111.32
-    map_lon_km = (xlim[1] - xlim[0]) * _km_per_deg_lon((ylim[0] + ylim[1]) / 2.0)
-    map_span_km = min(map_lat_km, map_lon_km)
-    consec_min_km = max(6.0, map_span_km * 0.07)
-    consec_max_km = max(10.0, map_span_km * 0.12)
-    disc_min_km = max(10.0, map_span_km * 0.11)
-    disc_max_km = max(14.0, map_span_km * 0.16)
-
     if spots is not None and not spots.empty:
-        threshold = float(spots["threshold"].iloc[0]) if "threshold" in spots.columns else float(BAD_SPOT_RULES[column]["threshold"])
-        poor = geo.loc[_poor_mask(geo[column], threshold)]
         for _, spot in spots.iterrows():
-            kind = str(spot.get("kind", "consecutive"))
-            box_poor = poor[
-                poor["Latitude"].between(spot["lat_min"], spot["lat_max"])
-                & poor["Longitude"].between(spot["lon_min"], spot["lon_max"])
-            ]
-            if kind == "discrete":
-                cx, cy, w, h = _circle_from_bbox(
-                    float(spot["lon_min"]),
-                    float(spot["lon_max"]),
-                    float(spot["lat_min"]),
-                    float(spot["lat_max"]),
-                    min_diameter_km=disc_min_km,
-                    max_diameter_km=disc_max_km,
-                )
-                angle = 0.0
-                style = (0, (1.0, 1.4))
-            else:
-                length_km = None if pd.isna(spot.get("length_m", np.nan)) else float(spot["length_m"]) / 1000.0
-                if box_poor.empty:
-                    cx, cy, w, h, angle = float(spot["lon"]), float(spot["lat"]), 0.012, 0.010, 0.0
-                else:
-                    cx, cy, w, h, angle = _ellipse_from_points(
-                        box_poor["Longitude"].to_numpy(),
-                        box_poor["Latitude"].to_numpy(),
-                        min_km=consec_min_km,
-                        max_km=consec_max_km,
-                        length_km=length_km,
-                    )
-                style = (0, (3.0, 2.0))
-            ax.add_patch(
-                Ellipse(
-                    (cx, cy),
-                    width=w,
-                    height=h,
-                    angle=angle,
-                    fill=False,
-                    edgecolor="#000000",
-                    linestyle=style,
-                    linewidth=0.7,
-                    zorder=6,
-                )
-            )
-            ax.text(
-                cx,
-                cy,
-                str(int(spot["spot"])),
-                fontsize=9,
-                fontweight="bold",
-                color="#1B1B1B",
-                ha="center",
-                va="center",
-                zorder=7,
-                bbox={
-                    "boxstyle": "round,pad=0.18",
-                    "facecolor": "#FCF3CF",
-                    "edgecolor": "#1B1B1B",
-                    "linewidth": 0.8,
-                },
-            )
+            _add_spot_outline(ax, spot)
     ax.set_title(title)
     hide_map_axes(ax)
+    fig.tight_layout()
+    fig.savefig(path, dpi=140, facecolor="white", bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def plot_bad_spot_zoom_grid(
+    df: pd.DataFrame,
+    spots: pd.DataFrame,
+    path: Path,
+    column: str,
+    class_series: pd.Series,
+    labels: list[str],
+    colors: list[str],
+    title: str,
+) -> Path | None:
+    """Zoomed all-band coverage around each identified spot, with no numbers."""
+    if spots is None or spots.empty:
+        return None
+    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    work = spots.head(BAD_SPOT_MAX_ZOOMS)
+    n = len(work)
+    cols = BAD_SPOT_ZOOM_COLS
+    rows = max(1, (n + cols - 1) // cols)
+    fig, axes = plt.subplots(rows, cols, figsize=(3.15 * cols, 3.35 * rows))
+    axes_flat = np.atleast_1d(axes).ravel()
+    geo = df.dropna(subset=["Longitude", "Latitude", column]).copy()
+    for i, ax in enumerate(axes_flat):
+        if i >= n:
+            ax.set_axis_off()
+            continue
+        spot = work.iloc[i]
+        zext = _zoom_extent(spot)
+        local = geo[
+            geo["Longitude"].between(zext[0], zext[1])
+            & geo["Latitude"].between(zext[2], zext[3])
+        ]
+        _draw_coverage_points(ax, local, class_series.reindex(local.index), labels, colors, max_points=8000)
+        ax.set_xlim(zext[0], zext[1])
+        ax.set_ylim(zext[2], zext[3])
+        ax.set_aspect("equal", adjustable="box")
+        _add_spot_outline(ax, spot)
+        hide_map_axes(ax)
+        kind = str(spot.get("kind", "consecutive"))
+        if kind == "discrete":
+            caption = f"Discrete {float(spot['area_km2']):.1f} km²"
+        else:
+            caption = f"Consecutive {float(spot['length_m']):.0f} m"
+        ax.set_title(caption, fontsize=8)
+    fig.suptitle(title, fontsize=11, fontweight="bold")
     fig.tight_layout()
     fig.savefig(path, dpi=140, facecolor="white", bbox_inches="tight")
     plt.close(fig)
