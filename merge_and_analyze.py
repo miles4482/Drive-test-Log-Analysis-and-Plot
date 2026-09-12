@@ -13,7 +13,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from matplotlib.patches import Ellipse, Patch, Polygon
+from matplotlib.patches import Ellipse, Polygon
 import numpy as np
 import pandas as pd
 
@@ -159,13 +159,11 @@ def hide_map_axes(ax) -> None:
         spine.set_visible(False)
 
 
-# Three-sector pie colours (A / B / C). Extra suffixes fall back to gray.
-SECTOR_PIE_COLORS = {
-    "A": "#E74C3C",
-    "B": "#27AE60",
-    "C": "#2980B9",
-}
-SECTOR_PIE_FALLBACK = "#7F8C8D"
+# RF-planner three-blade site widget (equal petals with gaps, one fill colour).
+SITE_PIE_FILL = "#F0A3A3"
+SITE_PIE_EDGE = "#5A5A5A"
+SITE_PIE_BEAMWIDTH_DEG = 70.0
+SITE_PIE_RADIUS_KM = 0.90
 _SITE_SECTORS: pd.DataFrame | None = None
 
 
@@ -176,11 +174,6 @@ def _most_common_azimuth(series: pd.Series) -> float:
         return float("nan")
     rounded = s.round().astype(int)
     return float(rounded.value_counts().idxmax())
-
-
-def _sector_key(name: object) -> str:
-    text = str(name).strip().upper()
-    return text[-1] if text else ""
 
 
 def load_site_sectors(path: Path | None = None) -> pd.DataFrame:
@@ -225,10 +218,7 @@ def load_site_sectors(path: Path | None = None) -> pd.DataFrame:
         )
         .reset_index()
     )
-    grouped["sector_key"] = grouped["Sector"].map(_sector_key)
-    grouped["color"] = grouped["sector_key"].map(lambda k: SECTOR_PIE_COLORS.get(k, SECTOR_PIE_FALLBACK))
-    n_sec = grouped.groupby("SiteName")["Sector"].transform("nunique")
-    grouped["n_sectors"] = n_sec
+    grouped["n_sectors"] = grouped.groupby("SiteName")["Sector"].transform("nunique")
     _SITE_SECTORS = grouped.dropna(subset=["lat", "lon", "azimuth"])
     return _SITE_SECTORS
 
@@ -260,33 +250,18 @@ def _sites_near_drive(sectors: pd.DataFrame, drive: pd.DataFrame, radius_km: flo
     return sectors.loc[keep].copy()
 
 
-def _clockwise_arc(az_start: float, az_end: float, n: int = 22) -> np.ndarray:
+def _clockwise_arc(az_start: float, az_end: float, n: int = 36) -> np.ndarray:
     span = (az_end - az_start) % 360.0
     if span <= 1e-6:
         span = 360.0
     return (az_start + np.linspace(0.0, span, n)) % 360.0
 
 
-def _pie_slice_azimuths(azimuths: list[float]) -> list[tuple[float, float, float]]:
-    """(azimuth, start_az, end_az) clockwise so wedges fill an exact pie."""
-    az = np.array(sorted(a % 360.0 for a in azimuths), dtype=float)
-    n = len(az)
-    if n == 0:
-        return []
-    if n == 1:
-        a = float(az[0])
-        return [(a, (a - 60.0) % 360.0, (a + 60.0) % 360.0)]
-    out = []
-    for i in range(n):
-        prev_az = float(az[i - 1])
-        this_az = float(az[i])
-        next_az = float(az[(i + 1) % n])
-        d_prev = (this_az - prev_az) % 360.0
-        d_next = (next_az - this_az) % 360.0
-        start = (this_az - d_prev / 2.0) % 360.0
-        end = (this_az + d_next / 2.0) % 360.0
-        out.append((this_az, start, end))
-    return out
+def _blade_span(azimuth: float, beamwidth: float = SITE_PIE_BEAMWIDTH_DEG) -> tuple[float, float]:
+    """Equal petal centred on the sector azimuth, with gaps between sectors."""
+    half = float(beamwidth) / 2.0
+    az = float(azimuth) % 360.0
+    return (az - half) % 360.0, (az + half) % 360.0
 
 
 def _wedge_polygon(lat: float, lon: float, az_start: float, az_end: float, radius_km: float) -> np.ndarray:
@@ -299,13 +274,22 @@ def _wedge_polygon(lat: float, lon: float, az_start: float, az_end: float, radiu
     return np.vstack([[lon, lat], ring, [lon, lat]])
 
 
+def _pie_radius_km(ax, default_km: float = SITE_PIE_RADIUS_KM) -> float:
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+    span_km = min((xlim[1] - xlim[0]) * 111.32, (ylim[1] - ylim[0]) * 111.32)
+    if span_km <= 0:
+        return default_km
+    # ~1.2% of the shorter axis, large enough to read three blades on the full map.
+    return float(np.clip(span_km * 0.012, 0.35, 1.15))
+
+
 def draw_site_pies(
     ax,
     drive: pd.DataFrame,
-    radius_km: float = 0.9,
-    label_sites: bool = True,
+    radius_km: float | None = None,
 ) -> list:
-    """Draw exact three-sector pies (grouped by sector name) on a coverage map."""
+    """Draw salmon three-blade site pies (grouped by sector name). No labels."""
     sectors = load_site_sectors()
     if sectors.empty:
         return []
@@ -315,53 +299,27 @@ def draw_site_pies(
     vis = _sites_near_drive(vis, drive, radius_km=2.5)
     if vis.empty:
         return []
-    extras = []
-    for site_name, part in vis.groupby("SiteName", sort=False):
-        part = part.drop_duplicates(subset=["Sector"]).sort_values("azimuth")
+    radius = _pie_radius_km(ax) if radius_km is None else float(radius_km)
+    for _site_name, part in vis.groupby("SiteName", sort=False):
+        part = part.drop_duplicates(subset=["Sector"])
         lat = float(part["lat"].median())
         lon = float(part["lon"].median())
-        slices = _pie_slice_azimuths(part["azimuth"].tolist())
-        for (_, row), (_az, start, end) in zip(part.iterrows(), slices):
-            poly = _wedge_polygon(lat, lon, start, end, radius_km)
+        for az in part["azimuth"].tolist():
+            start, end = _blade_span(float(az))
+            poly = _wedge_polygon(lat, lon, start, end, radius)
             ax.add_patch(
                 Polygon(
                     poly,
                     closed=True,
-                    facecolor=row["color"],
-                    edgecolor="#1B1B1B",
-                    linewidth=0.35,
+                    facecolor=SITE_PIE_FILL,
+                    edgecolor=SITE_PIE_EDGE,
+                    linewidth=0.65,
+                    joinstyle="round",
                     zorder=3,
-                    alpha=0.92,
+                    alpha=1.0,
                 )
             )
-        ax.plot(
-            lon,
-            lat,
-            marker="o",
-            markersize=1.6,
-            color="white",
-            markeredgecolor="#1B1B1B",
-            markeredgewidth=0.3,
-            zorder=4,
-        )
-        if label_sites:
-            ax.text(
-                lon + 0.010,
-                lat + 0.006,
-                str(site_name),
-                fontsize=3.4,
-                color="#1A5276",
-                ha="left",
-                va="bottom",
-                zorder=4,
-                clip_on=True,
-            )
-    extras = [
-        Patch(facecolor=SECTOR_PIE_COLORS["A"], edgecolor="#1B1B1B", label="Sector A"),
-        Patch(facecolor=SECTOR_PIE_COLORS["B"], edgecolor="#1B1B1B", label="Sector B"),
-        Patch(facecolor=SECTOR_PIE_COLORS["C"], edgecolor="#1B1B1B", label="Sector C"),
-    ]
-    return extras
+    return []
 
 
 def plot_discrete_coverage_map(
