@@ -1147,7 +1147,7 @@ def plot_all(df: pd.DataFrame) -> None:
     ax.tick_params(axis="x", rotation=45)
     style_axes(ax, "Merged idle log: samples by CSV", "Source file", "Samples")
     fig.tight_layout()
-    fig.savefig(PLOTS_DIR / "07_p1_vs_p2_counts.png", dpi=140)
+    fig.savefig(PLOTS_DIR / "07_csv_counts.png", dpi=140)
     plt.close(fig)
 
     print(f"Wrote plots to {PLOTS_DIR}")

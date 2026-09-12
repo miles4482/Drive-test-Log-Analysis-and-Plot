@@ -51,7 +51,7 @@ After a successful run:
 - `output/plots/04_rsrp_quality_bins.png` — coverage quality bins
 - `output/plots/05_band_counts.png` — LTE band from DL EARFCN
 - `output/plots/06_top_cells.png` — most-seen Cell Ids
-- `output/plots/07_p1_vs_p2_counts.png` — sample counts by CSV file
+- `output/plots/07_csv_counts.png` — sample counts by CSV file (`1.csv` … `15.csv`)
 - `output/plots/08_bad_spots_rsrp.png` / `_rsrq.png` / `_sinr.png` — bad-spot maps with site pies
 
 If `output/Bogura_merged.csv.gz` already exists, skip extract with:
@@ -68,8 +68,8 @@ python merge_and_analyze.py --from-merged
 | Scanner detections | 1,178,276 (11–21 May 2026) |
 | Operator | Robi |
 | Layers | L900 / L1800 / L2100 / L2600 |
-| Dominant bands | B3 1800 (50.5%), B1 2100 (42.3%), B41 2500 (6.5%), B8 900 (0.7%) |
-| Unique Cell Ids | 2,521 |
+| Dominant bands | B8 900 (28.4%), B1 2100 (25.4%), B3 1800 (23.5%), B41 2500 (22.7%) |
+| Unique Cell Ids | 5,132 |
 
 RSRP / RSRQ / SINR coverage maps use the Page 1 legend:
 
