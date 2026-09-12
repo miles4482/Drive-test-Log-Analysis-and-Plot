@@ -57,7 +57,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.15"
+REPORT_VERSION = "1.16"
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
@@ -531,8 +531,8 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     write_cell(ws, 18, 1, "How to read this workbook", size=14, bold=True)
     notes = [
         "Cover — dataset and KPI tables on the left, IDLE Mode plots on the right, Active Mode section at the bottom.",
-        "RSRP / RSRQ / SINR — IDLE Mode coverage map on the left with three-blade site pies; Active Mode map on the right when those logs are provided.",
-        "Bad Spot Analysis — every dense poor stretch on the full IDLE maps is circled and numbered. Physical sites use three-blade pies (most-common azimuth per sector).",
+        "RSRP / RSRQ / SINR — IDLE Mode coverage map on the left with outline-only site pies; Active Mode map on the right when those logs are provided.",
+        "Bad Spot Analysis — every dense poor stretch on the full IDLE maps is circled and numbered. Physical sites use outline-only three-arm pies (most-common azimuth per sector).",
         "RSRP vs KPIs — RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter with trend.",
         "Sample Log — evenly spaced subset of the merged samples (full 1.07M rows stay in output/Bogura_merged.csv.gz).",
         "These files are IDLE Mode. Active Mode coverage maps will be added when those logs are provided.",
@@ -620,7 +620,7 @@ def build_bad_spot_sheet(
     banner(
         ws,
         "  Bad Spot Analysis",
-        "  IDLE Mode  |  Poor-sample clusters  |  Three-blade site pies",
+        "  IDLE Mode  |  Poor-sample clusters  |  Outline-only site pies",
         last_col=last_col,
     )
     set_widths(ws, {get_column_letter(i): 13 for i in range(1, last_col + 1)})
@@ -631,7 +631,7 @@ def build_bad_spot_sheet(
         ws,
         4,
         1,
-        "Physical sites are drawn as salmon three-blade pies (no site names). One sector can have many cells; the blade uses the most common azimuth for that sector name.",
+        "Physical sites are drawn as outline-only three-arm pies (no fill, no site names). One sector can have many cells; the arm uses the most common azimuth for that sector name.",
         size=11,
         wrap=True,
     )

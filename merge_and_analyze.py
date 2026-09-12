@@ -13,7 +13,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from matplotlib.patches import Ellipse, Polygon
+from matplotlib.patches import Ellipse, PathPatch
+from matplotlib.path import Path as MPath
 import numpy as np
 import pandas as pd
 
@@ -159,10 +160,9 @@ def hide_map_axes(ax) -> None:
         spine.set_visible(False)
 
 
-# RF-planner three-blade site widget (equal petals with gaps, one fill colour).
-SITE_PIE_FILL = "#F0A3A3"
-SITE_PIE_EDGE = "#5A5A5A"
-SITE_PIE_BEAMWIDTH_DEG = 70.0
+# RF-planner three-arm site widget: outline only, no fill inside the petals.
+SITE_PIE_EDGE = "#2B2B2B"
+SITE_PIE_ARM_WIDTH_FRAC = 0.16
 SITE_PIE_RADIUS_KM = 0.90
 _SITE_SECTORS: pd.DataFrame | None = None
 
@@ -250,28 +250,18 @@ def _sites_near_drive(sectors: pd.DataFrame, drive: pd.DataFrame, radius_km: flo
     return sectors.loc[keep].copy()
 
 
-def _clockwise_arc(az_start: float, az_end: float, n: int = 36) -> np.ndarray:
-    span = (az_end - az_start) % 360.0
-    if span <= 1e-6:
-        span = 360.0
-    return (az_start + np.linspace(0.0, span, n)) % 360.0
-
-
-def _blade_span(azimuth: float, beamwidth: float = SITE_PIE_BEAMWIDTH_DEG) -> tuple[float, float]:
-    """Equal petal centred on the sector azimuth, with gaps between sectors."""
-    half = float(beamwidth) / 2.0
-    az = float(azimuth) % 360.0
-    return (az - half) % 360.0, (az + half) % 360.0
-
-
-def _wedge_polygon(lat: float, lon: float, az_start: float, az_end: float, radius_km: float) -> np.ndarray:
-    """Wedge in lon/lat degrees so pies stay round on equal-aspect coverage maps."""
-    r = radius_km / 111.32
-    arc = _clockwise_arc(az_start, az_end)
-    lons = lon + r * np.sin(np.radians(arc))
-    lats = lat + r * np.cos(np.radians(arc))
-    ring = np.column_stack([lons, lats])
-    return np.vstack([[lon, lat], ring, [lon, lat]])
+def _arm_path(lat: float, lon: float, azimuth: float, length_km: float, width_frac: float = SITE_PIE_ARM_WIDTH_FRAC) -> MPath:
+    """Hollow rectangular arm along azimuth (0 = north). Inner edge is left open so three arms form a Y."""
+    r = length_km / 111.32
+    half_w = r * float(width_frac) / 2.0
+    az = np.radians(float(azimuth) % 360.0)
+    ux, uy = np.sin(az), np.cos(az)
+    px, py = np.cos(az), -np.sin(az)
+    inner_l = (lon - half_w * px, lat - half_w * py)
+    outer_l = (lon + r * ux - half_w * px, lat + r * uy - half_w * py)
+    outer_r = (lon + r * ux + half_w * px, lat + r * uy + half_w * py)
+    inner_r = (lon + half_w * px, lat + half_w * py)
+    return MPath([inner_l, outer_l, outer_r, inner_r], [MPath.MOVETO, MPath.LINETO, MPath.LINETO, MPath.LINETO])
 
 
 def _pie_radius_km(ax, default_km: float = SITE_PIE_RADIUS_KM) -> float:
@@ -280,7 +270,6 @@ def _pie_radius_km(ax, default_km: float = SITE_PIE_RADIUS_KM) -> float:
     span_km = min((xlim[1] - xlim[0]) * 111.32, (ylim[1] - ylim[0]) * 111.32)
     if span_km <= 0:
         return default_km
-    # ~1.2% of the shorter axis, large enough to read three blades on the full map.
     return float(np.clip(span_km * 0.012, 0.35, 1.15))
 
 
@@ -289,7 +278,7 @@ def draw_site_pies(
     drive: pd.DataFrame,
     radius_km: float | None = None,
 ) -> list:
-    """Draw salmon three-blade site pies (grouped by sector name). No labels."""
+    """Draw outline-only three-arm site pies (grouped by sector name). No labels, no fill."""
     sectors = load_site_sectors()
     if sectors.empty:
         return []
@@ -305,18 +294,14 @@ def draw_site_pies(
         lat = float(part["lat"].median())
         lon = float(part["lon"].median())
         for az in part["azimuth"].tolist():
-            start, end = _blade_span(float(az))
-            poly = _wedge_polygon(lat, lon, start, end, radius)
             ax.add_patch(
-                Polygon(
-                    poly,
-                    closed=True,
-                    facecolor=SITE_PIE_FILL,
+                PathPatch(
+                    _arm_path(lat, lon, float(az), radius),
+                    facecolor="none",
                     edgecolor=SITE_PIE_EDGE,
-                    linewidth=0.65,
-                    joinstyle="round",
+                    linewidth=0.75,
+                    joinstyle="miter",
                     zorder=3,
-                    alpha=1.0,
                 )
             )
     return []
