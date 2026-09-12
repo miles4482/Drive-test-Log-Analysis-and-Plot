@@ -495,9 +495,11 @@ BAD_SPOT_MAX_SAMPLE_GAP_M = 100.0
 BAD_SPOT_MAX_SAMPLE_GAP_S = 12.0
 BAD_SPOT_FLICKER_M = 25.0
 BAD_SPOT_FLICKER_S = 3.0
-BAD_SPOT_GRID_DEG = 0.008  # ~0.9 km cells for discrete-area clustering
-BAD_SPOT_MAX_CONSEC = 50
-BAD_SPOT_MAX_DISCRETE = 25
+BAD_SPOT_GRID_DEG = 0.009  # ~1.0 km cells for discrete-area clustering
+BAD_SPOT_MAX_CONSEC = 30
+BAD_SPOT_MAX_DISCRETE = 15
+BAD_SPOT_DISCRETE_MIN_POOR = 60
+BAD_SPOT_DISCRETE_MAX_SPAN_KM = 3.2
 BAD_SPOT_MAX = BAD_SPOT_MAX_CONSEC + BAD_SPOT_MAX_DISCRETE
 BAD_SPOT_RULES = {
     "RSRP": {"threshold": -115.0, "unit": "dBm"},
@@ -691,7 +693,10 @@ def _consecutive_bad_spots(track: pd.DataFrame, column: str, threshold: float) -
 
 
 def _discrete_area_bad_spots(leftover: pd.DataFrame, column: str, threshold: float) -> pd.DataFrame:
-    """Rule 3: leftover poor samples covering >= 1 km², not a 200 m consecutive stretch."""
+    """Rule 3: leftover poor samples covering >= 1 km², not a 200 m consecutive stretch.
+
+    Cluster on a ~1 km grid and only keep compact patches (not a thin road network).
+    """
     if leftover.empty:
         return pd.DataFrame()
     g = leftover.reset_index(drop=True)
@@ -702,7 +707,7 @@ def _discrete_area_bad_spots(leftover: pd.DataFrame, column: str, threshold: flo
     for i, cell in enumerate(keys):
         cell_idx.setdefault(cell, []).append(i)
     cells = set(cell_idx)
-    neigh = ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1))
+    neigh = ((1, 0), (-1, 0), (0, 1), (0, -1))
     seen: set[tuple[int, int]] = set()
     rows = []
     for cell in cells:
@@ -716,13 +721,32 @@ def _discrete_area_bad_spots(leftover: pd.DataFrame, column: str, threshold: flo
             for dy, dx in neigh:
                 nb = (y + dy, x + dx)
                 if nb in cells and nb not in seen:
+                    trial = group + [nb]
+                    idx_trial = [i for c in trial for i in cell_idx[c]]
+                    trial_part = g.iloc[idx_trial]
+                    span_lat_km = (
+                        float(trial_part["Latitude"].max()) - float(trial_part["Latitude"].min())
+                    ) * 111.32
+                    span_lon_km = (
+                        float(trial_part["Longitude"].max()) - float(trial_part["Longitude"].min())
+                    ) * _km_per_deg_lon(float(trial_part["Latitude"].mean()))
+                    if max(span_lat_km, span_lon_km) > BAD_SPOT_DISCRETE_MAX_SPAN_KM:
+                        continue
                     seen.add(nb)
                     queue.append(nb)
                     group.append(nb)
         idx = [i for c in group for i in cell_idx[c]]
         part = g.iloc[idx]
+        if len(part) < BAD_SPOT_DISCRETE_MIN_POOR:
+            continue
         area = _hull_area_km2(part["Longitude"].to_numpy(), part["Latitude"].to_numpy())
-        if area < BAD_SPOT_DISCRETE_AREA_KM2:
+        span_lat_km = (float(part["Latitude"].max()) - float(part["Latitude"].min())) * 111.32
+        span_lon_km = (float(part["Longitude"].max()) - float(part["Longitude"].min())) * _km_per_deg_lon(float(part["Latitude"].mean()))
+        bbox_area = span_lat_km * span_lon_km
+        # A thin road of leftover holes is not a 1 km² area.
+        if min(span_lat_km, span_lon_km) < 0.45:
+            continue
+        if area < BAD_SPOT_DISCRETE_AREA_KM2 and bbox_area < BAD_SPOT_DISCRETE_AREA_KM2:
             continue
         rows.append(
             _spot_from_points(
@@ -731,7 +755,7 @@ def _discrete_area_bad_spots(leftover: pd.DataFrame, column: str, threshold: flo
                 threshold,
                 kind="discrete",
                 length_m=np.nan,
-                area_km2=area,
+                area_km2=max(area, bbox_area),
             )
         )
     spots = pd.DataFrame(rows)
@@ -782,37 +806,48 @@ def find_bad_spots(df: pd.DataFrame, column: str, max_spots: int = BAD_SPOT_MAX)
     return spots
 
 
-def _ellipse_from_points(lons: np.ndarray, lats: np.ndarray, min_km: float = 0.28, max_km: float = 8.0) -> tuple[float, float, float, float, float]:
-    """Tight oval around a consecutive poor stretch."""
+def _ellipse_from_points(
+    lons: np.ndarray,
+    lats: np.ndarray,
+    min_km: float = 1.6,
+    max_km: float = 6.0,
+    length_km: float | None = None,
+) -> tuple[float, float, float, float, float]:
+    """Oval around a consecutive poor stretch; sized from the actual span/length."""
     lon0 = float(np.mean(lons))
     lat0 = float(np.mean(lats))
     km_lon = _km_per_deg_lon(lat0)
-    if len(lons) < 8:
-        lon_span = max(float(np.max(lons) - np.min(lons)) if len(lons) else 0.0, min_km / km_lon)
-        lat_span = max(float(np.max(lats) - np.min(lats)) if len(lats) else 0.0, min_km / 111.32)
-        width_deg = min(lon_span * 1.35, max_km / km_lon)
-        height_deg = min(lat_span * 1.35, max_km / 111.32)
-        return lon0, lat0, width_deg, height_deg, 0.0
-    x = (lons - lon0) * km_lon
-    y = (lats - lat0) * 111.32
-    cov = np.cov(np.vstack([x, y]))
-    eigvals, eigvecs = np.linalg.eigh(cov)
-    order = np.argsort(eigvals)[::-1]
-    eigvals = np.clip(eigvals[order], 0.01, None)
-    eigvecs = eigvecs[:, order]
-    width_km = min(max(1.6 * 2.0 * np.sqrt(eigvals[0]), min_km), max_km)
-    height_km = min(max(1.6 * 2.0 * np.sqrt(eigvals[1]), min_km * 0.55), max_km * 0.75)
-    angle = float(np.degrees(np.arctan2(eigvecs[1, 0], eigvecs[0, 0])))
+    span_lon_km = float(np.max(lons) - np.min(lons)) * km_lon if len(lons) else 0.0
+    span_lat_km = float(np.max(lats) - np.min(lats)) * 111.32 if len(lats) else 0.0
+    angle = 0.0
+    if len(lons) >= 8:
+        x = (lons - lon0) * km_lon
+        y = (lats - lat0) * 111.32
+        cov = np.cov(np.vstack([x, y]))
+        eigvals, eigvecs = np.linalg.eigh(cov)
+        order = np.argsort(eigvals)[::-1]
+        eigvecs = eigvecs[:, order]
+        angle = float(np.degrees(np.arctan2(eigvecs[1, 0], eigvecs[0, 0])))
+    width_km = max(span_lon_km * 1.4, min_km)
+    height_km = max(span_lat_km * 1.4, min_km * 0.7)
+    if length_km:
+        major = max(width_km, height_km, float(length_km) * 1.15)
+        if width_km >= height_km:
+            width_km = major
+        else:
+            height_km = major
+    width_km = min(width_km, max_km)
+    height_km = min(height_km, max_km)
     return lon0, lat0, width_km / km_lon, height_km / 111.32, angle
 
 
-def _circle_from_bbox(lon_min: float, lon_max: float, lat_min: float, lat_max: float, min_diameter_km: float = 1.6) -> tuple[float, float, float, float]:
+def _circle_from_bbox(lon_min: float, lon_max: float, lat_min: float, lat_max: float, min_diameter_km: float = 2.8, max_diameter_km: float = 5.5) -> tuple[float, float, float, float]:
     """Large circle covering a discrete poor area (>= 1 km²)."""
     lat0 = (lat_min + lat_max) / 2.0
     lon0 = (lon_min + lon_max) / 2.0
     span_lon_km = (lon_max - lon_min) * _km_per_deg_lon(lat0)
     span_lat_km = (lat_max - lat_min) * 111.32
-    diameter_km = max(float(np.hypot(span_lon_km, span_lat_km) * 1.08), min_diameter_km)
+    diameter_km = float(np.clip(max(span_lon_km, span_lat_km) * 1.25, min_diameter_km, max_diameter_km))
     return lon0, lat0, diameter_km / _km_per_deg_lon(lat0), diameter_km / 111.32
 
 
@@ -894,6 +929,13 @@ def plot_bad_spot_map(
     ax.set_xlim(lon_min, lon_max)
     ax.set_ylim(lat_min, lat_max)
     ax.set_aspect("equal", adjustable="box")
+    map_lat_km = (lat_max - lat_min) * 111.32
+    map_lon_km = (lon_max - lon_min) * _km_per_deg_lon((lat_min + lat_max) / 2.0)
+    map_span_km = min(map_lat_km, map_lon_km)
+    consec_min_km = max(6.0, map_span_km * 0.07)
+    consec_max_km = max(10.0, map_span_km * 0.12)
+    disc_min_km = max(10.0, map_span_km * 0.11)
+    disc_max_km = max(14.0, map_span_km * 0.16)
     ax.legend(
         handles=handles,
         title=legend_title,
@@ -918,41 +960,40 @@ def plot_bad_spot_map(
                     float(spot["lon_max"]),
                     float(spot["lat_min"]),
                     float(spot["lat_max"]),
+                    min_diameter_km=disc_min_km,
+                    max_diameter_km=disc_max_km,
                 )
-                ax.add_patch(
-                    Ellipse(
-                        (cx, cy),
-                        width=w,
-                        height=h,
-                        angle=0.0,
-                        fill=False,
-                        edgecolor="#6C3483",
-                        linestyle="-",
-                        linewidth=2.4,
-                        zorder=5,
-                    )
-                )
+                angle = 0.0
+                edge = "#6C3483"
+                style = "-"
+                lw = 2.8
             else:
+                length_km = None if pd.isna(spot.get("length_m", np.nan)) else float(spot["length_m"]) / 1000.0
                 if box_poor.empty:
-                    cx, cy, w, h, angle = float(spot["lon"]), float(spot["lat"]), 0.004, 0.0035, 0.0
+                    cx, cy, w, h, angle = float(spot["lon"]), float(spot["lat"]), 0.012, 0.010, 0.0
                 else:
                     cx, cy, w, h, angle = _ellipse_from_points(
                         box_poor["Longitude"].to_numpy(),
                         box_poor["Latitude"].to_numpy(),
+                        min_km=consec_min_km,
+                        max_km=consec_max_km,
+                        length_km=length_km,
                     )
-                ax.add_patch(
-                    Ellipse(
-                        (cx, cy),
-                        width=w,
-                        height=h,
-                        angle=angle,
-                        fill=False,
-                        edgecolor="#C0392B",
-                        linestyle=(0, (6, 3)),
-                        linewidth=1.8,
-                        zorder=5,
-                    )
+                edge = "#C0392B"
+                style = (0, (7, 3))
+                lw = 2.4
+            ax.add_patch(
+                Ellipse(
+                    (cx, cy), width=w, height=h, angle=angle, fill=False,
+                    edgecolor="white", linestyle="-", linewidth=lw + 2.4, zorder=5, alpha=0.95,
                 )
+            )
+            ax.add_patch(
+                Ellipse(
+                    (cx, cy), width=w, height=h, angle=angle, fill=False,
+                    edgecolor=edge, linestyle=style, linewidth=lw, zorder=6,
+                )
+            )
             ax.text(
                 cx,
                 cy,
@@ -962,7 +1003,7 @@ def plot_bad_spot_map(
                 color="#1B1B1B",
                 ha="center",
                 va="center",
-                zorder=6,
+                zorder=7,
                 bbox={
                     "boxstyle": "round,pad=0.18",
                     "facecolor": "#FCF3CF",
