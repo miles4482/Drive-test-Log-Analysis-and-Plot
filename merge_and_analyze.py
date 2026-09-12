@@ -531,9 +531,8 @@ BAD_SPOT_MAP_POOR_SHARE = 0.75  # circled view must be mostly poor (pink/red for
 BAD_SPOT_CONSEC_MAX_SPAN_KM = 2.0  # do not wrap a winding city route in one oval
 BAD_SPOT_ZOOM_PAD_KM = 0.70
 BAD_SPOT_ZOOM_MIN_KM = 1.2
-BAD_SPOT_OUTLINE_PAD = 1.55  # oval must enclose the whole poor stretch, including corners/tails
-BAD_SPOT_OUTLINE_MIN_MINOR_KM = 0.38
-BAD_SPOT_CORRIDOR_KM = 0.22  # extend along the same road, not onto a crossing grid
+BAD_SPOT_OUTLINE_PAD = 1.45  # with sqrt(2), oval covers bbox corners / red tails
+BAD_SPOT_OUTLINE_MIN_MINOR_KM = 0.50
 BAD_SPOT_ZOOM_COLS = 4
 BAD_SPOT_MAX_ZOOMS = 16
 BAD_SPOT_MAX = BAD_SPOT_MAX_CONSEC + BAD_SPOT_MAX_DISCRETE
@@ -615,61 +614,27 @@ def _path_length_m(lats: np.ndarray, lons: np.ndarray) -> float:
     return float(np.sum(_equirect_km(lats[:-1], lons[:-1], lats[1:], lons[1:])) * 1000.0)
 
 
-def _line_offset_km(lat: float, lon: float, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Perpendicular distance from a point to the infinite line through two samples."""
-    km_lon = _km_per_deg_lon((lat + lat1 + lat2) / 3.0)
-    x = (lon - lon1) * km_lon
-    y = (lat - lat1) * 111.32
-    x2 = (lon2 - lon1) * km_lon
-    y2 = (lat2 - lat1) * 111.32
-    denom = x2 * x2 + y2 * y2
-    if denom < 1e-12:
-        return float(np.hypot(x, y))
-    t = (x * x2 + y * y2) / denom
-    return float(np.hypot(x - t * x2, y - t * y2))
-
-
 def _covering_ellipse(
     lons: np.ndarray,
     lats: np.ndarray,
     *,
     pad: float = BAD_SPOT_OUTLINE_PAD,
     min_minor_km: float = BAD_SPOT_OUTLINE_MIN_MINOR_KM,
-    min_major_km: float = 0.50,
+    min_major_km: float = 0.55,
 ) -> tuple[float, float, float, float, float]:
-    """Oriented oval that contains every sample, with margin for red/magenta tails."""
+    """Axis-aligned oval that contains the whole poor stretch, including corners and red tails."""
     lons = np.asarray(lons, dtype=float)
     lats = np.asarray(lats, dtype=float)
     lat0 = float((np.min(lats) + np.max(lats)) / 2.0)
     lon0 = float((np.min(lons) + np.max(lons)) / 2.0)
     km_lon = _km_per_deg_lon(lat0)
-    x = (lons - lon0) * km_lon
-    y = (lats - lat0) * 111.32
-    angle = 0.0
-    if len(lons) >= 4:
-        cov = np.cov(np.vstack([x, y]))
-        if np.isfinite(cov).all() and cov.shape == (2, 2):
-            eigvals, eigvecs = np.linalg.eigh(cov)
-            if np.isfinite(eigvals).all() and np.isfinite(eigvecs).all():
-                order = np.argsort(eigvals)[::-1]
-                eigvecs = eigvecs[:, order]
-                angle = float(np.degrees(np.arctan2(eigvecs[1, 0], eigvecs[0, 0])))
-                proj = np.column_stack([x, y]) @ eigvecs
-                p0_mid = (float(proj[:, 0].min()) + float(proj[:, 0].max())) / 2.0
-                p1_mid = (float(proj[:, 1].min()) + float(proj[:, 1].max())) / 2.0
-                shift = eigvecs @ np.array([p0_mid, p1_mid], dtype=float)
-                lon0 = lon0 + float(shift[0]) / km_lon
-                lat0 = lat0 + float(shift[1]) / 111.32
-                half_a = (float(proj[:, 0].max()) - float(proj[:, 0].min())) / 2.0 * pad
-                half_b = (float(proj[:, 1].max()) - float(proj[:, 1].min())) / 2.0 * pad
-                half_a = max(half_a, min_major_km / 2.0)
-                half_b = max(half_b, min_minor_km / 2.0)
-                return lon0, lat0, 2.0 * half_a, 2.0 * half_b, angle
-    # Axis-aligned fallback: scale by sqrt(2) so rectangle corners stay inside.
+    span_lon_km = (float(np.max(lons)) - float(np.min(lons))) * km_lon
+    span_lat_km = (float(np.max(lats)) - float(np.min(lats))) * 111.32
+    # Inscribed ellipse (width=bbox) leaves diagonal tails outside. Scale so corners stay in.
     cover = float(np.sqrt(2.0)) * pad / 1.15
-    width_km = max((float(np.max(x)) - float(np.min(x))) * cover, min_major_km)
-    height_km = max((float(np.max(y)) - float(np.min(y))) * cover, min_minor_km)
-    return lon0, lat0, width_km, height_km, angle
+    width_km = max(span_lon_km * cover, min_major_km)
+    height_km = max(span_lat_km * cover, min_minor_km)
+    return lon0, lat0, width_km, height_km, 0.0
 
 
 def _outline_fields(lons: np.ndarray, lats: np.ndarray, kind: str) -> dict:
@@ -685,46 +650,6 @@ def _outline_fields(lons: np.ndarray, lats: np.ndarray, kind: str) -> dict:
         "outline_height_km": float(height_km),
         "outline_angle": float(angle),
     }
-
-
-def _extend_along_corridor(
-    plat: np.ndarray,
-    plon: np.ndarray,
-    poor_local: np.ndarray,
-    i: int,
-    j: int,
-    max_off_km: float = BAD_SPOT_CORRIDOR_KM,
-    max_span_km: float = BAD_SPOT_CONSEC_MAX_SPAN_KM,
-) -> tuple[int, int]:
-    """Keep going along the same poor road so the oval can cover the whole red stretch."""
-    lat1 = float(plat[poor_local[i]])
-    lon1 = float(plon[poor_local[i]])
-    lat2 = float(plat[poor_local[j]])
-    lon2 = float(plon[poor_local[j]])
-    left, right = i, j
-    n = len(poor_local)
-    changed = True
-    while changed:
-        changed = False
-        if left > 0:
-            k = poor_local[left - 1]
-            sl = poor_local[left - 1 : right + 1]
-            if (
-                _span_km(plat[sl], plon[sl]) <= max_span_km
-                and _line_offset_km(float(plat[k]), float(plon[k]), lat1, lon1, lat2, lon2) <= max_off_km
-            ):
-                left -= 1
-                changed = True
-        if right + 1 < n:
-            k = poor_local[right + 1]
-            sl = poor_local[left : right + 2]
-            if (
-                _span_km(plat[sl], plon[sl]) <= max_span_km
-                and _line_offset_km(float(plat[k]), float(plon[k]), lat1, lon1, lat2, lon2) <= max_off_km
-            ):
-                right += 1
-                changed = True
-    return left, right
 
 
 def _spot_from_points(
@@ -876,25 +801,18 @@ def _compact_consecutive_spots(
             poor_chunk["Latitude"].to_numpy(), poor_chunk["Longitude"].to_numpy()
         )
         if length_m >= BAD_SPOT_MIN_CONSEC_M:
-            i, j = _extend_along_corridor(plat, plon, poor_local, i, j)
-            sl = poor_local[i : j + 1]
-            poor_chunk = part.iloc[sl]
-            length_m = _path_length_m(
-                poor_chunk["Latitude"].to_numpy(), poor_chunk["Longitude"].to_numpy()
+            spot = _spot_from_points(
+                poor_chunk,
+                column,
+                threshold,
+                kind="consecutive",
+                length_m=length_m,
+                area_km2=_hull_area_km2(
+                    poor_chunk["Longitude"].to_numpy(),
+                    poor_chunk["Latitude"].to_numpy(),
+                ),
             )
-            rows.append(
-                _spot_from_points(
-                    poor_chunk,
-                    column,
-                    threshold,
-                    kind="consecutive",
-                    length_m=length_m,
-                    area_km2=_hull_area_km2(
-                        poor_chunk["Longitude"].to_numpy(),
-                        poor_chunk["Latitude"].to_numpy(),
-                    ),
-                )
-            )
+            rows.append(spot)
             used_local[int(sl[0]) : int(sl[-1]) + 1] = True
             i = j + 1
         else:
