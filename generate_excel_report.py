@@ -63,7 +63,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.23"
+REPORT_VERSION = "1.24"
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
@@ -538,7 +538,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     notes = [
         "Cover \u2014 dataset and KPI tables on the left, IDLE Mode plots on the right, Active Mode section at the bottom.",
         "RSRP / RSRQ / SINR \u2014 Idle V2.0 scanner: all-band and L900 / L1800 / L2100 / L2600 IDLE maps (best RSRP per time, no site pies); Active Mode stays blank until those logs are provided.",
-        "Bad Spot Analysis \u2014 first all-band IDLE maps (same as the RSRP / RSRQ / SINR top maps), zoomed local inspection, thin black outlines, no numbers.",
+        "Bad Spot Analysis \u2014 first all-band IDLE maps (same as the RSRP / RSRQ / SINR top maps); only magenta/red RSRP (below -115 dBm) and matching RSRQ/SINR poor colours; zoomed local inspection, thin black outlines, no numbers.",
         "RSRP vs KPIs \u2014 RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter with trend.",
         "Sample Log \u2014 evenly spaced subset of the merged samples (full merged scanner log stays in output/Bogura_merged.csv.gz).",
         "These files are IDLE Mode. Active Mode coverage maps will be added when those logs are provided.",
@@ -638,7 +638,7 @@ def _bad_spot_table_rows(spots: pd.DataFrame) -> list[list]:
                 float(s["lon"]),
                 int(s["n"]),
                 int(s["n_poor"]),
-                float(s["poor_pct"]),
+                float(s["map_poor_share"]) if "map_poor_share" in s.index and pd.notna(s.get("map_poor_share")) else float(s["poor_pct"]),
                 float(s["mean"]),
                 float(s["mean_rsrp"]),
                 float(s["mean_rsrq"]),
@@ -680,15 +680,17 @@ def build_bad_spot_sheet(
         4,
         1,
         "Bad spots are taken from the first all-band IDLE map on the RSRP / RSRQ / SINR sheets (best server, not band maps). "
-        "RSRP poor if \u2264 -115 dBm, RSRQ poor if \u2264 -20 dB, SINR poor if \u2264 0 dB. "
-        "Each location is inspected in a zoomed view. Consecutive poor coverage of at least 200 m is a thin black dashed oval. "
+        "RSRP is poor only below -115 dBm (magenta and red; yellow is not a bad-spot colour). "
+        "RSRQ is poor below -20 dB (red). SINR is poor below 0 dB (orange and red). "
+        "A location is circled only when that zoomed view is mostly those poor colours. "
+        "Consecutive poor coverage of at least 200 m is a thin black dashed oval. "
         "A discrete patch of at least 1 km\u00b2 that is also poor on that coverage map is a thin black dotted circle. Numbers are not drawn on the maps.",
         size=11,
         wrap=True,
     )
-    ws.row_dimensions[4].height = 18
-    ws.row_dimensions[5].height = 18
-    ws.row_dimensions[6].height = 18
+    ws.row_dimensions[4].height = 22
+    ws.row_dimensions[5].height = 22
+    ws.row_dimensions[6].height = 22
 
     maps = [
         (8, "RSRP coverage map \u2014 IDLE Mode  |  bad spots", rsrp_map, 34),
@@ -759,7 +761,8 @@ def build_bad_spot_sheet(
         note_row,
         1,
         "Overview maps match the first all-band RSRP / RSRQ / SINR coverage maps. "
-        "Zoomed panels inspect each poor stretch locally. Outlines are thin black; map numbers are omitted so the coverage stays visible.",
+        "Zoomed panels inspect each poor stretch locally and keep magenta/red (or the matching RSRQ/SINR poor colours) on top. "
+        "Blue/green city grids are not circled. Outlines are thin black; map numbers are omitted so the coverage stays visible.",
         size=9,
         wrap=True,
     )

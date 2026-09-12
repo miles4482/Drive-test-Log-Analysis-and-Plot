@@ -343,13 +343,19 @@ def _draw_coverage_points(
     labels: list[str],
     colors: list[str],
     max_points: int = 25000,
+    *,
+    poor_on_top: bool = False,
 ) -> None:
-    """Same point style as the first all-band RSRP / RSRQ / SINR maps."""
+    """Same point style as the first all-band RSRP / RSRQ / SINR maps.
+
+    poor_on_top=True draws worst bins last so magenta/red stay visible in zooms.
+    """
     if geo.empty:
         return
     sample = downsample(geo, max_points=max_points)
     classes = class_series.reindex(sample.index)
-    for label, color in zip(reversed(labels), reversed(colors)):
+    order = list(zip(labels, colors)) if poor_on_top else list(zip(reversed(labels), reversed(colors)))
+    for label, color in order:
         part = sample[classes == label]
         if part.empty:
             continue
@@ -521,7 +527,8 @@ BAD_SPOT_MAX_CONSEC = 30
 BAD_SPOT_MAX_DISCRETE = 15
 BAD_SPOT_DISCRETE_MIN_POOR = 60
 BAD_SPOT_DISCRETE_MAX_SPAN_KM = 3.2
-BAD_SPOT_MAP_POOR_SHARE = 0.30  # discrete area must look poor on the all-band map
+BAD_SPOT_MAP_POOR_SHARE = 0.75  # circled view must be mostly poor (pink/red for RSRP)
+BAD_SPOT_CONSEC_MAX_SPAN_KM = 2.0  # do not wrap a winding city route in one oval
 BAD_SPOT_ZOOM_PAD_KM = 1.3
 BAD_SPOT_ZOOM_MIN_KM = 2.4
 BAD_SPOT_ZOOM_COLS = 4
@@ -546,8 +553,9 @@ def _equirect_km(lat1, lon1, lat2, lon2) -> np.ndarray:
 
 
 def _poor_mask(values: pd.Series, threshold: float) -> pd.Series:
+    """Poor samples are strictly below the KPI threshold (RSRP pink+red: X < -115)."""
     v = pd.to_numeric(values, errors="coerce")
-    return v.notna() & (v <= threshold)
+    return v.notna() & (v < threshold)
 
 
 def _prepare_track(df: pd.DataFrame, column: str) -> pd.DataFrame:
@@ -642,6 +650,136 @@ def _spot_from_points(
     }
 
 
+def _span_km(lats: np.ndarray, lons: np.ndarray) -> float:
+    if len(lats) == 0:
+        return 0.0
+    lat0 = float(np.mean(lats))
+    return max(
+        (float(np.max(lats)) - float(np.min(lats))) * 111.32,
+        (float(np.max(lons)) - float(np.min(lons))) * _km_per_deg_lon(lat0),
+    )
+
+
+def _bbox_poor_share_np(
+    tlat: np.ndarray,
+    tlon: np.ndarray,
+    tpoor: np.ndarray,
+    lat_min: float,
+    lat_max: float,
+    lon_min: float,
+    lon_max: float,
+    pad: float = 0.15,
+) -> float:
+    """Share of all-band samples in a slightly padded box that are poor."""
+    dlat = max(lat_max - lat_min, 1e-5)
+    dlon = max(lon_max - lon_min, 1e-5)
+    in_box = (
+        (tlat >= lat_min - pad * dlat)
+        & (tlat <= lat_max + pad * dlat)
+        & (tlon >= lon_min - pad * dlon)
+        & (tlon <= lon_max + pad * dlon)
+    )
+    n = int(np.count_nonzero(in_box))
+    if n == 0:
+        return 0.0
+    return float(np.count_nonzero(tpoor & in_box) / n)
+
+
+def _compact_consecutive_spots(
+    track: pd.DataFrame,
+    start: int,
+    end: int,
+    column: str,
+    threshold: float,
+    tlat: np.ndarray,
+    tlon: np.ndarray,
+    tpoor: np.ndarray,
+) -> tuple[list[dict], np.ndarray]:
+    """Split a long poor run so each oval stays on a mostly-poor stretch.
+
+    A 3 km winding route through a city must not become one giant box that also
+    contains good (blue/green) streets. Grow the longest prefix whose box is
+    still mostly below the KPI threshold, then continue along the path.
+    """
+    part = track.iloc[start:end]
+    poor_local = np.flatnonzero(_poor_mask(part[column], threshold).to_numpy())
+    used_local = np.zeros(end - start, dtype=bool)
+    if len(poor_local) < 2:
+        return [], used_local
+    plat = part["Latitude"].to_numpy(dtype=float)
+    plon = part["Longitude"].to_numpy(dtype=float)
+
+    def ok(i: int, j: int) -> bool:
+        sl = poor_local[i : j + 1]
+        if _span_km(plat[sl], plon[sl]) > BAD_SPOT_CONSEC_MAX_SPAN_KM:
+            return False
+        share = _bbox_poor_share_np(
+            tlat,
+            tlon,
+            tpoor,
+            float(plat[sl].min()),
+            float(plat[sl].max()),
+            float(plon[sl].min()),
+            float(plon[sl].max()),
+        )
+        return share >= BAD_SPOT_MAP_POOR_SHARE
+
+    def longest_end(i: int) -> int | None:
+        n = len(poor_local)
+        if i >= n - 1 or not ok(i, i + 1):
+            return None
+        lo = i + 1
+        hi = n - 1
+        step = 1
+        while lo + step <= hi and ok(i, lo + step):
+            lo = lo + step
+            step *= 2
+        bound = min(lo + step, hi)
+        if ok(i, bound):
+            return bound
+        left, right = lo, bound
+        while left + 1 < right:
+            mid = (left + right) // 2
+            if ok(i, mid):
+                left = mid
+            else:
+                right = mid
+        return left
+
+    rows: list[dict] = []
+    i = 0
+    nloc = len(poor_local)
+    while i < nloc:
+        j = longest_end(i)
+        if j is None:
+            i += 1
+            continue
+        sl = poor_local[i : j + 1]
+        poor_chunk = part.iloc[sl]
+        length_m = _path_length_m(
+            poor_chunk["Latitude"].to_numpy(), poor_chunk["Longitude"].to_numpy()
+        )
+        if length_m >= BAD_SPOT_MIN_CONSEC_M:
+            rows.append(
+                _spot_from_points(
+                    poor_chunk,
+                    column,
+                    threshold,
+                    kind="consecutive",
+                    length_m=length_m,
+                    area_km2=_hull_area_km2(
+                        poor_chunk["Longitude"].to_numpy(),
+                        poor_chunk["Latitude"].to_numpy(),
+                    ),
+                )
+            )
+            used_local[int(sl[0]) : int(sl[-1]) + 1] = True
+            i = j + 1
+        else:
+            i += 1
+    return rows, used_local
+
+
 def _consecutive_bad_spots(track: pd.DataFrame, column: str, threshold: float) -> tuple[pd.DataFrame, np.ndarray]:
     """Rule 2: consecutive poor path length >= 200 m. Returns (spots, used-row mask)."""
     n = len(track)
@@ -694,24 +832,16 @@ def _consecutive_bad_spots(track: pd.DataFrame, column: str, threshold: float) -
         else:
             merged.append([start, end])
 
-    rows = []
+    tlat = track["Latitude"].to_numpy(dtype=float)
+    tlon = track["Longitude"].to_numpy(dtype=float)
+    tpoor = poor
+    rows: list[dict] = []
     for start, end in merged:
-        part = track.iloc[start:end]
-        poor_part = part.loc[_poor_mask(part[column], threshold)]
-        length_m = _path_length_m(poor_part["Latitude"].to_numpy(), poor_part["Longitude"].to_numpy())
-        if length_m < BAD_SPOT_MIN_CONSEC_M:
-            continue
-        used[start:end] = True
-        rows.append(
-            _spot_from_points(
-                poor_part,
-                column,
-                threshold,
-                kind="consecutive",
-                length_m=length_m,
-                area_km2=_hull_area_km2(poor_part["Longitude"].to_numpy(), poor_part["Latitude"].to_numpy()),
-            )
+        compact, used_local = _compact_consecutive_spots(
+            track, start, end, column, threshold, tlat, tlon, tpoor
         )
+        used[start:end] |= used_local
+        rows.extend(compact)
     spots = pd.DataFrame(rows)
     if not spots.empty:
         spots = spots.sort_values("length_m", ascending=False).head(BAD_SPOT_MAX_CONSEC).reset_index(drop=True)
@@ -836,19 +966,32 @@ def find_bad_spots(df: pd.DataFrame, column: str, max_spots: int = BAD_SPOT_MAX)
     spots["mean_sinr"] = [e["mean_sinr"] for e in extras]
     spots["top_cell"] = [e["top_cell"] for e in extras]
     spots["map_poor_share"] = [_map_poor_share(track, row, column, threshold) for _, row in spots.iterrows()]
+    visible = spots["map_poor_share"] >= BAD_SPOT_MAP_POOR_SHARE
+    spots = spots.loc[visible].reset_index(drop=True)
+    if spots.empty:
+        return spots
+    spots["spot"] = np.arange(1, len(spots) + 1)
     return spots
 
 
 def _map_poor_share(df: pd.DataFrame, spot: pd.Series, column: str, threshold: float) -> float:
-    """Share of all-band best-server samples in the spot box that are poor."""
+    """Share of all-band best-server samples in the (padded) spot box that are poor."""
+    lat_min = float(spot["lat_min"])
+    lat_max = float(spot["lat_max"])
+    lon_min = float(spot["lon_min"])
+    lon_max = float(spot["lon_max"])
+    dlat = max(lat_max - lat_min, 1e-5)
+    dlon = max(lon_max - lon_min, 1e-5)
     box = df[
-        df["Latitude"].between(spot["lat_min"], spot["lat_max"])
-        & df["Longitude"].between(spot["lon_min"], spot["lon_max"])
+        df["Latitude"].between(lat_min - 0.15 * dlat, lat_max + 0.15 * dlat)
+        & df["Longitude"].between(lon_min - 0.15 * dlon, lon_max + 0.15 * dlon)
     ]
-    vals = pd.to_numeric(box[column], errors="coerce").dropna()
-    if vals.empty:
+    vals = pd.to_numeric(box[column], errors="coerce")
+    mask = _poor_mask(vals, threshold)
+    n = int(vals.notna().sum())
+    if n == 0:
         return 0.0
-    return float((vals <= threshold).mean())
+    return float(mask.sum() / n)
 
 
 def _ellipse_from_points(
@@ -1044,7 +1187,15 @@ def plot_bad_spot_zoom_grid(
             geo["Longitude"].between(zext[0], zext[1])
             & geo["Latitude"].between(zext[2], zext[3])
         ]
-        _draw_coverage_points(ax, local, class_series.reindex(local.index), labels, colors, max_points=8000)
+        _draw_coverage_points(
+            ax,
+            local,
+            class_series.reindex(local.index),
+            labels,
+            colors,
+            max_points=8000,
+            poor_on_top=True,
+        )
         ax.set_xlim(zext[0], zext[1])
         ax.set_ylim(zext[2], zext[3])
         ax.set_aspect("equal", adjustable="box")
