@@ -41,8 +41,12 @@ from merge_and_analyze import (
     MAP_RSRQ_LABELS,
     MAP_SINR_COLORS,
     MAP_SINR_LABELS,
+    REPORT_LAYERS,
+    coverage_extent,
     downsample,
     earfcn_to_band,
+    earfcn_to_layer,
+    filter_by_layer,
     find_bad_spots,
     plot_rsrp_bad_spot_map,
     plot_rsrp_coverage_map,
@@ -57,7 +61,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.16"
+REPORT_VERSION = "1.17"
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
@@ -531,7 +535,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     write_cell(ws, 18, 1, "How to read this workbook", size=14, bold=True)
     notes = [
         "Cover — dataset and KPI tables on the left, IDLE Mode plots on the right, Active Mode section at the bottom.",
-        "RSRP / RSRQ / SINR — IDLE Mode coverage map on the left with outline-only site pies; Active Mode map on the right when those logs are provided.",
+        "RSRP / RSRQ / SINR — all-band IDLE map on the left, then L900 / L1800 / L2100 / L2600 IDLE maps; Active Mode stays blank until those logs are provided.",
         "Bad Spot Analysis — every dense poor stretch on the full IDLE maps is circled and numbered. Physical sites use outline-only three-arm pies (most-common azimuth per sector).",
         "RSRP vs KPIs — RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter with trend.",
         "Sample Log — evenly spaced subset of the merged samples (full 1.07M rows stay in output/Bogura_merged.csv.gz).",
@@ -570,16 +574,45 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     section_bar(ws, 42, "Active Mode", 1, 20)
 
 
-def build_kpi_sheet(ws, df, name, color, unit, map_path: Path | None, placeholder_path: Path | None = None):
+def build_kpi_sheet(
+    ws,
+    name: str,
+    unit: str,
+    map_path: Path | None,
+    placeholder_path: Path | None,
+    band_maps: dict[str, Path],
+):
     last_col = 18
+    em = "\u2014"
     banner(ws, f"  {name} Report", f"  Unit: {unit}  |  IDLE Mode coverage map  |  Gridlines off", last_col=last_col)
     set_widths(ws, {get_column_letter(i): 14 for i in range(1, last_col + 1)})
-    section_bar(ws, 4, f"{name} coverage map — IDLE Mode", 1, 8)
-    section_bar(ws, 4, f"{name} coverage map — Active Mode", 10, 18)
+    section_bar(ws, 4, f"{name} coverage map {em} IDLE Mode", 1, 8)
+    section_bar(ws, 4, f"{name} coverage map {em} Active Mode", 10, 18)
     if map_path and map_path.exists():
         add_image(ws, map_path, "A6", width=620, height=520)
     if placeholder_path and placeholder_path.exists():
         add_image(ws, placeholder_path, "J6", width=520, height=360)
+
+    start_row = 34
+    block = 28
+    for i, layer in enumerate(REPORT_LAYERS):
+        row = start_row + i * block
+        section_bar(ws, row, f"{name} coverage map {em} IDLE Mode_{layer}", 1, 8)
+        section_bar(ws, row, f"{name} coverage map {em} Active Mode_{layer}", 10, 18)
+        band_path = band_maps.get(layer)
+        if band_path and band_path.exists():
+            add_image(ws, band_path, f"A{row + 2}", width=560, height=470)
+        note_row = row + 12
+        ws.merge_cells(start_row=note_row, start_column=10, end_row=note_row + 1, end_column=18)
+        write_cell(
+            ws,
+            note_row,
+            10,
+            "Log file will be provided later",
+            size=11,
+            color="7F8C8D",
+            align="center",
+        )
 
 
 def _bad_spot_table_rows(spots: pd.DataFrame) -> list[list]:
@@ -1056,11 +1089,29 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
     if "Band" not in df.columns:
         df = df.copy()
         df["Band"] = df["DL EARFCN"].map(earfcn_to_band)
+    if "Layer" not in df.columns:
+        df = df.copy()
+        df["Layer"] = pd.to_numeric(df["DL EARFCN"], errors="coerce").map(earfcn_to_layer)
 
     placeholder = save_active_placeholder(PLOTS_DIR / "active_mode_placeholder.png")
+    extent = coverage_extent(df)
     rsrp_map = plot_rsrp_coverage_map(df, PLOTS_DIR / "excel_route_rsrp.png")
     rsrq_map = plot_rsrq_coverage_map(df, PLOTS_DIR / "excel_route_rsrq.png")
     sinr_map = plot_sinr_coverage_map(df, PLOTS_DIR / "excel_route_sinr.png")
+    rsrp_band: dict[str, Path] = {}
+    rsrq_band: dict[str, Path] = {}
+    sinr_band: dict[str, Path] = {}
+    for layer in REPORT_LAYERS:
+        part = filter_by_layer(df, layer)
+        rsrp_band[layer] = plot_rsrp_coverage_map(
+            part, PLOTS_DIR / f"excel_route_rsrp_{layer}.png", layer=layer, extent=extent
+        )
+        rsrq_band[layer] = plot_rsrq_coverage_map(
+            part, PLOTS_DIR / f"excel_route_rsrq_{layer}.png", layer=layer, extent=extent
+        )
+        sinr_band[layer] = plot_sinr_coverage_map(
+            part, PLOTS_DIR / f"excel_route_sinr_{layer}.png", layer=layer, extent=extent
+        )
     scatter_sinr = save_rsrp_scatter(df, "SINR", PLOTS_DIR / "excel_scatter_rsrp_sinr.png", "SINR (dB)", "RSRP vs SINR", ylim=(-10, 32))
     scatter_rsrq = save_rsrp_scatter(df, "RSRQ", PLOTS_DIR / "excel_scatter_rsrp_rsrq.png", "RSRQ (dB)", "RSRP vs RSRQ", ylim=(-24, 0))
     rsrp_spots = find_bad_spots(df, "RSRP")
@@ -1090,9 +1141,9 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
     blocks = write_chart_data(data_ws, df)
     build_cover(cover, df)
     add_cover_charts(cover, data_ws, blocks)
-    build_kpi_sheet(rsrp_ws, df, "RSRP", RSRP_COLOR, "dBm", rsrp_map, placeholder)
-    build_kpi_sheet(rsrq_ws, df, "RSRQ", RSRQ_COLOR, "dB", rsrq_map, placeholder)
-    build_kpi_sheet(sinr_ws, df, "SINR", SINR_COLOR, "dB", sinr_map, placeholder)
+    build_kpi_sheet(rsrp_ws, "RSRP", "dBm", rsrp_map, placeholder, rsrp_band)
+    build_kpi_sheet(rsrq_ws, "RSRQ", "dB", rsrq_map, placeholder, rsrq_band)
+    build_kpi_sheet(sinr_ws, "SINR", "dB", sinr_map, placeholder, sinr_band)
     build_bad_spot_sheet(bad_ws, rsrp_spots, rsrq_spots, sinr_spots, rsrp_bad, rsrq_bad, sinr_bad)
     build_rsrp_vs_sheet(time_ws, data_ws, blocks["vs_n"], scatter_sinr, scatter_rsrq)
     build_sample_log(sample_ws, df)

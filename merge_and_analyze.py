@@ -51,6 +51,15 @@ EARFCN_BANDS = {
     41: (39650, 41589, "B41 2500 MHz"),
 }
 
+# Operator layer names used on the RSRP / RSRQ / SINR sheets.
+REPORT_LAYERS = ("L900", "L1800", "L2100", "L2600")
+LAYER_EARFCN_RANGES = {
+    "L900": ((3450, 3799),),
+    "L1800": ((1200, 1949),),
+    "L2100": ((0, 599),),
+    "L2600": ((2750, 3449), (39650, 41589)),  # Band 7 FDD 2600 + Band 41 TDD 2500/2600
+}
+
 # Coverage-map legend (Excel Page 1 colour table). Best bin is listed first.
 # Colours match the standard Office fills used in that table.
 LEGEND_BLUE = "#0070C0"
@@ -164,7 +173,7 @@ def hide_map_axes(ax) -> None:
 SITE_PIE_EDGE = "#2B2B2B"
 SITE_PIE_ARM_WIDTH_FRAC = 0.16
 SITE_PIE_RADIUS_KM = 0.90
-_SITE_SECTORS: pd.DataFrame | None = None
+_SITE_CELLS: pd.DataFrame | None = None
 
 
 def _most_common_azimuth(series: pd.Series) -> float:
@@ -176,38 +185,46 @@ def _most_common_azimuth(series: pd.Series) -> float:
     return float(rounded.value_counts().idxmax())
 
 
-def load_site_sectors(path: Path | None = None) -> pd.DataFrame:
+def load_site_sectors(path: Path | None = None, layer: str | None = None) -> pd.DataFrame:
     """One row per site+sector: most-common azimuth when a sector has many cells."""
-    global _SITE_SECTORS
-    if _SITE_SECTORS is not None:
-        return _SITE_SECTORS
-    db_path = path or SITE_DB_PATH
-    if not db_path.exists():
-        _SITE_SECTORS = pd.DataFrame()
-        return _SITE_SECTORS
-    from pyxlsb import open_workbook
+    global _SITE_CELLS
+    if _SITE_CELLS is None:
+        db_path = path or SITE_DB_PATH
+        if not db_path.exists():
+            _SITE_CELLS = pd.DataFrame()
+            return _SITE_CELLS
+        from pyxlsb import open_workbook
 
-    rows: list[list] = []
-    cols: list[str] = []
-    with open_workbook(str(db_path)) as wb:
-        sheet = wb.get_sheet(wb.sheets[0])
-        for i, row in enumerate(sheet.rows()):
-            vals = [c.v for c in row]
-            if i == 0:
-                cols = [str(v) for v in vals]
-                continue
-            rows.append(vals)
-    cells = pd.DataFrame(rows, columns=cols)
-    rename = {c: c.strip() for c in cells.columns}
-    cells = cells.rename(columns=rename)
-    for col in ("Lat", "Lon", "Azimuth"):
-        if col in cells.columns:
-            cells[col] = pd.to_numeric(cells[col], errors="coerce")
-    need = {"SiteName", "Sector", "Lat", "Lon", "Azimuth"}
-    if not need.issubset(cells.columns):
-        _SITE_SECTORS = pd.DataFrame()
-        return _SITE_SECTORS
-    cells = cells.dropna(subset=["SiteName", "Sector", "Lat", "Lon"])
+        rows: list[list] = []
+        cols: list[str] = []
+        with open_workbook(str(db_path)) as wb:
+            sheet = wb.get_sheet(wb.sheets[0])
+            for i, row in enumerate(sheet.rows()):
+                vals = [c.v for c in row]
+                if i == 0:
+                    cols = [str(v) for v in vals]
+                    continue
+                rows.append(vals)
+        cells = pd.DataFrame(rows, columns=cols)
+        cells = cells.rename(columns={c: c.strip() for c in cells.columns})
+        for col in ("Lat", "Lon", "Azimuth", "EARFCN"):
+            if col in cells.columns:
+                cells[col] = pd.to_numeric(cells[col], errors="coerce")
+        need = {"SiteName", "Sector", "Lat", "Lon", "Azimuth"}
+        if not need.issubset(cells.columns):
+            _SITE_CELLS = pd.DataFrame()
+            return _SITE_CELLS
+        cells = cells.dropna(subset=["SiteName", "Sector", "Lat", "Lon"])
+        if "EARFCN" in cells.columns:
+            cells["layer"] = cells["EARFCN"].map(earfcn_to_layer)
+        else:
+            cells["layer"] = ""
+        _SITE_CELLS = cells
+    cells = _SITE_CELLS
+    if cells.empty:
+        return cells
+    if layer:
+        cells = cells[cells["layer"] == layer]
     grouped = (
         cells.groupby(["SiteName", "Sector"], sort=False)
         .agg(
@@ -219,8 +236,7 @@ def load_site_sectors(path: Path | None = None) -> pd.DataFrame:
         .reset_index()
     )
     grouped["n_sectors"] = grouped.groupby("SiteName")["Sector"].transform("nunique")
-    _SITE_SECTORS = grouped.dropna(subset=["lat", "lon", "azimuth"])
-    return _SITE_SECTORS
+    return grouped.dropna(subset=["lat", "lon", "azimuth"])
 
 
 def _sites_near_drive(sectors: pd.DataFrame, drive: pd.DataFrame, radius_km: float = 2.5) -> pd.DataFrame:
@@ -277,9 +293,10 @@ def draw_site_pies(
     ax,
     drive: pd.DataFrame,
     radius_km: float | None = None,
+    layer: str | None = None,
 ) -> list:
     """Draw outline-only three-arm site pies (grouped by sector name). No labels, no fill."""
-    sectors = load_site_sectors()
+    sectors = load_site_sectors(layer=layer)
     if sectors.empty:
         return []
     xlim = ax.get_xlim()
@@ -317,25 +334,44 @@ def plot_discrete_coverage_map(
     title: str,
     legend_title: str,
     max_points: int = 25000,
+    extent: tuple[float, float, float, float] | None = None,
+    layer: str | None = None,
 ) -> Path:
     """Drive route colored by discrete KPI ranges, with an RSRP-style side legend."""
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
     geo = df.dropna(subset=["Longitude", "Latitude", column]).copy()
-    sample = downsample(geo, max_points=max_points)
-    classes = class_series.reindex(sample.index)
     fig, ax = plt.subplots(figsize=(8.0, 9.2))
-    for label, color in zip(reversed(labels), reversed(colors)):
-        part = sample[classes == label]
-        if part.empty:
-            continue
-        ax.scatter(part["Longitude"], part["Latitude"], s=5, c=color, linewidths=0, rasterized=True, zorder=2)
-    lon_min, lon_max = float(geo["Longitude"].min()), float(geo["Longitude"].max())
-    lat_min, lat_max = float(geo["Latitude"].min()), float(geo["Latitude"].max())
-    pad_lon = 0.02 * (lon_max - lon_min)
-    pad_lat = 0.02 * (lat_max - lat_min)
-    ax.set_xlim(lon_min - pad_lon, lon_max + pad_lon)
-    ax.set_ylim(lat_min - pad_lat, lat_max + pad_lat)
-    site_handles = draw_site_pies(ax, geo)
+    if not geo.empty:
+        sample = downsample(geo, max_points=max_points)
+        classes = class_series.reindex(sample.index)
+        for label, color in zip(reversed(labels), reversed(colors)):
+            part = sample[classes == label]
+            if part.empty:
+                continue
+            ax.scatter(part["Longitude"], part["Latitude"], s=5, c=color, linewidths=0, rasterized=True, zorder=2)
+    if extent is not None:
+        ax.set_xlim(extent[0], extent[1])
+        ax.set_ylim(extent[2], extent[3])
+    elif not geo.empty:
+        lon_min, lon_max = float(geo["Longitude"].min()), float(geo["Longitude"].max())
+        lat_min, lat_max = float(geo["Latitude"].min()), float(geo["Latitude"].max())
+        pad_lon = 0.02 * (lon_max - lon_min)
+        pad_lat = 0.02 * (lat_max - lat_min)
+        ax.set_xlim(lon_min - pad_lon, lon_max + pad_lon)
+        ax.set_ylim(lat_min - pad_lat, lat_max + pad_lat)
+    if not geo.empty:
+        draw_site_pies(ax, geo, layer=layer)
+    else:
+        ax.text(
+            0.5,
+            0.5,
+            "No IDLE samples on this band",
+            transform=ax.transAxes,
+            ha="center",
+            va="center",
+            color="#7F8C8D",
+            fontsize=12,
+        )
     handles = [
         Line2D(
             [0],
@@ -351,7 +387,7 @@ def plot_discrete_coverage_map(
         for lab, c in zip(labels, colors)
     ]
     ax.legend(
-        handles=handles + site_handles,
+        handles=handles,
         title=legend_title,
         loc="center left",
         bbox_to_anchor=(1.02, 0.5),
@@ -368,8 +404,18 @@ def plot_discrete_coverage_map(
     return path
 
 
-def plot_rsrp_coverage_map(df: pd.DataFrame, path: Path, max_points: int = 25000) -> Path:
+def plot_rsrp_coverage_map(
+    df: pd.DataFrame,
+    path: Path,
+    max_points: int = 25000,
+    *,
+    layer: str | None = None,
+    extent: tuple[float, float, float, float] | None = None,
+) -> Path:
     """Discrete RSRP coverage map with a range legend (no lon/lat chrome)."""
+    title = "Bogura coverage map — RSRP"
+    if layer:
+        title = f"{title} — {layer}"
     return plot_discrete_coverage_map(
         df,
         path,
@@ -377,13 +423,25 @@ def plot_rsrp_coverage_map(df: pd.DataFrame, path: Path, max_points: int = 25000
         class_series=rsrp_map_class(df["RSRP"]),
         labels=MAP_RSRP_LABELS,
         colors=MAP_RSRP_COLORS,
-        title="Bogura coverage map — RSRP",
+        title=title,
         legend_title="RSRP (dBm)",
         max_points=max_points,
+        extent=extent,
+        layer=layer,
     )
 
 
-def plot_rsrq_coverage_map(df: pd.DataFrame, path: Path, max_points: int = 25000) -> Path:
+def plot_rsrq_coverage_map(
+    df: pd.DataFrame,
+    path: Path,
+    max_points: int = 25000,
+    *,
+    layer: str | None = None,
+    extent: tuple[float, float, float, float] | None = None,
+) -> Path:
+    title = "Bogura coverage map — RSRQ"
+    if layer:
+        title = f"{title} — {layer}"
     return plot_discrete_coverage_map(
         df,
         path,
@@ -391,13 +449,25 @@ def plot_rsrq_coverage_map(df: pd.DataFrame, path: Path, max_points: int = 25000
         class_series=rsrq_map_class(df["RSRQ"]),
         labels=MAP_RSRQ_LABELS,
         colors=MAP_RSRQ_COLORS,
-        title="Bogura coverage map — RSRQ",
+        title=title,
         legend_title="RSRQ (dB)",
         max_points=max_points,
+        extent=extent,
+        layer=layer,
     )
 
 
-def plot_sinr_coverage_map(df: pd.DataFrame, path: Path, max_points: int = 25000) -> Path:
+def plot_sinr_coverage_map(
+    df: pd.DataFrame,
+    path: Path,
+    max_points: int = 25000,
+    *,
+    layer: str | None = None,
+    extent: tuple[float, float, float, float] | None = None,
+) -> Path:
+    title = "Bogura coverage map — SINR"
+    if layer:
+        title = f"{title} — {layer}"
     return plot_discrete_coverage_map(
         df,
         path,
@@ -405,9 +475,11 @@ def plot_sinr_coverage_map(df: pd.DataFrame, path: Path, max_points: int = 25000
         class_series=sinr_map_class(df["SINR"]),
         labels=MAP_SINR_LABELS,
         colors=MAP_SINR_COLORS,
-        title="Bogura coverage map — SINR",
+        title=title,
         legend_title="SINR (dB)",
         max_points=max_points,
+        extent=extent,
+        layer=layer,
     )
 
 
@@ -799,6 +871,38 @@ def extract_archives() -> None:
     )
     if not P1_XLSX.exists() or not P2_XLSX.exists():
         sys.exit("Extraction finished but expected xlsx files were not found.")
+
+
+def earfcn_to_layer(earfcn: object) -> str:
+    """Map DL EARFCN to L900 / L1800 / L2100 / L2600. Unknown EARFCNs return ''."""
+    if pd.isna(earfcn):
+        return ""
+    try:
+        value = int(earfcn)
+    except (TypeError, ValueError):
+        return ""
+    for layer, ranges in LAYER_EARFCN_RANGES.items():
+        for lo, hi in ranges:
+            if lo <= value <= hi:
+                return layer
+    return ""
+
+
+def filter_by_layer(df: pd.DataFrame, layer: str) -> pd.DataFrame:
+    if "Layer" in df.columns:
+        return df.loc[df["Layer"] == layer].copy()
+    earfcn = pd.to_numeric(df["DL EARFCN"], errors="coerce")
+    return df.loc[earfcn.map(earfcn_to_layer) == layer].copy()
+
+
+def coverage_extent(df: pd.DataFrame) -> tuple[float, float, float, float]:
+    """Padded lon/lat box so all-band and per-band maps share the same view."""
+    geo = df.dropna(subset=["Longitude", "Latitude"])
+    lon_min, lon_max = float(geo["Longitude"].min()), float(geo["Longitude"].max())
+    lat_min, lat_max = float(geo["Latitude"].min()), float(geo["Latitude"].max())
+    pad_lon = 0.02 * (lon_max - lon_min)
+    pad_lat = 0.02 * (lat_max - lat_min)
+    return lon_min - pad_lon, lon_max + pad_lon, lat_min - pad_lat, lat_max + pad_lat
 
 
 def earfcn_to_band(earfcn: float) -> str:
