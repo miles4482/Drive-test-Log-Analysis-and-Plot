@@ -7,7 +7,7 @@ LTE **IDLE Mode scanner** logs from **Bogura** (Robi). The current source is `Bo
 | File(s) | Role | After extract |
 | --- | --- | --- |
 | `Borga_Idle_V2.0.7z` | IDLE Mode scanner export | `extracted/Borga_Idle_V2.0/1.csv` … `15.csv` |
-| `Physical_Site_Database_V1.0.xlsb` | Physical site / sector database | Used on Bad Spot maps only |
+| `Physical_Site_Database_V1.0.xlsb` | Physical site / sector database | Kept in the repo; not overlaid on current maps |
 
 Scanner columns include `Time`, `Longitude`, `Latitude`, `Cell Id`, `DL EARFCN`, `NB RSRP`, `NB RSRQ`, `NB RS SINR` (mapped to RSRP / RSRQ / SINR). Campaign is **Scanner**. Files 1–15 cover 11–21 May 2026.
 
@@ -52,7 +52,7 @@ After a successful run:
 - `output/plots/05_band_counts.png` — LTE band from DL EARFCN
 - `output/plots/06_top_cells.png` — most-seen Cell Ids
 - `output/plots/07_csv_counts.png` — sample counts by CSV file (`1.csv` … `15.csv`)
-- `output/plots/08_bad_spots_rsrp.png` / `_rsrq.png` / `_sinr.png` — bad-spot maps with site pies
+- `output/plots/08_bad_spots_rsrp.png` / `_rsrq.png` / `_sinr.png` — bad-spot maps (no site pies)
 
 If `output/Bogura_merged.csv.gz` already exists, skip extract with:
 
@@ -83,19 +83,25 @@ Throughput (PDCP DL) and CQI are on the same legend sheet but are not in these I
 
 **RSRP / RSRQ / SINR sheets** show the all-band IDLE map, then band-wise IDLE maps for L900, L1800, L2100 and L2600. Those maps do not overlay site pies. Active Mode cells stay blank until those logs are provided.
 
-**Bad Spot Analysis** circles **every dense poor stretch** on the full drive maps (RSRP < −115 dBm, RSRQ < −15 dB, SINR < 0 dB). Numbered ovals match the table. Outline-only site pies from `Physical_Site_Database_V1.0.xlsb` are drawn on these maps only.
+**Bad Spot Analysis** has no site pies. Poor samples are:
 
-## Download Excel report (v1.19)
+- **RSRP** ≤ −115 dBm, **RSRQ** ≤ −20 dB, **SINR** ≤ 0 dB
+- **Consecutive:** at least 200 m of poor coverage along the drive (red dashed oval)
+- **Discrete area:** leftover poor samples covering at least 1 km² that never form a 200 m consecutive stretch (large purple circle)
 
-**v1.19 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.19.xlsx
+Numbered marks match the table.
+
+## Download Excel report (v1.20)
+
+**v1.20 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.20.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.19.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.20.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.19.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.20.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
 Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 
@@ -103,7 +109,7 @@ Sheet banners do not include the file version. The filename still carries the ve
 | --- | --- |
 | Cover | IDLE Mode bar, dataset/KPI tables on the left, histograms on the right, Active Mode bar at the bottom |
 | RSRP / RSRQ / SINR | All-band IDLE map, then L900 / L1800 / L2100 / L2600 IDLE maps (no site pies); Active Mode remains a placeholder |
-| Bad Spot Analysis | Full-drive IDLE maps with poor-stretch ovals and outline-only site pies |
+| Bad Spot Analysis | Larger stacked IDLE maps with consecutive 200 m ovals and discrete ≥1 km² circles (no site pies) |
 | RSRP vs KPIs | RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter plots with trend |
 | Sample Log | Evenly spaced subset of the merged samples |
 
