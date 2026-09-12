@@ -530,11 +530,11 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
 
     write_cell(ws, 18, 1, "How to read this workbook", size=14, bold=True)
     notes = [
-        "Cover — dataset and KPI tables on the left, IDLE Mode plots on the right, Active Mode section at the bottom.",
-        "RSRP / RSRQ / SINR — IDLE Mode coverage map on the left with three-blade site pies; Active Mode map on the right when those logs are provided.",
-        "Bad Spot Analysis — every dense poor stretch on the full IDLE maps is circled and numbered. Physical sites use three-blade pies (most-common azimuth per sector).",
-        "RSRP vs KPIs — RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter with trend.",
-        "Sample Log — evenly spaced subset of the merged samples (full 1.07M rows stay in output/Bogura_merged.csv.gz).",
+        "Cover â€” dataset and KPI tables on the left, IDLE Mode plots on the right, Active Mode section at the bottom.",
+        "RSRP / RSRQ / SINR â€” IDLE Mode coverage map on the left with three-blade site pies; Active Mode map on the right when those logs are provided.",
+        "Bad Spot Analysis â€” every dense poor stretch on the full IDLE maps is circled and numbered. Physical sites use three-blade pies (most-common azimuth per sector).",
+        "RSRP vs KPIs â€” RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter with trend.",
+        "Sample Log â€” evenly spaced subset of the merged samples (full 1.07M rows stay in output/Bogura_merged.csv.gz).",
         "These files are IDLE Mode. Active Mode coverage maps will be added when those logs are provided.",
     ]
     for i, text in enumerate(notes):
