@@ -1,0 +1,4 @@
+{
+  "name": "Drive-test Log Analysis",
+  "install": "sudo apt-get update && sudo apt-get install -y --no-install-recommends p7zip-full && pip install --user -r requirements.txt"
+}
