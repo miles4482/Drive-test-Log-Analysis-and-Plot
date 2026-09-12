@@ -91,17 +91,17 @@ Throughput (PDCP DL) and CQI are on the same legend sheet but are not in these I
 
 Numbered marks match the table.
 
-## Download Excel report (v1.20)
+## Download Excel report (v1.21)
 
-**v1.20 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.20.xlsx
+**v1.21 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.21.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.20.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.21.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.20.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.21.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
 Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 
@@ -109,7 +109,7 @@ Sheet banners do not include the file version. The filename still carries the ve
 | --- | --- |
 | Cover | IDLE Mode bar, dataset/KPI tables on the left, histograms on the right, Active Mode bar at the bottom |
 | RSRP / RSRQ / SINR | All-band IDLE map, then L900 / L1800 / L2100 / L2600 IDLE maps (no site pies); Active Mode remains a placeholder |
-| Bad Spot Analysis | Larger stacked IDLE maps with consecutive 200 m ovals and discrete ≥1 km² circles (no site pies) |
+| Bad Spot Analysis | First all-band IDLE maps (same as RSRP / RSRQ / SINR sheets) with consecutive 200 m ovals and discrete ≥1 km² circles; no site pies |
 | RSRP vs KPIs | RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter plots with trend |
 | Sample Log | Evenly spaced subset of the merged samples |
 

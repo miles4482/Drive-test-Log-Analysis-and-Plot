@@ -328,6 +328,51 @@ def draw_site_pies(
     return []
 
 
+def _coverage_extent_from_geo(geo: pd.DataFrame) -> tuple[float, float, float, float]:
+    lon_min, lon_max = float(geo["Longitude"].min()), float(geo["Longitude"].max())
+    lat_min, lat_max = float(geo["Latitude"].min()), float(geo["Latitude"].max())
+    pad_lon = 0.02 * (lon_max - lon_min)
+    pad_lat = 0.02 * (lat_max - lat_min)
+    return lon_min - pad_lon, lon_max + pad_lon, lat_min - pad_lat, lat_max + pad_lat
+
+
+def _draw_coverage_points(
+    ax,
+    geo: pd.DataFrame,
+    class_series: pd.Series,
+    labels: list[str],
+    colors: list[str],
+    max_points: int = 25000,
+) -> None:
+    """Same point style as the first all-band RSRP / RSRQ / SINR maps."""
+    if geo.empty:
+        return
+    sample = downsample(geo, max_points=max_points)
+    classes = class_series.reindex(sample.index)
+    for label, color in zip(reversed(labels), reversed(colors)):
+        part = sample[classes == label]
+        if part.empty:
+            continue
+        ax.scatter(part["Longitude"], part["Latitude"], s=5, c=color, linewidths=0, rasterized=True, zorder=2)
+
+
+def _coverage_legend_handles(labels: list[str], colors: list[str]) -> list:
+    return [
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="none",
+            markerfacecolor=c,
+            markeredgecolor="#333333",
+            markeredgewidth=0.4,
+            markersize=8,
+            label=lab,
+        )
+        for lab, c in zip(labels, colors)
+    ]
+
+
 def plot_discrete_coverage_map(
     df: pd.DataFrame,
     path: Path,
@@ -345,24 +390,14 @@ def plot_discrete_coverage_map(
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
     geo = df.dropna(subset=["Longitude", "Latitude", column]).copy()
     fig, ax = plt.subplots(figsize=(8.0, 9.2))
-    if not geo.empty:
-        sample = downsample(geo, max_points=max_points)
-        classes = class_series.reindex(sample.index)
-        for label, color in zip(reversed(labels), reversed(colors)):
-            part = sample[classes == label]
-            if part.empty:
-                continue
-            ax.scatter(part["Longitude"], part["Latitude"], s=5, c=color, linewidths=0, rasterized=True, zorder=2)
+    _draw_coverage_points(ax, geo, class_series, labels, colors, max_points=max_points)
     if extent is not None:
         ax.set_xlim(extent[0], extent[1])
         ax.set_ylim(extent[2], extent[3])
     elif not geo.empty:
-        lon_min, lon_max = float(geo["Longitude"].min()), float(geo["Longitude"].max())
-        lat_min, lat_max = float(geo["Latitude"].min()), float(geo["Latitude"].max())
-        pad_lon = 0.02 * (lon_max - lon_min)
-        pad_lat = 0.02 * (lat_max - lat_min)
-        ax.set_xlim(lon_min - pad_lon, lon_max + pad_lon)
-        ax.set_ylim(lat_min - pad_lat, lat_max + pad_lat)
+        lon_min, lon_max, lat_min, lat_max = _coverage_extent_from_geo(geo)
+        ax.set_xlim(lon_min, lon_max)
+        ax.set_ylim(lat_min, lat_max)
     if geo.empty:
         ax.text(
             0.5,
@@ -374,22 +409,8 @@ def plot_discrete_coverage_map(
             color="#7F8C8D",
             fontsize=12,
         )
-    handles = [
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="none",
-            markerfacecolor=c,
-            markeredgecolor="#333333",
-            markeredgewidth=0.4,
-            markersize=8,
-            label=lab,
-        )
-        for lab, c in zip(labels, colors)
-    ]
     ax.legend(
-        handles=handles,
+        handles=_coverage_legend_handles(labels, colors),
         title=legend_title,
         loc="center left",
         bbox_to_anchor=(1.02, 0.5),
@@ -871,71 +892,29 @@ def plot_bad_spot_map(
     spots: pd.DataFrame,
     title: str,
     legend_title: str,
-    max_points: int = 40000,
+    max_points: int = 25000,
+    extent: tuple[float, float, float, float] | None = None,
 ) -> Path:
-    """Full-drive coverage map with consecutive ovals and large discrete-area circles. No site pies."""
+    """First all-band coverage map, with consecutive ovals and discrete-area circles on top."""
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
     geo = df.dropna(subset=["Longitude", "Latitude", column]).copy()
-    threshold = float(BAD_SPOT_RULES[column]["threshold"])
-    if spots is not None and not spots.empty:
-        threshold = float(spots["threshold"].iloc[0])
-    classes_all = class_series.reindex(geo.index)
-    poor_all = _poor_mask(geo[column], threshold)
-    sample = downsample(geo, max_points=max_points)
-    classes = classes_all.reindex(sample.index)
-    poor_sample = poor_all.reindex(sample.index).fillna(False).astype(bool)
-    lat_min = float(geo["Latitude"].min())
-    lat_max = float(geo["Latitude"].max())
-    lon_min = float(geo["Longitude"].min())
-    lon_max = float(geo["Longitude"].max())
-    pad_lat = 0.02 * (lat_max - lat_min)
-    pad_lon = 0.02 * (lon_max - lon_min)
-    lat_min -= pad_lat
-    lat_max += pad_lat
-    lon_min -= pad_lon
-    lon_max += pad_lon
-
-    fig, ax = plt.subplots(figsize=(8.6, 10.0))
-    for label, color in zip(reversed(labels), reversed(colors)):
-        part = sample[(classes == label) & ~poor_sample]
-        if part.empty:
-            continue
-        ax.scatter(part["Longitude"], part["Latitude"], s=6, c=color, linewidths=0, alpha=0.38, rasterized=True, zorder=2)
-    for label, color in zip(reversed(labels), reversed(colors)):
-        part = sample[(classes == label) & poor_sample]
-        if part.empty:
-            continue
-        ax.scatter(part["Longitude"], part["Latitude"], s=11, c=color, linewidths=0, alpha=0.95, rasterized=True, zorder=3)
-    handles = [
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="none",
-            markerfacecolor=c,
-            markeredgecolor="#333333",
-            markeredgewidth=0.4,
-            markersize=8,
-            label=lab,
-        )
-        for lab, c in zip(labels, colors)
-    ]
+    fig, ax = plt.subplots(figsize=(8.0, 9.2))
+    _draw_coverage_points(ax, geo, class_series, labels, colors, max_points=max_points)
+    if extent is not None:
+        ax.set_xlim(extent[0], extent[1])
+        ax.set_ylim(extent[2], extent[3])
+    elif not geo.empty:
+        lon_min, lon_max, lat_min, lat_max = _coverage_extent_from_geo(geo)
+        ax.set_xlim(lon_min, lon_max)
+        ax.set_ylim(lat_min, lat_max)
+    ax.set_aspect("equal", adjustable="box")
+    handles = _coverage_legend_handles(labels, colors)
     handles.extend(
         [
             Line2D([0], [0], color="#C0392B", lw=2.0, linestyle=(0, (6, 3)), label="Consecutive ≥ 200 m"),
             Line2D([0], [0], color="#6C3483", lw=2.6, linestyle="-", label="Discrete area ≥ 1 km²"),
         ]
     )
-    ax.set_xlim(lon_min, lon_max)
-    ax.set_ylim(lat_min, lat_max)
-    ax.set_aspect("equal", adjustable="box")
-    map_lat_km = (lat_max - lat_min) * 111.32
-    map_lon_km = (lon_max - lon_min) * _km_per_deg_lon((lat_min + lat_max) / 2.0)
-    map_span_km = min(map_lat_km, map_lon_km)
-    consec_min_km = max(6.0, map_span_km * 0.07)
-    consec_max_km = max(10.0, map_span_km * 0.12)
-    disc_min_km = max(10.0, map_span_km * 0.11)
-    disc_max_km = max(14.0, map_span_km * 0.16)
     ax.legend(
         handles=handles,
         title=legend_title,
@@ -943,11 +922,22 @@ def plot_bad_spot_map(
         bbox_to_anchor=(1.02, 0.5),
         frameon=True,
         fontsize=8,
-        title_fontsize=9,
+        title_fontsize=10,
     )
 
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+    map_lat_km = (ylim[1] - ylim[0]) * 111.32
+    map_lon_km = (xlim[1] - xlim[0]) * _km_per_deg_lon((ylim[0] + ylim[1]) / 2.0)
+    map_span_km = min(map_lat_km, map_lon_km)
+    consec_min_km = max(6.0, map_span_km * 0.07)
+    consec_max_km = max(10.0, map_span_km * 0.12)
+    disc_min_km = max(10.0, map_span_km * 0.11)
+    disc_max_km = max(14.0, map_span_km * 0.16)
+
     if spots is not None and not spots.empty:
-        poor = geo.loc[poor_all]
+        threshold = float(spots["threshold"].iloc[0]) if "threshold" in spots.columns else float(BAD_SPOT_RULES[column]["threshold"])
+        poor = geo.loc[_poor_mask(geo[column], threshold)]
         for _, spot in spots.iterrows():
             kind = str(spot.get("kind", "consecutive"))
             box_poor = poor[
@@ -1011,16 +1001,21 @@ def plot_bad_spot_map(
                     "linewidth": 0.8,
                 },
             )
-    add_map_scale_bar(ax, km=20)
     ax.set_title(title)
     hide_map_axes(ax)
     fig.tight_layout()
-    fig.savefig(path, dpi=180, facecolor="white", bbox_inches="tight")
+    fig.savefig(path, dpi=140, facecolor="white", bbox_inches="tight")
     plt.close(fig)
     return path
 
 
-def plot_rsrp_bad_spot_map(df: pd.DataFrame, spots: pd.DataFrame, path: Path) -> Path:
+def plot_rsrp_bad_spot_map(
+    df: pd.DataFrame,
+    spots: pd.DataFrame,
+    path: Path,
+    *,
+    extent: tuple[float, float, float, float] | None = None,
+) -> Path:
     return plot_bad_spot_map(
         df,
         path,
@@ -1029,12 +1024,19 @@ def plot_rsrp_bad_spot_map(df: pd.DataFrame, spots: pd.DataFrame, path: Path) ->
         labels=MAP_RSRP_LABELS,
         colors=MAP_RSRP_COLORS,
         spots=spots,
-        title="Bad spot analysis — RSRP",
+        title="Bogura coverage map — RSRP",
         legend_title="RSRP (dBm)",
+        extent=extent,
     )
 
 
-def plot_rsrq_bad_spot_map(df: pd.DataFrame, spots: pd.DataFrame, path: Path) -> Path:
+def plot_rsrq_bad_spot_map(
+    df: pd.DataFrame,
+    spots: pd.DataFrame,
+    path: Path,
+    *,
+    extent: tuple[float, float, float, float] | None = None,
+) -> Path:
     return plot_bad_spot_map(
         df,
         path,
@@ -1043,12 +1045,19 @@ def plot_rsrq_bad_spot_map(df: pd.DataFrame, spots: pd.DataFrame, path: Path) ->
         labels=MAP_RSRQ_LABELS,
         colors=MAP_RSRQ_COLORS,
         spots=spots,
-        title="Bad spot analysis — RSRQ",
+        title="Bogura coverage map — RSRQ",
         legend_title="RSRQ (dB)",
+        extent=extent,
     )
 
 
-def plot_sinr_bad_spot_map(df: pd.DataFrame, spots: pd.DataFrame, path: Path) -> Path:
+def plot_sinr_bad_spot_map(
+    df: pd.DataFrame,
+    spots: pd.DataFrame,
+    path: Path,
+    *,
+    extent: tuple[float, float, float, float] | None = None,
+) -> Path:
     return plot_bad_spot_map(
         df,
         path,
@@ -1057,8 +1066,9 @@ def plot_sinr_bad_spot_map(df: pd.DataFrame, spots: pd.DataFrame, path: Path) ->
         labels=MAP_SINR_LABELS,
         colors=MAP_SINR_COLORS,
         spots=spots,
-        title="Bad spot analysis — SINR",
+        title="Bogura coverage map — SINR",
         legend_title="SINR (dB)",
+        extent=extent,
     )
 
 
