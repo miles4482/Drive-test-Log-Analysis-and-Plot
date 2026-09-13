@@ -81,34 +81,34 @@ RSRP / RSRQ / SINR coverage maps use the Page 1 legend:
 
 Throughput (PDCP DL) and CQI are on the same legend sheet but are not in these IDLE logs, so those maps are not drawn yet.
 
-**RSRP / RSRQ / SINR sheets** show the all-band IDLE map, then band-wise IDLE maps for L900, L1800, L2100 and L2600. Those maps do not overlay site pies. Active Mode cells stay blank until those logs are provided.
+**RSRP / RSRQ / SINR sheets** show the **combined all-band IDLE map on top with bad spots marked**, then band-wise IDLE maps for L900, L1800, L2100 and L2600. Those maps do not overlay site pies. Active Mode cells stay blank until those logs are provided.
 
-**Bad Spot Analysis** uses the **first all-band IDLE map** from each KPI sheet (not band maps). Poor samples are inspected in zoomed views. Map numbers are omitted.
+**Bad Spot RSRP / RSRQ / SINR** are separate sheets (one KPI each). Each sheet puts the **combined all-band view with marks on top**, then zoomed local inspection. Map numbers are omitted.
 
 - **RSRP** < −115 dBm (magenta and red only; yellow is not a bad-spot colour), **RSRQ** < −20 dB (red), **SINR** < 0 dB
 - A stretch is circled only when the zoomed box is mostly those poor colours, so a winding poor route does not wrap a blue/green city grid
 - **Consecutive:** at least 200 m of poor coverage along the drive (thin black dashed oval covering the whole poor stretch)
 - **Discrete area:** leftover poor samples covering at least 1 km² that also look poor on that coverage map (thin black dotted circle)
 
-## Download Excel report (v1.25)
+## Download Excel report (v1.26)
 
-**v1.25 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.25.xlsx
+**v1.26 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.26.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.25.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.26.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.25.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.26.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
 Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 
 | Sheet | Contents |
 | --- | --- |
 | Cover | IDLE Mode bar, dataset/KPI tables on the left, histograms on the right, Active Mode bar at the bottom |
-| RSRP / RSRQ / SINR | All-band IDLE map, then L900 / L1800 / L2100 / L2600 IDLE maps (no site pies); Active Mode remains a placeholder |
-| Bad Spot Analysis | First all-band IDLE maps with tight unnumbered outlines, plus zoomed local views of each spot |
+| RSRP / RSRQ / SINR | Combined all-band IDLE map on top with bad spots marked, then L900 / L1800 / L2100 / L2600 IDLE maps (no site pies); Active Mode remains a placeholder |
+| Bad Spot RSRP / RSRQ / SINR | One sheet per KPI: combined all-band view with marks on top, zoomed local views, and that KPI’s table |
 | RSRP vs KPIs | RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter plots with trend |
 | Sample Log | Evenly spaced subset of the merged samples |
 

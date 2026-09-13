@@ -1273,7 +1273,7 @@ def plot_rsrp_bad_spot_map(
         labels=MAP_RSRP_LABELS,
         colors=MAP_RSRP_COLORS,
         spots=spots,
-        title="Bogura coverage map — RSRP",
+        title="Combined view — RSRP",
         legend_title="RSRP (dBm)",
         extent=extent,
     )
@@ -1294,7 +1294,7 @@ def plot_rsrq_bad_spot_map(
         labels=MAP_RSRQ_LABELS,
         colors=MAP_RSRQ_COLORS,
         spots=spots,
-        title="Bogura coverage map — RSRQ",
+        title="Combined view — RSRQ",
         legend_title="RSRQ (dB)",
         extent=extent,
     )
@@ -1315,7 +1315,7 @@ def plot_sinr_bad_spot_map(
         labels=MAP_SINR_LABELS,
         colors=MAP_SINR_COLORS,
         spots=spots,
-        title="Bogura coverage map — SINR",
+        title="Combined view — SINR",
         legend_title="SINR (dB)",
         extent=extent,
     )
