@@ -94,22 +94,22 @@ Throughput (PDCP DL) and CQI are on the same legend sheet but are not in these I
 
 - Poor is **RSRP ≤ −115 dBm** (magenta and red only; yellow is not a bad-spot colour), **RSRQ ≤ −20 dB** (red), **SINR ≤ 0 dB** (orange and red)
 - Maps and rules read the same **50 m road bins**: a bin is coloured by the median of the samples measured in it and counts as poor only when that median is at or below the threshold, and poor bins are drawn on top of good ones — so a circle can only sit on colour the map actually shows
-- **RSRP:** every poor run is circled, however short, because a 50 m coverage hole is still a hole. A single poor bin is reported as 50 m
-- **RSRQ / SINR:** poor coverage is so widespread that only runs of at least 200 m are circled, and the 30 longest are mapped and tabled
+- **Every poor run is circled**, however short, because a 50 m coverage hole is still a hole. A single poor bin is reported as 50 m. The drive yields 98 RSRP runs, 216 RSRQ runs and 1,237 SINR runs
 - **Discrete area:** leftover poor bins covering at least 1 km² where that area is at least half poor (thin black dotted circle)
-- Each sheet states how many runs the rules found, how many are drawn, and — where a minimum length applies — how long the longest run that missed it was
+- Rings shrink and thin as the count grows (2.6 km haloed up to 40 spots, 1.4 km up to 250, 0.8 km beyond), so the marks never cover the colour they mark. Poor SINR covers 11 % of the drive, so its marks merge at district scale and the zoom panels and table carry the detail
+- Each sheet lists the 16 longest runs as zoom panels and up to 300 in the table, longest first, and states the full count
 
-## Download Excel report (v1.29)
+## Download Excel report (v1.30)
 
-**v1.29 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.29.xlsx
+**v1.30 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.30.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.29.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.30.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.29.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.30.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
 Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 

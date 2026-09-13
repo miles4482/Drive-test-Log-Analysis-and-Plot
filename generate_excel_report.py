@@ -68,7 +68,10 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.29"
+REPORT_VERSION = "1.30"
+# Every poor run is a bad spot, so a dense KPI produces over a thousand of them.
+# The map marks them all; the table lists the longest ones a team can act on.
+BAD_SPOT_TABLE_MAX = 300
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
@@ -543,7 +546,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     notes = [
         "Cover \u2014 dataset and KPI tables on the left, IDLE Mode plots on the right, Active Mode section at the bottom.",
         "RSRP / RSRQ / SINR \u2014 Idle V2.0 scanner: combined all-band map on top (with bad spots marked), then L900 / L1800 / L2100 / L2600 IDLE maps (strongest band per scanner sweep, no site pies); Active Mode stays blank until those logs are provided.",
-        "Bad Spot RSRP / RSRQ / SINR \u2014 one sheet per KPI: combined all-band view with marks on top, then zoomed local inspection. RSRP poor below -115 dBm (magenta/red); RSRQ below -20 dB (red); SINR below 0 dB (orange/red).",
+        "Bad Spot RSRP / RSRQ / SINR \u2014 one sheet per KPI: combined all-band view with marks on top, then zoomed local inspection. Poor is RSRP at or below -115 dBm (magenta/red), RSRQ at or below -20 dB (red), SINR at or below 0 dB (orange/red); every poor run is circled, however short.",
         "RSRP vs KPIs \u2014 RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter with trend.",
         "Sample Log \u2014 evenly spaced subset of the merged samples (full merged scanner log stays in output/Bogura_merged.csv.gz).",
         "These files are IDLE Mode. Active Mode coverage maps will be added when those logs are provided.",
@@ -637,11 +640,13 @@ BAD_SPOT_KPI_NOTES = {
         "Best server is the strongest band per scanner sweep, so a weak band is never mapped as the coverage of a road."
     ),
     "RSRQ": (
-        "Poor is RSRQ at or below -20 dB (red), and a bad spot is a run of at least 200 m. "
+        "Poor is RSRQ at or below -20 dB (red), and every poor run is circled, however short. "
         "The combined view at the top is the same all-band best-server map as the RSRQ sheet, with bad spots marked."
     ),
     "SINR": (
-        "Poor is SINR at or below 0 dB (orange and red), and a bad spot is a run of at least 200 m. "
+        "Poor is SINR at or below 0 dB (orange and red), and every poor run is circled, however short. "
+        "Poor SINR covers so much of this drive that the marks merge at district scale: read the zoom "
+        "panels and the table below for the runs worth acting on. "
         "The combined view at the top is the same all-band best-server map as the SINR sheet, with bad spots marked."
     ),
 }
@@ -688,16 +693,16 @@ def _detection_summary(kpi: str, spots: pd.DataFrame) -> str:
     minimum = min_consecutive_m(kpi)
     if minimum <= 0:
         text = (
-            f"The rules find {total_consec} poor {kpi} run(s) on the drive, all of them circled, "
-            f"and {total_discrete} discrete area(s) of at least 1 km\u00b2."
+            f"The rules find {total_consec:,} poor {kpi} run(s) on the drive, all of them circled, "
+            f"and {total_discrete:,} discrete area(s) of at least 1 km\u00b2."
         )
     else:
         text = (
-            f"The rules find {total_consec} consecutive {kpi} run(s) of at least {minimum:,.0f} m "
-            f"and {total_discrete} discrete area(s) of at least 1 km\u00b2."
+            f"The rules find {total_consec:,} consecutive {kpi} run(s) of at least {minimum:,.0f} m "
+            f"and {total_discrete:,} discrete area(s) of at least 1 km\u00b2."
         )
     if total_consec > shown_consec:
-        text += f" The {shown_consec} longest runs are mapped and listed below."
+        text += f" The {shown_consec:,} longest runs are mapped and listed below."
     longest_short = float(spots.attrs.get("longest_short_m", 0.0))
     if minimum > 0 and longest_short >= 50:
         text += (
@@ -770,7 +775,10 @@ def build_kpi_bad_spot_sheet(
     else:
         table_row = zoom_row + 3
 
-    write_cell(ws, table_row, 1, f"Identified {kpi} bad spots", size=14, bold=True)
+    table_title = f"Identified {kpi} bad spots"
+    if spots is not None and len(spots) > BAD_SPOT_TABLE_MAX:
+        table_title = f"{table_title}  \u2014  {BAD_SPOT_TABLE_MAX:,} longest of {len(spots):,}"
+    write_cell(ws, table_row, 1, table_title, size=14, bold=True)
     headers = [
         "Type",
         "Latitude",
@@ -786,7 +794,8 @@ def build_kpi_bad_spot_sheet(
         "Area (km\u00b2)",
         "Top Cell Id",
     ]
-    rows = _bad_spot_table_rows(spots, include_kpi=False)
+    listed = spots if spots is None or len(spots) <= BAD_SPOT_TABLE_MAX else spots.head(BAD_SPOT_TABLE_MAX)
+    rows = _bad_spot_table_rows(listed, include_kpi=False)
     write_table(
         ws,
         table_row + 1,
@@ -1271,7 +1280,7 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
     wb.properties.subject = "IDLE Mode"
     wb.properties.description = (
         "Bogura drive-test report, IDLE Mode. "
-        "KPI sheets: combined all-band maps with bad spots on top. Bad Spot RSRP/RSRQ/SINR: consecutive 200 m stretches and discrete 1 km2 areas. Analysis: RSRP vs SINR/RSRQ."
+        "KPI sheets: combined all-band maps with bad spots on top. Bad Spot RSRP/RSRQ/SINR: every poor run, plus discrete 1 km2 areas. Analysis: RSRP vs SINR/RSRQ."
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(out_path)

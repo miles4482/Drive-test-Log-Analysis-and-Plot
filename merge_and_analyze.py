@@ -586,9 +586,9 @@ def plot_sinr_coverage_map(
 
 # Bad-spot rules:
 # 1) A location is poor when the KPI is at or below the threshold.
-# 2) A run of poor road is a bad spot. RSRP marks every run, however short, because
-#    a coverage hole of 50 m is still a hole; RSRQ and SINR are poor over so much of
-#    the drive that only runs of at least 200 m are worth circling.
+# 2) Every run of poor road is a bad spot, however short: a 50 m hole is still a hole.
+#    Runs are reported longest first, so the 200 m mark separates the stretches worth
+#    driving out to from the single bins.
 # 3) Poor locations that never form a 200 m run, but cover >= 1 km², get a large circle.
 BAD_SPOT_MIN_CONSEC_M = 200.0
 BAD_SPOT_DISCRETE_AREA_KM2 = 1.0
@@ -610,17 +610,22 @@ BAD_SPOT_ZOOM_MIN_KM = 1.2
 BAD_SPOT_OUTLINE_PAD = 1.45  # with sqrt(2), oval covers bbox corners / red tails
 BAD_SPOT_OUTLINE_MIN_MINOR_KM = 0.50
 BAD_SPOT_OVERVIEW_MIN_KM = 2.6  # city-scale combined map must show a visible circle
-BAD_SPOT_OVERVIEW_DENSE_MIN_KM = 2.0  # many spots: smaller, thinner rings stay readable
 BAD_SPOT_OVERVIEW_MAX_KM = 4.5
 BAD_SPOT_OVERVIEW_LW = 2.15
-BAD_SPOT_OVERVIEW_DENSE_LW = 0.9
+# A few spots can each carry a big haloed ring. Hundreds cannot: the rings would
+# cover the colour they are marking, so they shrink and thin as the count grows.
+BAD_SPOT_OVERVIEW_TIERS = (
+    (40, 2.6, 2.15, True),
+    (250, 1.4, 0.70, False),
+    (10**9, 0.8, 0.50, False),
+)
 BAD_SPOT_ZOOM_COLS = 4
 BAD_SPOT_MAX_ZOOMS = 16
 BAD_SPOT_MAX = BAD_SPOT_MAX_CONSEC + BAD_SPOT_MAX_DISCRETE
 BAD_SPOT_RULES = {
-    "RSRP": {"threshold": -115.0, "unit": "dBm", "min_consecutive_m": 0.0, "max_consecutive": 150},
-    "RSRQ": {"threshold": -20.0, "unit": "dB", "min_consecutive_m": BAD_SPOT_MIN_CONSEC_M, "max_consecutive": 30},
-    "SINR": {"threshold": 0.0, "unit": "dB", "min_consecutive_m": BAD_SPOT_MIN_CONSEC_M, "max_consecutive": 30},
+    "RSRP": {"threshold": -115.0, "unit": "dBm", "min_consecutive_m": 0.0, "max_consecutive": 2000},
+    "RSRQ": {"threshold": -20.0, "unit": "dB", "min_consecutive_m": 0.0, "max_consecutive": 2000},
+    "SINR": {"threshold": 0.0, "unit": "dB", "min_consecutive_m": 0.0, "max_consecutive": 2000},
 }
 
 
@@ -1158,24 +1163,33 @@ def _spot_outline(spot: pd.Series) -> tuple[float, float, float, float, float, t
     return lon0, lat0, width_km / km_lon, height_km / 111.32, 0.0, style
 
 
+def overview_ring_style(spot_count: int) -> tuple[float, float, bool]:
+    """Ring floor (km), line width and halo flag for this many spots on one map."""
+    for limit, min_km, lw, halo in BAD_SPOT_OVERVIEW_TIERS:
+        if spot_count <= limit:
+            return min_km, lw, halo
+    return BAD_SPOT_OVERVIEW_TIERS[-1][1:]
+
+
 def _add_spot_outline(
-    ax, spot: pd.Series, *, overview: bool = False, min_diameter_km: float = BAD_SPOT_OVERVIEW_MIN_KM
+    ax,
+    spot: pd.Series,
+    *,
+    overview: bool = False,
+    style_tier: tuple[float, float, bool] = (BAD_SPOT_OVERVIEW_MIN_KM, BAD_SPOT_OVERVIEW_LW, True),
 ) -> None:
     cx, cy, w, h, angle, style = _spot_outline(spot)
     lat0 = cy
     km_lon = _km_per_deg_lon(lat0)
     if overview:
+        min_diameter_km, lw, halo = style_tier
         width_km = abs(w) * km_lon
         height_km = abs(h) * 111.32
         diameter_km = float(np.clip(max(width_km, height_km, min_diameter_km), min_diameter_km, BAD_SPOT_OVERVIEW_MAX_KM))
         w = diameter_km / km_lon
         h = diameter_km / 111.32
         angle = 0.0
-        dense = min_diameter_km < BAD_SPOT_OVERVIEW_MIN_KM
-        lw = BAD_SPOT_OVERVIEW_DENSE_LW if dense else BAD_SPOT_OVERVIEW_LW
-        if not dense:
-            # A lone ring reads better with a halo; dozens of haloed rings just
-            # smother the colour underneath.
+        if halo:
             ax.add_patch(
                 Ellipse(
                     (cx, cy),
@@ -1269,11 +1283,9 @@ def plot_bad_spot_map(
         title_fontsize=10,
     )
     if spots is not None and not spots.empty:
-        # A KPI with dozens of short holes needs smaller rings or the map disappears
-        # under them.
-        min_km = BAD_SPOT_OVERVIEW_MIN_KM if len(spots) <= 40 else BAD_SPOT_OVERVIEW_DENSE_MIN_KM
+        tier = overview_ring_style(len(spots))
         for _, spot in spots.iterrows():
-            _add_spot_outline(ax, spot, overview=True, min_diameter_km=min_km)
+            _add_spot_outline(ax, spot, overview=True, style_tier=tier)
     ax.set_title(title)
     hide_map_axes(ax)
     fig.tight_layout()
