@@ -685,6 +685,12 @@ def _detection_summary(kpi: str, spots: pd.DataFrame) -> str:
     )
     if total_consec > shown_consec:
         text += f" The {shown_consec} longest stretches are mapped and listed below."
+    longest_short = float(spots.attrs.get("longest_short_m", 0.0))
+    if longest_short >= 50:
+        text += (
+            f" The longest poor stretch that misses the rule is {longest_short:,.0f} m, "
+            "so shorter poor patches on the map are left unmarked."
+        )
     return text
 
 
@@ -720,10 +726,13 @@ def build_kpi_bad_spot_sheet(
         4,
         1,
         BAD_SPOT_KPI_NOTES[kpi]
-        + " Every sample below the threshold is painted on top of the good ones, so nothing poor is "
-        "hidden: each circle sits on colour you can see. Consecutive poor coverage of at least 200 m "
-        "is a thin black dashed oval, and a discrete patch of at least 1 km\u00b2 is a thin black dotted "
-        "circle. " + _detection_summary(kpi, spots) + " Numbers are not drawn on the maps.",
+        + " Maps and rules read the same 50 m road bins: a bin is coloured by the median of the "
+        "samples measured in it and counts as poor only when that median is below the threshold, "
+        "and poor bins are drawn on top of good ones. A circle can therefore only sit on colour you "
+        "can see. Consecutive poor coverage of at least 200 m is a thin black dashed oval, and a "
+        "discrete patch of at least 1 km\u00b2 is a thin black dotted circle. "
+        + _detection_summary(kpi, spots)
+        + " Numbers are not drawn on the maps.",
         size=11,
         wrap=True,
     )
@@ -788,8 +797,8 @@ def build_kpi_bad_spot_sheet(
         note_row,
         1,
         "Combined view is the first all-band coverage map with thin black outlines on poor stretches. "
-        "Poor share is the share of all-band samples inside the spot box that are below the threshold: "
-        "a low value means the road is poor on some passes only. Isolated poor samples that never reach "
+        "Poor share is the share of raw samples inside the spot box that are below the threshold: a "
+        "low value means the road is poor on some passes only. Short poor patches that never reach "
         "200 m of continuous poor coverage are left unmarked by design. Map numbers are omitted.",
         size=9,
         wrap=True,

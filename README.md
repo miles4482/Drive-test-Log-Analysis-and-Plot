@@ -71,6 +71,13 @@ python merge_and_analyze.py --from-merged
 | Dominant bands | B8 900 (28.4%), B1 2100 (25.4%), B3 1800 (23.5%), B41 2500 (22.7%) |
 | Unique Cell Ids | 5,132 |
 
+The all-band coverage maps show the **best server per scanner sweep**. The scanner writes one row per
+band with its own millisecond timestamp and revisits each band about every 3 s, so picking the
+strongest RSRP at an exact timestamp never lets the bands compete — it just keeps whichever band was
+sampled at that instant, and B41 2500 MHz is polled about four times as often as B8 900 MHz. Samples
+are therefore grouped into sweep windows (at most 4 s and 40 m of the same pass) before the strongest
+band is taken.
+
 RSRP / RSRQ / SINR coverage maps use the Page 1 legend:
 
 **RSRP (dBm):** `-90 <= X < Max` blue, `-100 <= X < -90` dark green, `-110 <= X < -100` light green, `-115 <= X < -110` yellow, `-120 <= X < -115` magenta, `-Min <= X < -120` red.
@@ -86,21 +93,22 @@ Throughput (PDCP DL) and CQI are on the same legend sheet but are not in these I
 **Bad Spot RSRP / RSRQ / SINR** are separate sheets (one KPI each). Each sheet puts the **combined all-band view with marks on top**, then zoomed local inspection. Map numbers are omitted.
 
 - **RSRP** < −115 dBm (magenta and red only; yellow is not a bad-spot colour), **RSRQ** < −20 dB (red), **SINR** < 0 dB
-- A stretch is circled only when the zoomed box is mostly those poor colours, so a winding poor route does not wrap a blue/green city grid
+- Maps and rules read the same **50 m road bins**: a bin is coloured by the median of the samples measured in it and counts as poor only when that median is below the threshold, and poor bins are drawn on top of good ones — so a circle can only sit on colour the map actually shows
 - **Consecutive:** at least 200 m of poor coverage along the drive (thin black dashed oval covering the whole poor stretch)
-- **Discrete area:** leftover poor samples covering at least 1 km² that also look poor on that coverage map (thin black dotted circle)
+- **Discrete area:** leftover poor bins covering at least 1 km² where that area is at least half poor (thin black dotted circle)
+- Poor patches shorter than 200 m are left unmarked by design; each sheet states how many stretches the rules found and how long the longest one that missed the rule was
 
-## Download Excel report (v1.27)
+## Download Excel report (v1.28)
 
-**v1.27 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.27.xlsx
+**v1.28 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.28.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.27.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.28.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.27.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.28.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
 Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 

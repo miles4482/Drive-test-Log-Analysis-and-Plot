@@ -863,12 +863,14 @@ def _consecutive_bad_spots(
     cum_m = np.cumsum(step_m)
 
     rows: list[dict] = []
+    longest_short_m = 0.0
     for run in _poor_runs(np.flatnonzero(poor), same_pass, cum_m, time_s):
         for piece in _split_by_span(run, lat, lon):
             if len(piece) < 2:
                 continue
             length_m = float(cum_m[piece[-1]] - cum_m[piece[0]])
             if length_m < BAD_SPOT_MIN_CONSEC_M:
+                longest_short_m = max(longest_short_m, length_m)
                 continue
             chunk = track.iloc[piece]
             rows.append(
@@ -887,6 +889,7 @@ def _consecutive_bad_spots(
     spots = pd.DataFrame(rows)
     if not spots.empty:
         spots = spots.sort_values("length_m", ascending=False).reset_index(drop=True)
+    spots.attrs["longest_short_m"] = longest_short_m
     return spots, used
 
 
@@ -986,6 +989,7 @@ def find_bad_spots(df: pd.DataFrame, column: str, max_spots: int = BAD_SPOT_MAX)
     binned_col = f"{column}__binned"
     track[binned_col] = binned_kpi(track, column)
     consec, used = _consecutive_bad_spots(track, column, threshold, detect_column=binned_col)
+    longest_short_m = float(consec.attrs.get("longest_short_m", 0.0))
     total_consec = len(consec)
     if total_consec > BAD_SPOT_MAX_CONSEC:
         consec = consec.head(BAD_SPOT_MAX_CONSEC).copy()
@@ -1019,6 +1023,7 @@ def find_bad_spots(df: pd.DataFrame, column: str, max_spots: int = BAD_SPOT_MAX)
     spots["map_poor_share"] = [_map_poor_share(track, row, column, threshold) for _, row in spots.iterrows()]
     spots.attrs["total_consecutive"] = total_consec
     spots.attrs["total_discrete"] = total_discrete
+    spots.attrs["longest_short_m"] = longest_short_m
     return spots
 
 
