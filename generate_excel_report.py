@@ -63,7 +63,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.27"
+REPORT_VERSION = "1.28"
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
@@ -537,7 +537,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
     write_cell(ws, 18, 1, "How to read this workbook", size=14, bold=True)
     notes = [
         "Cover \u2014 dataset and KPI tables on the left, IDLE Mode plots on the right, Active Mode section at the bottom.",
-        "RSRP / RSRQ / SINR \u2014 Idle V2.0 scanner: combined all-band map on top (with bad spots marked), then L900 / L1800 / L2100 / L2600 IDLE maps (best RSRP per time, no site pies); Active Mode stays blank until those logs are provided.",
+        "RSRP / RSRQ / SINR \u2014 Idle V2.0 scanner: combined all-band map on top (with bad spots marked), then L900 / L1800 / L2100 / L2600 IDLE maps (strongest band per scanner sweep, no site pies); Active Mode stays blank until those logs are provided.",
         "Bad Spot RSRP / RSRQ / SINR \u2014 one sheet per KPI: combined all-band view with marks on top, then zoomed local inspection. RSRP poor below -115 dBm (magenta/red); RSRQ below -20 dB (red); SINR below 0 dB (orange/red).",
         "RSRP vs KPIs \u2014 RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter with trend.",
         "Sample Log \u2014 evenly spaced subset of the merged samples (full merged scanner log stays in output/Bogura_merged.csv.gz).",
@@ -627,7 +627,8 @@ def _kind_label(kind: object) -> str:
 BAD_SPOT_KPI_NOTES = {
     "RSRP": (
         "Poor samples are RSRP below -115 dBm (magenta and red only; yellow is not a bad-spot colour). "
-        "The combined view at the top is the same all-band best-server map as the RSRP sheet, with bad spots marked."
+        "The combined view at the top is the same all-band best-server map as the RSRP sheet, with bad spots marked. "
+        "Best server is the strongest band per scanner sweep, so a weak band is never mapped as the coverage of a road."
     ),
     "RSRQ": (
         "Poor samples are RSRQ below -20 dB (red). "
@@ -671,6 +672,22 @@ def _bad_spot_table_rows(spots: pd.DataFrame, *, include_kpi: bool = True) -> li
     return rows
 
 
+def _detection_summary(kpi: str, spots: pd.DataFrame) -> str:
+    """State how many spots the rules found and how many of them are drawn."""
+    if spots is None or spots.empty:
+        return f"No {kpi} location meets either rule."
+    total_consec = int(spots.attrs.get("total_consecutive", int((spots["kind"] == "consecutive").sum())))
+    total_discrete = int(spots.attrs.get("total_discrete", int((spots["kind"] == "discrete").sum())))
+    shown_consec = int((spots["kind"] == "consecutive").sum())
+    text = (
+        f"The rules find {total_consec} consecutive {kpi} stretch(es) of at least 200 m "
+        f"and {total_discrete} discrete area(s) of at least 1 km\u00b2."
+    )
+    if total_consec > shown_consec:
+        text += f" The {shown_consec} longest stretches are mapped and listed below."
+    return text
+
+
 def _zoom_display_height(path: Path | None, spots: pd.DataFrame, width: int = 860) -> int:
     n = 0 if spots is None or spots.empty else int(min(len(spots), 16))
     rows = max(1, (n + 3) // 4)
@@ -703,10 +720,10 @@ def build_kpi_bad_spot_sheet(
         4,
         1,
         BAD_SPOT_KPI_NOTES[kpi]
-        + " A location is circled only when that zoomed view is mostly those poor colours. "
-        "The dashed oval covers the whole poor stretch. Consecutive poor coverage of at least 200 m "
-        "is a thin black dashed oval. A discrete patch of at least 1 km\u00b2 is a thin black dotted circle. "
-        "Numbers are not drawn on the maps.",
+        + " Every sample below the threshold is painted on top of the good ones, so nothing poor is "
+        "hidden: each circle sits on colour you can see. Consecutive poor coverage of at least 200 m "
+        "is a thin black dashed oval, and a discrete patch of at least 1 km\u00b2 is a thin black dotted "
+        "circle. " + _detection_summary(kpi, spots) + " Numbers are not drawn on the maps.",
         size=11,
         wrap=True,
     )
@@ -771,8 +788,9 @@ def build_kpi_bad_spot_sheet(
         note_row,
         1,
         "Combined view is the first all-band coverage map with thin black outlines on poor stretches. "
-        "Zoomed panels inspect each stretch locally and keep poor colours on top. "
-        "Blue/green city grids are not circled. Map numbers are omitted.",
+        "Poor share is the share of all-band samples inside the spot box that are below the threshold: "
+        "a low value means the road is poor on some passes only. Isolated poor samples that never reach "
+        "200 m of continuous poor coverage are left unmarked by design. Map numbers are omitted.",
         size=9,
         wrap=True,
     )
