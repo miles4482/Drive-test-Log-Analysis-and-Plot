@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+import math
 import re
 import shutil
 import zipfile
@@ -47,7 +48,11 @@ from merge_and_analyze import (
     earfcn_to_band,
     earfcn_to_layer,
     filter_by_layer,
+    BAD_SPOT_MAX_ZOOMS,
+    BAD_SPOT_RULES,
+    consecutive_label,
     find_bad_spots,
+    min_consecutive_m,
     best_server,
     plot_rsrp_bad_spot_map,
     plot_rsrp_coverage_map,
@@ -63,7 +68,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.28"
+REPORT_VERSION = "1.29"
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
 
@@ -617,25 +622,26 @@ def build_kpi_sheet(
         )
 
 
-def _kind_label(kind: object) -> str:
+def _kind_label(kind: object, kpi: object = None) -> str:
     text = str(kind or "")
     if text == "discrete":
         return "Discrete area \u2265 1 km\u00b2"
-    return "Consecutive \u2265 200 m"
+    return consecutive_label(str(kpi)) if kpi in BAD_SPOT_RULES else "Consecutive \u2265 200 m"
 
 
 BAD_SPOT_KPI_NOTES = {
     "RSRP": (
-        "Poor samples are RSRP below -115 dBm (magenta and red only; yellow is not a bad-spot colour). "
+        "Poor is RSRP at or below -115 dBm (magenta and red only; yellow is not a bad-spot colour). "
+        "Every poor run is circled, however short, because a 50 m coverage hole is still a hole. "
         "The combined view at the top is the same all-band best-server map as the RSRP sheet, with bad spots marked. "
         "Best server is the strongest band per scanner sweep, so a weak band is never mapped as the coverage of a road."
     ),
     "RSRQ": (
-        "Poor samples are RSRQ below -20 dB (red). "
+        "Poor is RSRQ at or below -20 dB (red), and a bad spot is a run of at least 200 m. "
         "The combined view at the top is the same all-band best-server map as the RSRQ sheet, with bad spots marked."
     ),
     "SINR": (
-        "Poor samples are SINR below 0 dB (orange and red). "
+        "Poor is SINR at or below 0 dB (orange and red), and a bad spot is a run of at least 200 m. "
         "The combined view at the top is the same all-band best-server map as the SINR sheet, with bad spots marked."
     ),
 }
@@ -648,7 +654,7 @@ def _bad_spot_table_rows(spots: pd.DataFrame, *, include_kpi: bool = True) -> li
         length_m = s.get("length_m", np.nan)
         area_km2 = s.get("area_km2", np.nan)
         row = [
-            _kind_label(s.get("kind")),
+            _kind_label(s.get("kind"), s.get("kpi")),
         ]
         if include_kpi:
             row.append(str(s["kpi"]))
@@ -679,16 +685,23 @@ def _detection_summary(kpi: str, spots: pd.DataFrame) -> str:
     total_consec = int(spots.attrs.get("total_consecutive", int((spots["kind"] == "consecutive").sum())))
     total_discrete = int(spots.attrs.get("total_discrete", int((spots["kind"] == "discrete").sum())))
     shown_consec = int((spots["kind"] == "consecutive").sum())
-    text = (
-        f"The rules find {total_consec} consecutive {kpi} stretch(es) of at least 200 m "
-        f"and {total_discrete} discrete area(s) of at least 1 km\u00b2."
-    )
+    minimum = min_consecutive_m(kpi)
+    if minimum <= 0:
+        text = (
+            f"The rules find {total_consec} poor {kpi} run(s) on the drive, all of them circled, "
+            f"and {total_discrete} discrete area(s) of at least 1 km\u00b2."
+        )
+    else:
+        text = (
+            f"The rules find {total_consec} consecutive {kpi} run(s) of at least {minimum:,.0f} m "
+            f"and {total_discrete} discrete area(s) of at least 1 km\u00b2."
+        )
     if total_consec > shown_consec:
-        text += f" The {shown_consec} longest stretches are mapped and listed below."
+        text += f" The {shown_consec} longest runs are mapped and listed below."
     longest_short = float(spots.attrs.get("longest_short_m", 0.0))
-    if longest_short >= 50:
+    if minimum > 0 and longest_short >= 50:
         text += (
-            f" The longest poor stretch that misses the rule is {longest_short:,.0f} m, "
+            f" The longest poor run that misses the rule is {math.floor(longest_short):,} m, "
             "so shorter poor patches on the map are left unmarked."
         )
     return text
@@ -727,10 +740,10 @@ def build_kpi_bad_spot_sheet(
         1,
         BAD_SPOT_KPI_NOTES[kpi]
         + " Maps and rules read the same 50 m road bins: a bin is coloured by the median of the "
-        "samples measured in it and counts as poor only when that median is below the threshold, "
-        "and poor bins are drawn on top of good ones. A circle can therefore only sit on colour you "
-        "can see. Consecutive poor coverage of at least 200 m is a thin black dashed oval, and a "
-        "discrete patch of at least 1 km\u00b2 is a thin black dotted circle. "
+        "samples measured in it and counts as poor only when that median is at or below the "
+        "threshold, and poor bins are drawn on top of good ones. A circle can therefore only sit on "
+        "colour you can see. A poor run is a thin black dashed oval, and a discrete patch of at "
+        "least 1 km\u00b2 is a thin black dotted circle. "
         + _detection_summary(kpi, spots)
         + " Numbers are not drawn on the maps.",
         size=11,
@@ -745,7 +758,11 @@ def build_kpi_bad_spot_sheet(
         add_image(ws, combined_map, "A10", width=760, height=660)
 
     zoom_row = 46
-    section_bar(ws, zoom_row, f"{kpi} zoomed locations", 1, last_col)
+    zoom_title = f"{kpi} zoomed locations"
+    shown_zooms = 0 if spots is None or spots.empty else min(len(spots), BAD_SPOT_MAX_ZOOMS)
+    if spots is not None and len(spots) > shown_zooms:
+        zoom_title = f"{zoom_title}  |  {shown_zooms} longest of {len(spots)}"
+    section_bar(ws, zoom_row, zoom_title, 1, last_col)
     zoom_h = _zoom_display_height(zooms, spots)
     if zooms is not None and zooms.exists():
         add_image(ws, zooms, f"A{zoom_row + 2}", width=860, height=zoom_h)
@@ -797,9 +814,9 @@ def build_kpi_bad_spot_sheet(
         note_row,
         1,
         "Combined view is the first all-band coverage map with thin black outlines on poor stretches. "
-        "Poor share is the share of raw samples inside the spot box that are below the threshold: a "
-        "low value means the road is poor on some passes only. Short poor patches that never reach "
-        "200 m of continuous poor coverage are left unmarked by design. Map numbers are omitted.",
+        "Poor share is the share of raw samples inside the spot box that are at or below the "
+        "threshold: a low value means the road is poor on some passes only. Length is the distance "
+        "of road the run covers, and a single 50 m bin is reported as 50 m. Map numbers are omitted.",
         size=9,
         wrap=True,
     )

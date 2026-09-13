@@ -585,9 +585,11 @@ def plot_sinr_coverage_map(
 
 
 # Bad-spot rules:
-# 1) A sample is poor when the KPI is at or below the threshold.
-# 2) Consecutive poor coverage along the drive of at least 200 m.
-# 3) Poor samples that never form a 200 m stretch, but cover >= 1 km², get a large circle.
+# 1) A location is poor when the KPI is at or below the threshold.
+# 2) A run of poor road is a bad spot. RSRP marks every run, however short, because
+#    a coverage hole of 50 m is still a hole; RSRQ and SINR are poor over so much of
+#    the drive that only runs of at least 200 m are worth circling.
+# 3) Poor locations that never form a 200 m run, but cover >= 1 km², get a large circle.
 BAD_SPOT_MIN_CONSEC_M = 200.0
 BAD_SPOT_DISCRETE_AREA_KM2 = 1.0
 # Best-server samples are one scanner sweep apart (<= 40 m), so a poor stretch may
@@ -608,16 +610,30 @@ BAD_SPOT_ZOOM_MIN_KM = 1.2
 BAD_SPOT_OUTLINE_PAD = 1.45  # with sqrt(2), oval covers bbox corners / red tails
 BAD_SPOT_OUTLINE_MIN_MINOR_KM = 0.50
 BAD_SPOT_OVERVIEW_MIN_KM = 2.6  # city-scale combined map must show a visible circle
+BAD_SPOT_OVERVIEW_DENSE_MIN_KM = 2.0  # many spots: smaller, thinner rings stay readable
 BAD_SPOT_OVERVIEW_MAX_KM = 4.5
 BAD_SPOT_OVERVIEW_LW = 2.15
+BAD_SPOT_OVERVIEW_DENSE_LW = 0.9
 BAD_SPOT_ZOOM_COLS = 4
 BAD_SPOT_MAX_ZOOMS = 16
 BAD_SPOT_MAX = BAD_SPOT_MAX_CONSEC + BAD_SPOT_MAX_DISCRETE
 BAD_SPOT_RULES = {
-    "RSRP": {"threshold": -115.0, "unit": "dBm"},
-    "RSRQ": {"threshold": -20.0, "unit": "dB"},
-    "SINR": {"threshold": 0.0, "unit": "dB"},
+    "RSRP": {"threshold": -115.0, "unit": "dBm", "min_consecutive_m": 0.0, "max_consecutive": 150},
+    "RSRQ": {"threshold": -20.0, "unit": "dB", "min_consecutive_m": BAD_SPOT_MIN_CONSEC_M, "max_consecutive": 30},
+    "SINR": {"threshold": 0.0, "unit": "dB", "min_consecutive_m": BAD_SPOT_MIN_CONSEC_M, "max_consecutive": 30},
 }
+
+
+def min_consecutive_m(column: str) -> float:
+    return float(BAD_SPOT_RULES[column].get("min_consecutive_m", BAD_SPOT_MIN_CONSEC_M))
+
+
+def consecutive_label(column: str) -> str:
+    """Legend / table wording for the consecutive rule actually applied to this KPI."""
+    minimum = min_consecutive_m(column)
+    if minimum <= 0:
+        return "Poor run (any length)"
+    return f"Consecutive \u2265 {minimum:,.0f} m"
 
 
 def _km_per_deg_lon(lat: float) -> float:
@@ -632,9 +648,9 @@ def _equirect_km(lat1, lon1, lat2, lon2) -> np.ndarray:
 
 
 def _poor_mask(values: pd.Series, threshold: float) -> pd.Series:
-    """Poor samples are strictly below the KPI threshold (RSRP pink+red: X < -115)."""
+    """Poor is at or below the KPI threshold (RSRP <= -115, RSRQ <= -20, SINR <= 0)."""
     v = pd.to_numeric(values, errors="coerce")
-    return v.notna() & (v < threshold)
+    return v.notna() & (v <= threshold)
 
 
 def _prepare_track(df: pd.DataFrame, column: str) -> pd.DataFrame:
@@ -841,9 +857,16 @@ def _split_by_span(run: list[int], lat: np.ndarray, lon: np.ndarray) -> list[lis
 
 
 def _consecutive_bad_spots(
-    track: pd.DataFrame, column: str, threshold: float, detect_column: str | None = None
+    track: pd.DataFrame,
+    column: str,
+    threshold: float,
+    detect_column: str | None = None,
+    min_length_m: float = BAD_SPOT_MIN_CONSEC_M,
 ) -> tuple[pd.DataFrame, np.ndarray]:
-    """Rule 2: consecutive poor path length >= 200 m. Returns (spots, used-row mask)."""
+    """Rule 2: a run of consecutive poor road of at least min_length_m.
+
+    Returns (spots, used-row mask).
+    """
     detect_column = detect_column or column
     n = len(track)
     used = np.zeros(n, dtype=bool)
@@ -866,10 +889,11 @@ def _consecutive_bad_spots(
     longest_short_m = 0.0
     for run in _poor_runs(np.flatnonzero(poor), same_pass, cum_m, time_s):
         for piece in _split_by_span(run, lat, lon):
-            if len(piece) < 2:
+            if not piece:
                 continue
-            length_m = float(cum_m[piece[-1]] - cum_m[piece[0]])
-            if length_m < BAD_SPOT_MIN_CONSEC_M:
+            # A lone poor sample still stands for the 50 m bin it was judged on.
+            length_m = max(float(cum_m[piece[-1]] - cum_m[piece[0]]), MAP_BIN_M)
+            if length_m < min_length_m:
                 longest_short_m = max(longest_short_m, length_m)
                 continue
             chunk = track.iloc[piece]
@@ -981,18 +1005,27 @@ def _spot_extra_stats(df: pd.DataFrame, spot: pd.Series) -> dict:
     }
 
 
-def find_bad_spots(df: pd.DataFrame, column: str, max_spots: int = BAD_SPOT_MAX) -> pd.DataFrame:
+def find_bad_spots(df: pd.DataFrame, column: str, max_spots: int | None = None) -> pd.DataFrame:
     """Bad spots on the same best-server all-band track used by the first coverage map."""
     rule = BAD_SPOT_RULES[column]
     threshold = rule["threshold"]
+    if max_spots is None:
+        max_spots = int(rule.get("max_consecutive", BAD_SPOT_MAX_CONSEC)) + BAD_SPOT_MAX_DISCRETE
     track = _prepare_track(df, column)
     binned_col = f"{column}__binned"
     track[binned_col] = binned_kpi(track, column)
-    consec, used = _consecutive_bad_spots(track, column, threshold, detect_column=binned_col)
+    consec, used = _consecutive_bad_spots(
+        track,
+        column,
+        threshold,
+        detect_column=binned_col,
+        min_length_m=float(rule.get("min_consecutive_m", BAD_SPOT_MIN_CONSEC_M)),
+    )
     longest_short_m = float(consec.attrs.get("longest_short_m", 0.0))
     total_consec = len(consec)
-    if total_consec > BAD_SPOT_MAX_CONSEC:
-        consec = consec.head(BAD_SPOT_MAX_CONSEC).copy()
+    max_consec = int(rule.get("max_consecutive", BAD_SPOT_MAX_CONSEC))
+    if total_consec > max_consec:
+        consec = consec.head(max_consec).copy()
     leftover = track.iloc[np.flatnonzero(_poor_mask(track[binned_col], threshold).to_numpy() & ~used)]
     discrete = _discrete_area_bad_spots(leftover, column, threshold)
     if not discrete.empty:
@@ -1125,31 +1158,37 @@ def _spot_outline(spot: pd.Series) -> tuple[float, float, float, float, float, t
     return lon0, lat0, width_km / km_lon, height_km / 111.32, 0.0, style
 
 
-def _add_spot_outline(ax, spot: pd.Series, *, overview: bool = False) -> None:
+def _add_spot_outline(
+    ax, spot: pd.Series, *, overview: bool = False, min_diameter_km: float = BAD_SPOT_OVERVIEW_MIN_KM
+) -> None:
     cx, cy, w, h, angle, style = _spot_outline(spot)
     lat0 = cy
     km_lon = _km_per_deg_lon(lat0)
     if overview:
         width_km = abs(w) * km_lon
         height_km = abs(h) * 111.32
-        diameter_km = float(np.clip(max(width_km, height_km, BAD_SPOT_OVERVIEW_MIN_KM), BAD_SPOT_OVERVIEW_MIN_KM, BAD_SPOT_OVERVIEW_MAX_KM))
+        diameter_km = float(np.clip(max(width_km, height_km, min_diameter_km), min_diameter_km, BAD_SPOT_OVERVIEW_MAX_KM))
         w = diameter_km / km_lon
         h = diameter_km / 111.32
         angle = 0.0
-        lw = BAD_SPOT_OVERVIEW_LW
-        ax.add_patch(
-            Ellipse(
-                (cx, cy),
-                width=w,
-                height=h,
-                angle=angle,
-                fill=False,
-                edgecolor="#FFFFFF",
-                linestyle="solid",
-                linewidth=lw + 2.0,
-                zorder=5.6,
+        dense = min_diameter_km < BAD_SPOT_OVERVIEW_MIN_KM
+        lw = BAD_SPOT_OVERVIEW_DENSE_LW if dense else BAD_SPOT_OVERVIEW_LW
+        if not dense:
+            # A lone ring reads better with a halo; dozens of haloed rings just
+            # smother the colour underneath.
+            ax.add_patch(
+                Ellipse(
+                    (cx, cy),
+                    width=w,
+                    height=h,
+                    angle=angle,
+                    fill=False,
+                    edgecolor="#FFFFFF",
+                    linestyle="solid",
+                    linewidth=lw + 2.0,
+                    zorder=5.6,
+                )
             )
-        )
     else:
         lw = 1.0
     ax.add_patch(
@@ -1216,7 +1255,7 @@ def plot_bad_spot_map(
     handles = _coverage_legend_handles(labels, colors)
     handles.extend(
         [
-            Line2D([0], [0], color="#000000", lw=2.0, linestyle=(0, (3, 2)), label="Consecutive ≥ 200 m"),
+            Line2D([0], [0], color="#000000", lw=2.0, linestyle=(0, (3, 2)), label=consecutive_label(column)),
             Line2D([0], [0], color="#000000", lw=2.0, linestyle=(0, (1, 1.4)), label="Discrete area ≥ 1 km²"),
         ]
     )
@@ -1230,8 +1269,11 @@ def plot_bad_spot_map(
         title_fontsize=10,
     )
     if spots is not None and not spots.empty:
+        # A KPI with dozens of short holes needs smaller rings or the map disappears
+        # under them.
+        min_km = BAD_SPOT_OVERVIEW_MIN_KM if len(spots) <= 40 else BAD_SPOT_OVERVIEW_DENSE_MIN_KM
         for _, spot in spots.iterrows():
-            _add_spot_outline(ax, spot, overview=True)
+            _add_spot_outline(ax, spot, overview=True, min_diameter_km=min_km)
     ax.set_title(title)
     hide_map_axes(ax)
     fig.tight_layout()
@@ -1291,7 +1333,8 @@ def plot_bad_spot_zoom_grid(
         if kind == "discrete":
             caption = f"Discrete {float(spot['area_km2']):.1f} km²"
         else:
-            caption = f"Consecutive {float(spot['length_m']):.0f} m"
+            word = "Poor run" if min_consecutive_m(column) <= 0 else "Consecutive"
+            caption = f"{word} {float(spot['length_m']):.0f} m"
         ax.set_title(caption, fontsize=8)
     fig.suptitle(title, fontsize=11, fontweight="bold")
     fig.tight_layout()

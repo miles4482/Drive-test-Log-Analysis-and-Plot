@@ -92,23 +92,24 @@ Throughput (PDCP DL) and CQI are on the same legend sheet but are not in these I
 
 **Bad Spot RSRP / RSRQ / SINR** are separate sheets (one KPI each). Each sheet puts the **combined all-band view with marks on top**, then zoomed local inspection. Map numbers are omitted.
 
-- **RSRP** < −115 dBm (magenta and red only; yellow is not a bad-spot colour), **RSRQ** < −20 dB (red), **SINR** < 0 dB
-- Maps and rules read the same **50 m road bins**: a bin is coloured by the median of the samples measured in it and counts as poor only when that median is below the threshold, and poor bins are drawn on top of good ones — so a circle can only sit on colour the map actually shows
-- **Consecutive:** at least 200 m of poor coverage along the drive (thin black dashed oval covering the whole poor stretch)
+- Poor is **RSRP ≤ −115 dBm** (magenta and red only; yellow is not a bad-spot colour), **RSRQ ≤ −20 dB** (red), **SINR ≤ 0 dB** (orange and red)
+- Maps and rules read the same **50 m road bins**: a bin is coloured by the median of the samples measured in it and counts as poor only when that median is at or below the threshold, and poor bins are drawn on top of good ones — so a circle can only sit on colour the map actually shows
+- **RSRP:** every poor run is circled, however short, because a 50 m coverage hole is still a hole. A single poor bin is reported as 50 m
+- **RSRQ / SINR:** poor coverage is so widespread that only runs of at least 200 m are circled, and the 30 longest are mapped and tabled
 - **Discrete area:** leftover poor bins covering at least 1 km² where that area is at least half poor (thin black dotted circle)
-- Poor patches shorter than 200 m are left unmarked by design; each sheet states how many stretches the rules found and how long the longest one that missed the rule was
+- Each sheet states how many runs the rules found, how many are drawn, and — where a minimum length applies — how long the longest run that missed it was
 
-## Download Excel report (v1.28)
+## Download Excel report (v1.29)
 
-**v1.28 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.28.xlsx
+**v1.29 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.29.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.28.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.29.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.28.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.29.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
 Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 
