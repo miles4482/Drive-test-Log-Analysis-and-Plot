@@ -533,6 +533,9 @@ BAD_SPOT_ZOOM_PAD_KM = 0.70
 BAD_SPOT_ZOOM_MIN_KM = 1.2
 BAD_SPOT_OUTLINE_PAD = 1.45  # with sqrt(2), oval covers bbox corners / red tails
 BAD_SPOT_OUTLINE_MIN_MINOR_KM = 0.50
+BAD_SPOT_OVERVIEW_MIN_KM = 2.6  # city-scale combined map must show a visible circle
+BAD_SPOT_OVERVIEW_MAX_KM = 4.5
+BAD_SPOT_OVERVIEW_LW = 2.15
 BAD_SPOT_ZOOM_COLS = 4
 BAD_SPOT_MAX_ZOOMS = 16
 BAD_SPOT_MAX = BAD_SPOT_MAX_CONSEC + BAD_SPOT_MAX_DISCRETE
@@ -1112,8 +1115,33 @@ def _spot_outline(spot: pd.Series) -> tuple[float, float, float, float, float, t
     return lon0, lat0, width_km / km_lon, height_km / 111.32, 0.0, style
 
 
-def _add_spot_outline(ax, spot: pd.Series) -> None:
+def _add_spot_outline(ax, spot: pd.Series, *, overview: bool = False) -> None:
     cx, cy, w, h, angle, style = _spot_outline(spot)
+    lat0 = cy
+    km_lon = _km_per_deg_lon(lat0)
+    if overview:
+        width_km = abs(w) * km_lon
+        height_km = abs(h) * 111.32
+        diameter_km = float(np.clip(max(width_km, height_km, BAD_SPOT_OVERVIEW_MIN_KM), BAD_SPOT_OVERVIEW_MIN_KM, BAD_SPOT_OVERVIEW_MAX_KM))
+        w = diameter_km / km_lon
+        h = diameter_km / 111.32
+        angle = 0.0
+        lw = BAD_SPOT_OVERVIEW_LW
+        ax.add_patch(
+            Ellipse(
+                (cx, cy),
+                width=w,
+                height=h,
+                angle=angle,
+                fill=False,
+                edgecolor="#FFFFFF",
+                linestyle="solid",
+                linewidth=lw + 2.0,
+                zorder=5.6,
+            )
+        )
+    else:
+        lw = 1.0
     ax.add_patch(
         Ellipse(
             (cx, cy),
@@ -1123,7 +1151,7 @@ def _add_spot_outline(ax, spot: pd.Series) -> None:
             fill=False,
             edgecolor="#000000",
             linestyle=style,
-            linewidth=0.7,
+            linewidth=lw,
             zorder=6,
         )
     )
@@ -1176,8 +1204,8 @@ def plot_bad_spot_map(
     handles = _coverage_legend_handles(labels, colors)
     handles.extend(
         [
-            Line2D([0], [0], color="#000000", lw=0.8, linestyle=(0, (3, 2)), label="Consecutive ≥ 200 m"),
-            Line2D([0], [0], color="#000000", lw=0.8, linestyle=(0, (1, 1.4)), label="Discrete area ≥ 1 km²"),
+            Line2D([0], [0], color="#000000", lw=2.0, linestyle=(0, (3, 2)), label="Consecutive ≥ 200 m"),
+            Line2D([0], [0], color="#000000", lw=2.0, linestyle=(0, (1, 1.4)), label="Discrete area ≥ 1 km²"),
         ]
     )
     ax.legend(
@@ -1191,7 +1219,7 @@ def plot_bad_spot_map(
     )
     if spots is not None and not spots.empty:
         for _, spot in spots.iterrows():
-            _add_spot_outline(ax, spot)
+            _add_spot_outline(ax, spot, overview=True)
     ax.set_title(title)
     hide_map_axes(ax)
     fig.tight_layout()

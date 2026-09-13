@@ -90,17 +90,17 @@ Throughput (PDCP DL) and CQI are on the same legend sheet but are not in these I
 - **Consecutive:** at least 200 m of poor coverage along the drive (thin black dashed oval covering the whole poor stretch)
 - **Discrete area:** leftover poor samples covering at least 1 km² that also look poor on that coverage map (thin black dotted circle)
 
-## Download Excel report (v1.26)
+## Download Excel report (v1.27)
 
-**v1.26 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.26.xlsx
+**v1.27 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.27.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.26.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.27.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.26.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.27.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
 Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 
