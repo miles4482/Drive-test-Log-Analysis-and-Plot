@@ -1445,7 +1445,7 @@ def _sweep_group_ids(
     return ids
 
 
-def best_server(df: pd.DataFrame, group_cols: tuple[str, ...] = ("Time",)) -> pd.DataFrame:
+def best_server(df: pd.DataFrame) -> pd.DataFrame:
     """All-band best server: strongest RSRP per scanner sweep.
 
     The scanner writes one row per band with its own millisecond timestamp and
