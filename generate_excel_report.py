@@ -1,0 +1,1280 @@
+#!/usr/bin/env python3
+"""Build a Bogura drive-test Excel report with RSRP/RSRQ/SINR charts.
+
+Worksheet rules for every sheet:
+- freeze panes off
+- gridlines off (screen and print)
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from pathlib import Path
+import re
+import shutil
+import zipfile
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from matplotlib.ticker import MultipleLocator
+from openpyxl import Workbook, load_workbook
+from openpyxl.chart import BarChart, LineChart, Reference
+from openpyxl.chart.layout import Layout, ManualLayout
+from openpyxl.chart.marker import Marker
+from openpyxl.chart.text import RichText
+from openpyxl.drawing.image import Image as XLImage
+from openpyxl.drawing.text import CharacterProperties, Paragraph, ParagraphProperties, RichTextProperties
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.worksheet import Worksheet
+
+from merge_and_analyze import (
+    OUTPUT_DIR,
+    PLOTS_DIR,
+    MAP_RSRP_COLORS,
+    MAP_RSRP_LABELS,
+    MAP_RSRQ_COLORS,
+    MAP_RSRQ_LABELS,
+    MAP_SINR_COLORS,
+    MAP_SINR_LABELS,
+    REPORT_LAYERS,
+    coverage_extent,
+    downsample,
+    earfcn_to_band,
+    earfcn_to_layer,
+    filter_by_layer,
+    find_bad_spots,
+    best_server,
+    plot_rsrp_bad_spot_map,
+    plot_rsrp_coverage_map,
+    plot_rsrq_bad_spot_map,
+    plot_rsrq_coverage_map,
+    plot_sinr_bad_spot_map,
+    plot_sinr_coverage_map,
+    plot_bad_spot_zoom_grid,
+    plot_stacked_map_hist,
+    rsrp_map_class,
+    rsrp_range_counts,
+    rsrq_map_class,
+    sinr_map_class,
+)
+
+REPORT_VERSION = "1.28"
+REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
+VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
+
+NAVY = "1B4F72"
+WHITE = "FFFFFF"
+LIGHT = "F4F6F7"
+CARD = "EAF2F8"
+YELLOW = "F4D03F"
+RSRP_COLOR = "C0392B"
+RSRQ_COLOR = "1F618D"
+SINR_COLOR = "117A65"
+VS_SINR_LINE = "48C9B0"
+VS_RSRQ_LINE = "5DADE2"
+THIN = Border(
+    left=Side(style="thin", color="D5D8DC"),
+    right=Side(style="thin", color="D5D8DC"),
+    top=Side(style="thin", color="D5D8DC"),
+    bottom=Side(style="thin", color="D5D8DC"),
+)
+
+
+def apply_sheet_view(ws: Worksheet) -> None:
+    """No freeze panes, no gridlines (on-screen or printed)."""
+    ws.freeze_panes = None
+    ws.sheet_view.showGridLines = False
+    ws.print_options.gridLines = False
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.paperSize = ws.PAPERSIZE_A4
+    ws.sheet_view.zoomScale = 100
+    ws.sheet_view.view = "normal"
+
+
+def fill(color: str) -> PatternFill:
+    return PatternFill("solid", fgColor=color)
+
+
+def font(size=11, bold=False, color=NAVY, name="Calibri") -> Font:
+    return Font(name=name, size=size, bold=bold, color=color)
+
+
+def write_cell(ws, row, col, value, *, size=11, bold=False, color=NAVY, fill_color=None, align="left", num_fmt=None, wrap=False):
+    cell = ws.cell(row, col, value)
+    cell.font = font(size=size, bold=bold, color=color)
+    cell.alignment = Alignment(horizontal=align, vertical="center", wrap_text=wrap)
+    if fill_color:
+        cell.fill = fill(fill_color)
+    if num_fmt:
+        cell.number_format = num_fmt
+    return cell
+
+
+def set_widths(ws, widths: dict[str, float]) -> None:
+    for col, width in widths.items():
+        ws.column_dimensions[col].width = width
+
+
+def kpi_stats(series: pd.Series) -> dict[str, float]:
+    s = pd.to_numeric(series, errors="coerce").dropna()
+    if s.empty:
+        return {k: np.nan for k in ("Count", "Min", "P5", "Median", "Mean", "P95", "Max", "Std")}
+    return {
+        "Count": float(len(s)),
+        "Min": float(s.min()),
+        "P5": float(s.quantile(0.05)),
+        "Median": float(s.median()),
+        "Mean": float(s.mean()),
+        "P95": float(s.quantile(0.95)),
+        "Max": float(s.max()),
+        "Std": float(s.std()),
+    }
+
+
+def map_range_counts(series: pd.Series, classifier, labels) -> pd.Series:
+    return classifier(series).value_counts(dropna=True).reindex(labels, fill_value=0)
+
+
+def add_image(ws: Worksheet, path: Path, anchor: str, width: int, height: int) -> None:
+    img = XLImage(str(path))
+    img.width = width
+    img.height = height
+    ws.add_image(img, anchor)
+
+
+def banner(ws: Worksheet, title: str, subtitle: str, last_col: int = 12) -> None:
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
+    write_cell(ws, 1, 1, title, size=20, bold=True, color=WHITE, fill_color=NAVY, align="left")
+    ws.row_dimensions[1].height = 28
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=last_col)
+    write_cell(ws, 2, 1, subtitle, size=12, color=WHITE, fill_color=NAVY)
+    ws.row_dimensions[2].height = 20
+    for col in range(1, last_col + 1):
+        ws.cell(1, col).fill = fill(NAVY)
+        ws.cell(2, col).fill = fill(NAVY)
+        ws.cell(1, col).font = font(20, bold=True, color=WHITE)
+        ws.cell(2, col).font = font(12, color=WHITE)
+
+
+def section_bar(ws: Worksheet, row: int, text: str, start_col: int, end_col: int, fill_color=YELLOW) -> None:
+    """Yellow section header like IDLE Mode / Active Mode."""
+    ws.merge_cells(start_row=row, start_column=start_col, end_row=row, end_column=end_col)
+    write_cell(ws, row, start_col, text, size=13, bold=True, color=NAVY, fill_color=fill_color, align="center")
+    ws.row_dimensions[row].height = 22
+    for col in range(start_col, end_col + 1):
+        ws.cell(row, col).fill = fill(fill_color)
+        ws.cell(row, col).font = font(13, bold=True, color=NAVY)
+        ws.cell(row, col).alignment = Alignment(horizontal="center", vertical="center")
+
+
+def save_active_placeholder(path: Path) -> Path:
+    """Blue placeholder shown until Active Mode logs are provided."""
+    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(7.4, 8.2))
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.axis("off")
+    ax.add_patch(plt.Rectangle((0.12, 0.38), 0.76, 0.24, facecolor="#2E86C1", edgecolor="none", linewidth=0))
+    ax.text(
+        0.5,
+        0.50,
+        "Later I will give you data,\nthen plot here",
+        ha="center",
+        va="center",
+        color="white",
+        fontsize=14,
+        fontweight="bold",
+    )
+    fig.savefig(path, dpi=140, facecolor="white", bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def write_table(ws, start_row: int, start_col: int, headers: list[str], rows: list[list], header_fill=NAVY, num_formats: dict[int, str] | None = None):
+    for i, h in enumerate(headers):
+        cell = write_cell(ws, start_row, start_col + i, h, size=11, bold=True, color=WHITE, fill_color=header_fill, align="center")
+        cell.border = THIN
+    for r_i, row in enumerate(rows, start=start_row + 1):
+        bg = LIGHT if (r_i - start_row) % 2 == 0 else WHITE
+        for c_i, value in enumerate(row):
+            fmt = (num_formats or {}).get(c_i)
+            cell = write_cell(ws, r_i, start_col + c_i, value, fill_color=bg, align="center" if c_i else "left", num_fmt=fmt)
+            cell.border = THIN
+    return start_row + len(rows)
+
+
+def _title_outside(title_obj) -> None:
+    if title_obj is None:
+        return
+    try:
+        title_obj.overlay = False
+    except Exception:
+        pass
+
+
+def reserve_plot_area(chart, left=0.14, top=0.16, width=0.78, height=0.60) -> None:
+    """Keep plot area inside the frame so axis titles and tick levels stay visible."""
+    chart.layout = Layout(
+        manualLayout=ManualLayout(
+            xMode="edge",
+            yMode="edge",
+            x=left,
+            y=top,
+            w=width,
+            h=height,
+        )
+    )
+
+
+def apply_xy_levels(
+    chart,
+    x_title: str,
+    y_title: str,
+    y_min=None,
+    y_max=None,
+    show_all_x_ticks=True,
+    x_tick_skip=None,
+    rotate_x=False,
+    y_major_unit=None,
+    y_ax_pos="l",
+    layout=True,
+    y_num_fmt=None,
+) -> None:
+    """Put category levels on the bottom (X) and value levels on the left (Y).
+
+    openpyxl defaults both axes to axPos='l', which Excel then draws without
+    horizontal tick labels or a usable vertical scale — the bug in the v1.3 charts.
+    """
+    chart.x_axis.title = x_title
+    chart.y_axis.title = y_title
+    _title_outside(getattr(chart, "title", None))
+    _title_outside(chart.x_axis.title)
+    _title_outside(chart.y_axis.title)
+    chart.x_axis.delete = False
+    chart.y_axis.delete = False
+    chart.x_axis.axPos = "b"
+    chart.y_axis.axPos = y_ax_pos
+    chart.x_axis.tickLblPos = "nextTo"
+    chart.y_axis.tickLblPos = "nextTo"
+    chart.x_axis.majorTickMark = "out"
+    chart.y_axis.majorTickMark = "out"
+    chart.x_axis.minorTickMark = "none"
+    chart.y_axis.minorTickMark = "none"
+    if y_num_fmt:
+        chart.y_axis.numFmt = y_num_fmt
+    if x_tick_skip is not None:
+        try:
+            chart.x_axis.tickLblSkip = int(x_tick_skip)
+            chart.x_axis.tickMarkSkip = int(x_tick_skip)
+        except Exception:
+            pass
+    elif show_all_x_ticks:
+        try:
+            chart.x_axis.tickLblSkip = 1
+            chart.x_axis.tickMarkSkip = 1
+        except Exception:
+            pass
+    if y_min is not None:
+        chart.y_axis.scaling.min = y_min
+    if y_max is not None:
+        chart.y_axis.scaling.max = y_max
+    if y_major_unit is not None:
+        try:
+            chart.y_axis.majorUnit = y_major_unit
+        except Exception:
+            pass
+    if rotate_x:
+        # Rotation only — do not add an empty text run, which blanks tick labels.
+        chart.x_axis.txPr = RichText(
+            bodyPr=RichTextProperties(rot="-5400000", wrap="square", anchor="ctr"),
+            p=[Paragraph(pPr=ParagraphProperties(defRPr=CharacterProperties(sz=700)))],
+        )
+    if layout:
+        reserve_plot_area(chart)
+
+
+def style_chart(chart, color: str, title: str, y_title: str, x_title: str, width=14, height=8, show_legend=False) -> None:
+    chart.title = title
+    chart.y_axis.title = y_title
+    chart.x_axis.title = x_title
+    chart.style = 10
+    chart.width = width
+    chart.height = height
+    if show_legend:
+        chart.legend.position = "b"
+    else:
+        chart.legend = None
+    if chart.series:
+        chart.series[0].graphicalProperties.solidFill = color
+        chart.series[0].graphicalProperties.line.solidFill = color
+    apply_xy_levels(chart, x_title, y_title, show_all_x_ticks=False, rotate_x=False)
+
+
+def add_col_chart(ws_data, ws_dest, anchor, title, color, cat_col, data_col, min_row, max_row, y_title, x_title, width=14, height=8, show_legend=False):
+    chart = BarChart()
+    chart.type = "col"
+    cats = Reference(ws_data, min_col=cat_col, min_row=min_row, max_row=max_row)
+    data = Reference(ws_data, min_col=data_col, min_row=min_row - 1, max_row=max_row)
+    chart.add_data(data, titles_from_data=True)
+    chart.set_categories(cats)
+    style_chart(chart, color, title, y_title, x_title, width=width, height=height, show_legend=show_legend)
+    chart.shape = 4
+    ws_dest.add_chart(chart, anchor)
+    return chart
+
+
+def add_stacked_col_chart(ws_data, ws_dest, anchor, title, cat_col, data_min, data_max, min_row, max_row, y_title, x_title, colors, width=14, height=8):
+    chart = BarChart()
+    chart.type = "col"
+    chart.grouping = "stacked"
+    chart.overlap = 100
+    cats = Reference(ws_data, min_col=cat_col, min_row=min_row, max_row=max_row)
+    data = Reference(ws_data, min_col=data_min, max_col=data_max, min_row=min_row - 1, max_row=max_row)
+    chart.add_data(data, titles_from_data=True)
+    chart.set_categories(cats)
+    chart.title = title
+    chart.y_axis.title = y_title
+    chart.x_axis.title = x_title
+    chart.style = 10
+    chart.width = width
+    chart.height = height
+    chart.legend.position = "b"
+    apply_xy_levels(chart, x_title, y_title, show_all_x_ticks=False, rotate_x=False)
+    for i, color in enumerate(colors):
+        if i < len(chart.series):
+            hexcol = color.lstrip("#")
+            chart.series[i].graphicalProperties.solidFill = hexcol
+            chart.series[i].graphicalProperties.line.solidFill = hexcol
+    ws_dest.add_chart(chart, anchor)
+    return chart
+
+
+def add_line_chart(ws_data, ws_dest, anchor, title, color, cat_col, data_col, min_row, max_row, y_title, x_title, width=14, height=8, legend=False):
+    chart = LineChart()
+    cats = Reference(ws_data, min_col=cat_col, min_row=min_row, max_row=max_row)
+    data = Reference(ws_data, min_col=data_col, min_row=min_row - 1, max_row=max_row)
+    chart.add_data(data, titles_from_data=True)
+    chart.set_categories(cats)
+    style_chart(chart, color, title, y_title, x_title, width=width, height=height)
+    if legend:
+        chart.legend.position = "b"
+    chart.series[0].graphicalProperties.line.solidFill = color
+    chart.series[0].graphicalProperties.line.width = 18000
+    ws_dest.add_chart(chart, anchor)
+    return chart
+
+
+def write_stacked_hist(ws, start_col, values, fine_bins, class_series, class_labels):
+    values = pd.to_numeric(values, errors="coerce")
+    mask = values.notna()
+    values = values[mask]
+    classes = class_series.reindex(values.index).astype(str)
+    ws.cell(1, start_col, "bin")
+    for j, lab in enumerate(class_labels):
+        ws.cell(1, start_col + 1 + j, str(lab))
+    lefts = fine_bins[:-1]
+    for i, left in enumerate(lefts, start=2):
+        ws.cell(i, start_col, float(left))
+    for j, lab in enumerate(class_labels):
+        subset = values[classes == str(lab)]
+        counts, _ = np.histogram(subset.to_numpy(), bins=fine_bins)
+        for i, n in enumerate(counts, start=2):
+            ws.cell(i, start_col + 1 + j, int(n))
+    return {
+        "cat_col": start_col,
+        "data_min": start_col + 1,
+        "data_max": start_col + len(class_labels),
+        "n": len(lefts),
+    }
+
+
+def write_chart_data(ws: Worksheet, df: pd.DataFrame) -> dict:
+    """Hidden sheet holding all series used by Excel charts."""
+    rsrp_bins = np.arange(-140, -48, 2)
+    rsrq_bins = np.arange(-24, -2.5, 0.5)
+    sinr_bins = np.arange(-15, 31, 1)
+
+    rsrp_cls = rsrp_map_class(df["RSRP"])
+    rsrq_cls = rsrq_map_class(df["RSRQ"])
+    sinr_cls = sinr_map_class(df["SINR"])
+
+    blocks = {
+        "RSRP": write_stacked_hist(ws, 26, df["RSRP"], rsrp_bins, rsrp_cls, MAP_RSRP_LABELS),
+        "RSRQ": write_stacked_hist(ws, 35, df["RSRQ"], rsrq_bins, rsrq_cls, MAP_RSRQ_LABELS),
+        "SINR": write_stacked_hist(ws, 41, df["SINR"], sinr_bins, sinr_cls, MAP_SINR_LABELS),
+    }
+
+    percentiles = list(range(0, 101, 2))
+    ws.cell(1, 7, "Percentile")
+    ws.cell(1, 8, "RSRP_CDF")
+    ws.cell(1, 9, "RSRQ_CDF")
+    ws.cell(1, 10, "SINR_CDF")
+    rsrp = df["RSRP"].dropna()
+    rsrq = df["RSRQ"].dropna()
+    sinr = df["SINR"].dropna()
+    rsrp_p = np.nanpercentile(rsrp, percentiles)
+    rsrq_p = np.nanpercentile(rsrq, percentiles)
+    sinr_p = np.nanpercentile(sinr, percentiles)
+    for i, p in enumerate(percentiles, start=2):
+        ws.cell(i, 7, p)
+        ws.cell(i, 8, float(rsrp_p[i - 2]))
+        ws.cell(i, 9, float(rsrq_p[i - 2]))
+        ws.cell(i, 10, float(sinr_p[i - 2]))
+    blocks["cdf_n"] = len(percentiles)
+
+    ws.cell(1, 12, "RSRP_quality")
+    ws.cell(1, 13, "RSRP_quality_n")
+    rsrp_q = rsrp_range_counts(df["RSRP"])
+    for i, (label, n) in enumerate(rsrp_q.items(), start=2):
+        ws.cell(i, 12, str(label))
+        ws.cell(i, 13, int(n))
+    blocks["rsrp_q_n"] = len(rsrp_q)
+    ws.cell(1, 15, "RSRQ_quality")
+    ws.cell(1, 16, "RSRQ_quality_n")
+    for i, (label, n) in enumerate(map_range_counts(df["RSRQ"], rsrq_map_class, MAP_RSRQ_LABELS).items(), start=2):
+        ws.cell(i, 15, str(label))
+        ws.cell(i, 16, int(n))
+    ws.cell(1, 18, "SINR_quality")
+    ws.cell(1, 19, "SINR_quality_n")
+    for i, (label, n) in enumerate(map_range_counts(df["SINR"], sinr_map_class, MAP_SINR_LABELS).items(), start=2):
+        ws.cell(i, 18, str(label))
+        ws.cell(i, 19, int(n))
+
+    ts = (
+        df.dropna(subset=["Time"])
+        .set_index("Time")[["RSRP", "RSRQ", "SINR"]]
+        .resample("10min")
+        .mean()
+        .dropna(how="all")
+    )
+    if len(ts) > 900:
+        ts = ts.iloc[:: max(1, len(ts) // 900)]
+    ws.cell(1, 21, "Time")
+    ws.cell(1, 22, "RSRP")
+    ws.cell(1, 23, "RSRQ")
+    ws.cell(1, 24, "SINR")
+    for i, (t, row) in enumerate(ts.iterrows(), start=2):
+        cell = ws.cell(i, 21, pd.Timestamp(t).to_pydatetime())
+        cell.number_format = "yyyy-mm-dd hh:mm"
+        ws.cell(i, 22, None if pd.isna(row["RSRP"]) else float(row["RSRP"]))
+        ws.cell(i, 23, None if pd.isna(row["RSRQ"]) else float(row["RSRQ"]))
+        ws.cell(i, 24, None if pd.isna(row["SINR"]) else float(row["SINR"]))
+    blocks["ts_n"] = len(ts)
+
+    rsrp_vs_bins = list(range(-80, -126, -1))
+    pair = df.copy()
+    pair["rsrp_bin"] = pd.to_numeric(pair["RSRP"], errors="coerce").round().astype("Int64")
+    ws.cell(1, 50, "RSRP_dBm")
+    ws.cell(1, 51, "SINR")
+    ws.cell(1, 52, "RSRQ")
+    all_mean = pair.groupby("rsrp_bin")[["SINR", "RSRQ"]].mean()
+    for i, b in enumerate(rsrp_vs_bins, start=2):
+        ws.cell(i, 50, int(b))
+        if b in all_mean.index:
+            ws.cell(i, 51, None if pd.isna(all_mean.loc[b, "SINR"]) else float(all_mean.loc[b, "SINR"]))
+            ws.cell(i, 52, None if pd.isna(all_mean.loc[b, "RSRQ"]) else float(all_mean.loc[b, "RSRQ"]))
+    blocks["vs_n"] = len(rsrp_vs_bins)
+    return blocks
+
+
+def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
+    last_col = 20
+    banner(
+        ws,
+        "  Bogura Drive-Test Report",
+        f"  Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}  |  IDLE Mode  |  Gridlines off  |  Freeze panes off",
+        last_col=last_col,
+    )
+    set_widths(ws, {get_column_letter(i): 14 for i in range(1, last_col + 1)})
+    ws.column_dimensions["A"].width = 26
+    ws.column_dimensions["B"].width = 18
+    ws.column_dimensions["E"].width = 20
+    section_bar(ws, 3, "IDLE Mode", 1, last_col)
+
+    write_cell(ws, 5, 1, "Dataset", size=14, bold=True)
+    info_rows = [
+        ["Mode", "IDLE (scanner)"],
+        ["Generated", datetime.now().strftime("%Y-%m-%d %H:%M")],
+        ["Archive", "Borga_Idle_V2.0.7z"],
+        ["CSV files", int(df["Source"].nunique())],
+        ["Merged samples", int(len(df))],
+        ["Start time", df["Time"].min()],
+        ["End time", df["Time"].max()],
+        ["Unique Cell Ids", int(df["Cell Id"].nunique())],
+        ["Longitude range", f"{df['Longitude'].min():.5f} – {df['Longitude'].max():.5f}"],
+        ["Latitude range", f"{df['Latitude'].min():.5f} – {df['Latitude'].max():.5f}"],
+    ]
+    write_table(ws, 6, 1, ["Item", "Value"], info_rows, num_formats={1: "#,##0"})
+    ws.cell(12, 2).number_format = "yyyy-mm-dd hh:mm:ss"
+    ws.cell(13, 2).number_format = "yyyy-mm-dd hh:mm:ss"
+
+    write_cell(ws, 5, 4, "Radio KPIs (all samples)", size=14, bold=True)
+    stats_headers = ["KPI", "Count", "Min", "P5", "Median", "Mean", "P95", "Max"]
+    stats_rows = []
+    for name in ("RSRP", "RSRQ", "SINR"):
+        st = kpi_stats(df[name])
+        stats_rows.append(
+            [name, st["Count"], st["Min"], st["P5"], st["Median"], st["Mean"], st["P95"], st["Max"]]
+        )
+    write_table(
+        ws,
+        6,
+        4,
+        stats_headers,
+        stats_rows,
+        num_formats={1: "#,##0", 2: "0.00", 3: "0.00", 4: "0.00", 5: "0.00", 6: "0.00", 7: "0.00"},
+    )
+
+    write_cell(ws, 18, 1, "How to read this workbook", size=14, bold=True)
+    notes = [
+        "Cover \u2014 dataset and KPI tables on the left, IDLE Mode plots on the right, Active Mode section at the bottom.",
+        "RSRP / RSRQ / SINR \u2014 Idle V2.0 scanner: combined all-band map on top (with bad spots marked), then L900 / L1800 / L2100 / L2600 IDLE maps (strongest band per scanner sweep, no site pies); Active Mode stays blank until those logs are provided.",
+        "Bad Spot RSRP / RSRQ / SINR \u2014 one sheet per KPI: combined all-band view with marks on top, then zoomed local inspection. RSRP poor below -115 dBm (magenta/red); RSRQ below -20 dB (red); SINR below 0 dB (orange/red).",
+        "RSRP vs KPIs \u2014 RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter with trend.",
+        "Sample Log \u2014 evenly spaced subset of the merged samples (full merged scanner log stays in output/Bogura_merged.csv.gz).",
+        "These files are IDLE Mode. Active Mode coverage maps will be added when those logs are provided.",
+    ]
+    for i, text in enumerate(notes):
+        ws.merge_cells(start_row=19 + i, start_column=1, end_row=19 + i, end_column=11)
+        write_cell(ws, 19 + i, 1, text, wrap=True)
+        ws.row_dimensions[19 + i].height = 18
+
+    write_cell(ws, 25, 1, "Band mix (DL EARFCN)", size=14, bold=True)
+    band = df["Band"].value_counts()
+    band_rows = [[str(k), int(v), v / len(df)] for k, v in band.items()]
+    write_table(ws, 26, 1, ["Band", "Samples", "Share"], band_rows, num_formats={1: "#,##0", 2: "0.0%"})
+
+    write_cell(ws, 25, 5, "RSRP ranges (dBm)", size=14, bold=True)
+    rsrp_q = rsrp_range_counts(df["RSRP"])
+    rsrp_rows = [[str(label), int(n), n / len(df)] for label, n in rsrp_q.items()]
+    write_table(
+        ws,
+        26,
+        5,
+        ["Range", "Samples", "Share"],
+        rsrp_rows,
+        num_formats={1: "#,##0", 2: "0.0%"},
+    )
+    write_cell(
+        ws,
+        36,
+        5,
+        "Ranges match the coverage-map legend: -90 <= X < Max (blue) down to RSRP < -120 (red).",
+        size=9,
+        wrap=True,
+    )
+    ws.merge_cells(start_row=36, start_column=5, end_row=36, end_column=8)
+    section_bar(ws, 42, "Active Mode", 1, 20)
+
+
+def build_kpi_sheet(
+    ws,
+    name: str,
+    unit: str,
+    map_path: Path | None,
+    placeholder_path: Path | None,
+    band_maps: dict[str, Path],
+):
+    last_col = 18
+    em = "\u2014"
+    banner(ws, f"  {name} Report", f"  Unit: {unit}  |  IDLE Mode coverage map  |  Gridlines off", last_col=last_col)
+    set_widths(ws, {get_column_letter(i): 14 for i in range(1, last_col + 1)})
+    section_bar(ws, 4, f"{name} coverage map {em} IDLE Mode  |  Combined view  |  bad spots", 1, 8)
+    section_bar(ws, 4, f"{name} coverage map {em} Active Mode", 10, 18)
+    if map_path and map_path.exists():
+        add_image(ws, map_path, "A6", width=620, height=520)
+    if placeholder_path and placeholder_path.exists():
+        add_image(ws, placeholder_path, "J6", width=520, height=360)
+
+    start_row = 34
+    block = 28
+    for i, layer in enumerate(REPORT_LAYERS):
+        row = start_row + i * block
+        section_bar(ws, row, f"{name} coverage map {em} IDLE Mode_{layer}", 1, 8)
+        section_bar(ws, row, f"{name} coverage map {em} Active Mode_{layer}", 10, 18)
+        band_path = band_maps.get(layer)
+        if band_path and band_path.exists():
+            add_image(ws, band_path, f"A{row + 2}", width=560, height=470)
+        note_row = row + 12
+        ws.merge_cells(start_row=note_row, start_column=10, end_row=note_row + 1, end_column=18)
+        write_cell(
+            ws,
+            note_row,
+            10,
+            "Log file will be provided later",
+            size=11,
+            color="7F8C8D",
+            align="center",
+        )
+
+
+def _kind_label(kind: object) -> str:
+    text = str(kind or "")
+    if text == "discrete":
+        return "Discrete area \u2265 1 km\u00b2"
+    return "Consecutive \u2265 200 m"
+
+
+BAD_SPOT_KPI_NOTES = {
+    "RSRP": (
+        "Poor samples are RSRP below -115 dBm (magenta and red only; yellow is not a bad-spot colour). "
+        "The combined view at the top is the same all-band best-server map as the RSRP sheet, with bad spots marked. "
+        "Best server is the strongest band per scanner sweep, so a weak band is never mapped as the coverage of a road."
+    ),
+    "RSRQ": (
+        "Poor samples are RSRQ below -20 dB (red). "
+        "The combined view at the top is the same all-band best-server map as the RSRQ sheet, with bad spots marked."
+    ),
+    "SINR": (
+        "Poor samples are SINR below 0 dB (orange and red). "
+        "The combined view at the top is the same all-band best-server map as the SINR sheet, with bad spots marked."
+    ),
+}
+
+
+def _bad_spot_table_rows(spots: pd.DataFrame, *, include_kpi: bool = True) -> list[list]:
+    rows = []
+    for _, s in spots.iterrows():
+        top_cell = "" if pd.isna(s.get("top_cell", pd.NA)) else int(s["top_cell"])
+        length_m = s.get("length_m", np.nan)
+        area_km2 = s.get("area_km2", np.nan)
+        row = [
+            _kind_label(s.get("kind")),
+        ]
+        if include_kpi:
+            row.append(str(s["kpi"]))
+        row.extend(
+            [
+                float(s["lat"]),
+                float(s["lon"]),
+                int(s["n"]),
+                int(s["n_poor"]),
+                float(s["map_poor_share"]) if "map_poor_share" in s.index and pd.notna(s.get("map_poor_share")) else float(s["poor_pct"]),
+                float(s["mean"]),
+                float(s["mean_rsrp"]),
+                float(s["mean_rsrq"]),
+                float(s["mean_sinr"]),
+                None if pd.isna(length_m) else float(length_m),
+                None if pd.isna(area_km2) else float(area_km2),
+                top_cell,
+            ]
+        )
+        rows.append(row)
+    return rows
+
+
+def _detection_summary(kpi: str, spots: pd.DataFrame) -> str:
+    """State how many spots the rules found and how many of them are drawn."""
+    if spots is None or spots.empty:
+        return f"No {kpi} location meets either rule."
+    total_consec = int(spots.attrs.get("total_consecutive", int((spots["kind"] == "consecutive").sum())))
+    total_discrete = int(spots.attrs.get("total_discrete", int((spots["kind"] == "discrete").sum())))
+    shown_consec = int((spots["kind"] == "consecutive").sum())
+    text = (
+        f"The rules find {total_consec} consecutive {kpi} stretch(es) of at least 200 m "
+        f"and {total_discrete} discrete area(s) of at least 1 km\u00b2."
+    )
+    if total_consec > shown_consec:
+        text += f" The {shown_consec} longest stretches are mapped and listed below."
+    longest_short = float(spots.attrs.get("longest_short_m", 0.0))
+    if longest_short >= 50:
+        text += (
+            f" The longest poor stretch that misses the rule is {longest_short:,.0f} m, "
+            "so shorter poor patches on the map are left unmarked."
+        )
+    return text
+
+
+def _zoom_display_height(path: Path | None, spots: pd.DataFrame, width: int = 860) -> int:
+    n = 0 if spots is None or spots.empty else int(min(len(spots), 16))
+    rows = max(1, (n + 3) // 4)
+    return int(min(280 * rows, 1120))
+
+
+def build_kpi_bad_spot_sheet(
+    ws,
+    kpi: str,
+    spots: pd.DataFrame,
+    combined_map: Path,
+    zooms: Path | None,
+) -> None:
+    """One Bad Spot sheet per KPI: combined all-band view on top, then zooms and table."""
+    last_col = 16
+    em = "\u2014"
+    banner(
+        ws,
+        f"  Bad Spot Analysis  {em}  {kpi}",
+        "  IDLE Mode  |  Combined all-band view on top  |  Zoomed spots  |  No numbering",
+        last_col=last_col,
+    )
+    set_widths(ws, {get_column_letter(i): 13 for i in range(1, last_col + 1)})
+    ws.column_dimensions["A"].width = 16
+    ws.column_dimensions["C"].width = 24
+    section_bar(ws, 3, "IDLE Mode", 1, last_col)
+    ws.merge_cells(start_row=4, start_column=1, end_row=6, end_column=last_col)
+    write_cell(
+        ws,
+        4,
+        1,
+        BAD_SPOT_KPI_NOTES[kpi]
+        + " Maps and rules read the same 50 m road bins: a bin is coloured by the median of the "
+        "samples measured in it and counts as poor only when that median is below the threshold, "
+        "and poor bins are drawn on top of good ones. A circle can therefore only sit on colour you "
+        "can see. Consecutive poor coverage of at least 200 m is a thin black dashed oval, and a "
+        "discrete patch of at least 1 km\u00b2 is a thin black dotted circle. "
+        + _detection_summary(kpi, spots)
+        + " Numbers are not drawn on the maps.",
+        size=11,
+        wrap=True,
+    )
+    ws.row_dimensions[4].height = 22
+    ws.row_dimensions[5].height = 22
+    ws.row_dimensions[6].height = 22
+
+    section_bar(ws, 8, f"Combined view {em} all-band IDLE  |  {kpi} bad spots", 1, last_col)
+    if combined_map.exists():
+        add_image(ws, combined_map, "A10", width=760, height=660)
+
+    zoom_row = 46
+    section_bar(ws, zoom_row, f"{kpi} zoomed locations", 1, last_col)
+    zoom_h = _zoom_display_height(zooms, spots)
+    if zooms is not None and zooms.exists():
+        add_image(ws, zooms, f"A{zoom_row + 2}", width=860, height=zoom_h)
+        table_row = zoom_row + 2 + zoom_h // 20 + 4
+    else:
+        table_row = zoom_row + 3
+
+    write_cell(ws, table_row, 1, f"Identified {kpi} bad spots", size=14, bold=True)
+    headers = [
+        "Type",
+        "Latitude",
+        "Longitude",
+        "Samples",
+        "Poor samples",
+        "Poor share",
+        "Mean KPI",
+        "Mean RSRP",
+        "Mean RSRQ",
+        "Mean SINR",
+        "Length (m)",
+        "Area (km\u00b2)",
+        "Top Cell Id",
+    ]
+    rows = _bad_spot_table_rows(spots, include_kpi=False)
+    write_table(
+        ws,
+        table_row + 1,
+        1,
+        headers,
+        rows,
+        num_formats={
+            1: "0.00000",
+            2: "0.00000",
+            3: "#,##0",
+            4: "#,##0",
+            5: "0.0%",
+            6: "0.00",
+            7: "0.00",
+            8: "0.00",
+            9: "0.00",
+            10: "#,##0",
+            11: "0.00",
+        },
+    )
+    note_row = table_row + 2 + len(rows)
+    ws.merge_cells(start_row=note_row, start_column=1, end_row=note_row + 1, end_column=13)
+    write_cell(
+        ws,
+        note_row,
+        1,
+        "Combined view is the first all-band coverage map with thin black outlines on poor stretches. "
+        "Poor share is the share of raw samples inside the spot box that are below the threshold: a "
+        "low value means the road is poor on some passes only. Short poor patches that never reach "
+        "200 m of continuous poor coverage are left unmarked by design. Map numbers are omitted.",
+        size=9,
+        wrap=True,
+    )
+    ws.row_dimensions[note_row].height = 22
+    ws.row_dimensions[note_row + 1].height = 22
+
+
+def style_smooth_line(series, color: str, width=25000) -> None:
+    hexcol = color.lstrip("#")
+    series.graphicalProperties.line.solidFill = hexcol
+    series.graphicalProperties.line.width = width
+    series.smooth = True
+    series.marker = Marker(symbol="none")
+
+
+def add_vs_line_chart(ws_data, ws_dest, anchor, title, cat_col, data_min, data_max, min_row, max_row, y_title, colors, width=16, height=8):
+    chart = LineChart()
+    chart.style = 10
+    chart.title = title
+    chart.y_axis.title = y_title
+    chart.x_axis.title = "RSRP (dBm)"
+    chart.width = width
+    chart.height = height
+    chart.legend = None
+    cats = Reference(ws_data, min_col=cat_col, min_row=min_row, max_row=max_row)
+    data = Reference(ws_data, min_col=data_min, max_col=data_max, min_row=min_row - 1, max_row=max_row)
+    chart.add_data(data, titles_from_data=True)
+    chart.set_categories(cats)
+    for i, color in enumerate(colors):
+        if i >= len(chart.series):
+            break
+        style_smooth_line(chart.series[i], color)
+    if "RSRQ" in y_title:
+        y_min, y_max, y_major, y_fmt = -20, 0, 5, "0.0"
+    else:
+        y_min, y_max, y_major, y_fmt = 0, 30, 5, "0"
+    apply_xy_levels(
+        chart, "RSRP (dBm)", y_title,
+        y_min=y_min, y_max=y_max, show_all_x_ticks=False, x_tick_skip=5, rotate_x=False,
+        y_major_unit=y_major, y_num_fmt=y_fmt,
+    )
+    reserve_plot_area(chart, left=0.12, top=0.14, width=0.82, height=0.70)
+    ws_dest.add_chart(chart, anchor)
+    return chart
+
+
+def add_dual_axis_vs_chart(ws_data, ws_dest, anchor, n_rows, width=16, height=9):
+    cats = Reference(ws_data, min_col=50, min_row=2, max_row=1 + n_rows)
+    sinr = LineChart()
+    sinr.style = 10
+    sinr.title = "RSRP vs SINR vs RSRQ"
+    sinr.y_axis.title = "SINR (dB)"
+    sinr.x_axis.title = "RSRP (dBm)"
+    sinr.width = width
+    sinr.height = height
+    sinr.add_data(Reference(ws_data, min_col=51, min_row=1, max_row=1 + n_rows), titles_from_data=True)
+    sinr.set_categories(cats)
+    style_smooth_line(sinr.series[0], VS_SINR_LINE)
+    sinr.legend.position = "b"
+
+    rsrq = LineChart()
+    rsrq.y_axis.axId = 200
+    rsrq.y_axis.title = "RSRQ (dB)"
+    rsrq.add_data(Reference(ws_data, min_col=52, min_row=1, max_row=1 + n_rows), titles_from_data=True)
+    style_smooth_line(rsrq.series[0], VS_RSRQ_LINE)
+    sinr.y_axis.crosses = "min"
+    rsrq.y_axis.crosses = "max"
+    apply_xy_levels(
+        sinr, "RSRP (dBm)", "SINR (dB)",
+        y_min=0, y_max=30, show_all_x_ticks=False, x_tick_skip=5, rotate_x=False,
+        y_major_unit=5, layout=False, y_num_fmt="0",
+    )
+    reserve_plot_area(sinr, left=0.12, top=0.14, width=0.74, height=0.58)
+    rsrq.y_axis.delete = False
+    rsrq.y_axis.axPos = "r"
+    rsrq.y_axis.tickLblPos = "nextTo"
+    rsrq.y_axis.majorTickMark = "out"
+    rsrq.y_axis.minorTickMark = "none"
+    rsrq.y_axis.title = "RSRQ (dB)"
+    _title_outside(rsrq.y_axis.title)
+    rsrq.y_axis.scaling.min = -20
+    rsrq.y_axis.scaling.max = 0
+    rsrq.y_axis.numFmt = "0.0"
+    try:
+        rsrq.y_axis.majorUnit = 10
+    except Exception:
+        pass
+    sinr += rsrq
+    ws_dest.add_chart(sinr, anchor)
+
+
+def save_rsrp_scatter(df: pd.DataFrame, ycol: str, path: Path, ylabel: str, title: str, ylim=None) -> Path:
+    sample = downsample(df.dropna(subset=["RSRP", ycol]), 18000)
+    fig, ax = plt.subplots(figsize=(9.2, 6.2))
+    ax.scatter(sample["RSRP"], sample[ycol], s=6, alpha=0.22, c="#1F618D", linewidths=0)
+    x = sample["RSRP"].to_numpy()
+    y = sample[ycol].to_numpy()
+    if len(x) > 20:
+        coeff = np.polyfit(x, y, 1)
+        xs = np.linspace(np.nanmin(x), np.nanmax(x), 80)
+        ax.plot(xs, np.polyval(coeff, xs), color="#17202A", lw=1.8, label="Trend")
+        ax.legend(fontsize=8)
+    ax.set_xlabel("RSRP (dBm)")
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    ax.set_xlim(-50, -130)
+    if ylim:
+        ax.set_ylim(*ylim)
+    ax.xaxis.set_major_locator(MultipleLocator(5))
+    ax.yaxis.set_major_locator(MultipleLocator(5 if "SINR" in ylabel else 2))
+    ax.tick_params(axis="both", labelsize=8)
+    ax.grid(True, alpha=0.35)
+    fig.tight_layout()
+    fig.savefig(path, dpi=140, facecolor="white")
+    plt.close(fig)
+    return path
+
+
+def save_binned_vs_preview(df: pd.DataFrame, path: Path) -> Path:
+    pair = df.dropna(subset=["RSRP", "SINR", "RSRQ"]).copy()
+    pair["rsrp_bin"] = pair["RSRP"].round().astype(int)
+    g = pair.groupby("rsrp_bin")[["SINR", "RSRQ"]].mean()
+    g = g.loc[(g.index <= -80) & (g.index >= -125)].sort_index(ascending=False)
+    fig, axes = plt.subplots(1, 3, figsize=(18.6, 5.2))
+
+    ax = axes[0]
+    ax.plot(g.index, g["SINR"], color=f"#{VS_SINR_LINE}", lw=2.4)
+    ax.set_title("RSRP vs SINR")
+    ax.set_xlabel("RSRP (dBm)")
+    ax.set_ylabel("SINR (dB)")
+    ax.set_xlim(-80, -125)
+    ax.set_ylim(0, 30)
+    ax.set_xticks(range(-80, -126, -5))
+    ax.yaxis.set_major_locator(MultipleLocator(5))
+    ax.grid(True, axis="y", color="#D5D8DC", lw=0.8)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    ax = axes[1]
+    ax.plot(g.index, g["RSRQ"], color=f"#{VS_RSRQ_LINE}", lw=2.4)
+    ax.set_title("RSRP vs RSRQ")
+    ax.set_xlabel("RSRP (dBm)")
+    ax.set_ylabel("RSRQ (dB)")
+    ax.set_xlim(-80, -125)
+    ax.set_ylim(-20, 0)
+    ax.set_xticks(range(-80, -126, -5))
+    ax.yaxis.set_major_locator(MultipleLocator(5))
+    ax.grid(True, axis="y", color="#D5D8DC", lw=0.8)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    ax = axes[2]
+    ax.plot(g.index, g["SINR"], color=f"#{VS_SINR_LINE}", lw=2.4, label="SINR")
+    ax.set_ylim(0, 30)
+    ax.set_ylabel("SINR (dB)")
+    ax.yaxis.set_major_locator(MultipleLocator(5))
+    ax2 = ax.twinx()
+    ax2.plot(g.index, g["RSRQ"], color=f"#{VS_RSRQ_LINE}", lw=2.4, label="RSRQ")
+    ax2.set_ylim(-20, 0)
+    ax2.set_ylabel("RSRQ (dB)")
+    ax2.yaxis.set_major_locator(MultipleLocator(10))
+    ax.set_title("RSRP vs SINR vs RSRQ")
+    ax.set_xlabel("RSRP (dBm)")
+    ax.set_xlim(-80, -125)
+    ax.set_xticks(range(-80, -126, -5))
+    ax.grid(True, axis="y", color="#D5D8DC", lw=0.8)
+    ax.spines["top"].set_visible(False)
+    handles = ax.get_lines() + ax2.get_lines()
+    labels = [h.get_label() for h in handles]
+    ax.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=2, frameon=False)
+    fig.tight_layout()
+    fig.savefig(path, dpi=140, facecolor="white")
+    plt.close(fig)
+    return path
+
+
+def build_rsrp_vs_sheet(ws, data_ws, n_rows: int, scatter_sinr: Path, scatter_rsrq: Path) -> None:
+    banner(
+        ws,
+        "  RSRP vs KPIs IDLE Mode",
+        "  Idle V2.0 scanner  |  Smooth mean lines and scatter with trend  |  Gridlines off",
+        last_col=12,
+    )
+    set_widths(ws, {get_column_letter(i): 14 for i in range(1, 13)})
+    add_vs_line_chart(
+        data_ws, ws, "A4", "RSRP vs SINR",
+        50, 51, 51, 2, 1 + n_rows, "SINR (dB)",
+        [VS_SINR_LINE], width=15, height=8,
+    )
+    add_vs_line_chart(
+        data_ws, ws, "I4", "RSRP vs RSRQ",
+        50, 52, 52, 2, 1 + n_rows, "RSRQ (dB)",
+        [VS_RSRQ_LINE], width=15, height=8,
+    )
+    add_dual_axis_vs_chart(data_ws, ws, "A22", n_rows, width=22, height=8)
+    write_cell(ws, 48, 1, "RSRP vs SINR scatter (trend line)", size=14, bold=True)
+    write_cell(ws, 48, 8, "RSRP vs RSRQ scatter (trend line)", size=14, bold=True)
+    if scatter_sinr.exists():
+        add_image(ws, scatter_sinr, "A50", width=520, height=350)
+    if scatter_rsrq.exists():
+        add_image(ws, scatter_rsrq, "H50", width=520, height=350)
+
+
+def build_sample_log(ws: Worksheet, df: pd.DataFrame, n: int = 8000) -> None:
+    banner(ws, "  Sample Drive Log IDLE Mode", "  Evenly spaced subset for inspection  |  Full merged file is CSV  |  No freeze / no gridlines", last_col=10)
+    sample = downsample(df, max_points=n).copy()
+    cols = ["Time", "RSRP", "RSRQ", "SINR", "Longitude", "Latitude", "Cell Id", "DL EARFCN", "Source", "Band"]
+    sample = sample[cols]
+    for c, w in zip(cols, (22, 12, 12, 12, 14, 14, 14, 14, 10, 22)):
+        ws.column_dimensions[get_column_letter(cols.index(c) + 1)].width = w
+    headers = cols
+    for i, h in enumerate(headers, start=1):
+        write_cell(ws, 4, i, h, bold=True, color=WHITE, fill_color=NAVY, align="center")
+    for r_i, row in enumerate(sample.itertuples(index=False), start=5):
+        bg = LIGHT if r_i % 2 == 0 else WHITE
+        values = list(row)
+        for c_i, value in enumerate(values, start=1):
+            if isinstance(value, pd.Timestamp):
+                value = value.to_pydatetime()
+            if hasattr(value, "item"):
+                try:
+                    value = value.item()
+                except Exception:
+                    pass
+            if pd.isna(value):
+                value = None
+            cell = write_cell(ws, r_i, c_i, value, fill_color=bg, align="center")
+            cell.border = THIN
+            if c_i == 1 and value is not None:
+                cell.number_format = "yyyy-mm-dd hh:mm:ss.000"
+            if c_i in (2, 3, 4, 5, 6):
+                cell.number_format = "0.000"
+
+
+def _chart_title_text(title) -> str | None:
+    if title is None:
+        return None
+    try:
+        return str(title.tx.rich.p[0].r[0].t)
+    except Exception:
+        return str(title)
+
+
+def verify_report(path: Path) -> dict:
+    wb = load_workbook(path)
+    info = {"sheets": {}, "chart_titles": [], "axis_check": [], "problems": []}
+    for name in wb.sheetnames:
+        ws = wb[name]
+        freeze = ws.freeze_panes
+        grid = ws.sheet_view.showGridLines
+        print_grid = ws.print_options.gridLines
+        n_charts = len(ws._charts)
+        n_images = len(ws._images)
+        info["sheets"][name] = {
+            "freeze_panes": freeze,
+            "showGridLines": grid,
+            "print_gridLines": print_grid,
+            "charts": n_charts,
+            "images": n_images,
+        }
+        if freeze not in (None, "A1"):
+            info["problems"].append(f"{name}: freeze_panes={freeze}")
+        if grid is not False:
+            info["problems"].append(f"{name}: showGridLines={grid}")
+        if print_grid:
+            info["problems"].append(f"{name}: print gridlines on")
+        for ch in ws._charts:
+            title = _chart_title_text(getattr(ch, "title", None))
+            x_title = _chart_title_text(getattr(ch.x_axis, "title", None))
+            y_title = _chart_title_text(getattr(ch.y_axis, "title", None))
+            x_pos = getattr(ch.x_axis, "axPos", None)
+            y_pos = getattr(ch.y_axis, "axPos", None)
+            info["chart_titles"].append((name, title, type(ch).__name__))
+            info["axis_check"].append((name, title, x_title, y_title, x_pos, y_pos))
+            if x_pos != "b":
+                info["problems"].append(f"{name}/{title}: x axPos={x_pos} (expected b)")
+            if y_pos not in ("l", "r"):
+                info["problems"].append(f"{name}/{title}: y axPos={y_pos} (expected l/r)")
+            if not x_title:
+                info["problems"].append(f"{name}/{title}: missing horizontal axis title")
+            if not y_title:
+                info["problems"].append(f"{name}/{title}: missing vertical axis title")
+    for name in ("Bad Spot RSRP", "Bad Spot RSRQ", "Bad Spot SINR"):
+        if name not in info["sheets"]:
+            info["problems"].append(f"missing {name} sheet")
+        elif info["sheets"][name]["images"] < 1:
+            info["problems"].append(f"{name}: expected combined map image")
+    wb.close()
+    with zipfile.ZipFile(path) as zf:
+        for item in zf.namelist():
+            if not item.startswith("xl/charts/chart"):
+                continue
+            xml = zf.read(item).decode("utf-8")
+            for cat in re.findall(r"<catAx>.*?</catAx>", xml):
+                pos = re.search(r'<axPos val="([^"]+)"', cat)
+                if not pos or pos.group(1) != "b":
+                    info["problems"].append(f"{item}: category axis axPos is {pos.group(1) if pos else 'missing'} (need b)")
+                if 'tickLblPos val="none"' in cat:
+                    info["problems"].append(f"{item}: category tick labels hidden")
+            for val in re.findall(r"<valAx>.*?</valAx>", xml):
+                pos = re.search(r'<axPos val="([^"]+)"', val)
+                if not pos or pos.group(1) not in ("l", "r"):
+                    info["problems"].append(f"{item}: value axis axPos is {pos.group(1) if pos else 'missing'}")
+                if 'tickLblPos val="none"' in val:
+                    info["problems"].append(f"{item}: value tick labels hidden")
+            if "<a:t></a:t>" in xml or "<a:t/>" in xml:
+                info["problems"].append(f"{item}: empty text run would blank axis labels")
+    return info
+
+
+def add_cover_charts(cover, data_ws, blocks) -> None:
+    write_cell(cover, 5, 12, "RSRP, RSRQ and SINR plots (native Excel charts with legends)", size=14, bold=True)
+    cover.merge_cells(start_row=5, start_column=12, end_row=5, end_column=20)
+    add_stacked_col_chart(
+        data_ws, cover, "L6", "RSRP histogram",
+        blocks["RSRP"]["cat_col"], blocks["RSRP"]["data_min"], blocks["RSRP"]["data_max"],
+        2, 1 + blocks["RSRP"]["n"],
+        "Samples", "RSRP (dBm)", MAP_RSRP_COLORS, width=11, height=7,
+    )
+    add_stacked_col_chart(
+        data_ws, cover, "R6", "RSRQ histogram",
+        blocks["RSRQ"]["cat_col"], blocks["RSRQ"]["data_min"], blocks["RSRQ"]["data_max"],
+        2, 1 + blocks["RSRQ"]["n"],
+        "Samples", "RSRQ (dB)", MAP_RSRQ_COLORS, width=11, height=7,
+    )
+    add_stacked_col_chart(
+        data_ws, cover, "L23", "SINR histogram",
+        blocks["SINR"]["cat_col"], blocks["SINR"]["data_min"], blocks["SINR"]["data_max"],
+        2, 1 + blocks["SINR"]["n"],
+        "Samples", "SINR (dB)", MAP_SINR_COLORS, width=11, height=7,
+    )
+    add_col_chart(
+        data_ws, cover, "R23", "RSRP ranges (dBm)", RSRP_COLOR,
+        12, 13, 2, 1 + blocks["rsrp_q_n"],
+        "Samples", "RSRP range", width=11, height=7, show_legend=True,
+    )
+
+
+def save_report_preview(df: pd.DataFrame, path: Path) -> Path:
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5.2))
+    plot_stacked_map_hist(
+        axes[0], df["RSRP"], rsrp_map_class, MAP_RSRP_LABELS, MAP_RSRP_COLORS,
+        np.arange(-140, -48, 2), "RSRP histogram", "RSRP (dBm)", "RSRP (dBm)", (-140, -50),
+    )
+    plot_stacked_map_hist(
+        axes[1], df["RSRQ"], rsrq_map_class, MAP_RSRQ_LABELS, MAP_RSRQ_COLORS,
+        np.arange(-24, -2.5, 0.5), "RSRQ histogram", "RSRQ (dB)", "RSRQ (dB)", (-24, -3),
+    )
+    plot_stacked_map_hist(
+        axes[2], df["SINR"], sinr_map_class, MAP_SINR_LABELS, MAP_SINR_COLORS,
+        np.arange(-15, 31, 1), "SINR histogram", "SINR (dB)", "SINR (dB)", (-15, 30),
+    )
+    for ax in axes:
+        ax.grid(False)
+        ax.set_facecolor("white")
+    fig.suptitle("Bogura Drive-Test Report — RSRP / RSRQ / SINR", fontsize=13, fontweight="bold")
+    fig.tight_layout()
+    fig.savefig(path, dpi=140, facecolor="white")
+    plt.close(fig)
+    return path
+
+
+def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    if "Band" not in df.columns:
+        df = df.copy()
+        df["Band"] = df["DL EARFCN"].map(earfcn_to_band)
+    if "Layer" not in df.columns:
+        df = df.copy()
+        df["Layer"] = pd.to_numeric(df["DL EARFCN"], errors="coerce").map(earfcn_to_layer)
+
+    placeholder = save_active_placeholder(PLOTS_DIR / "active_mode_placeholder.png")
+    map_df = best_server(df)
+    extent = coverage_extent(map_df)
+    rsrp_map = plot_rsrp_coverage_map(map_df, PLOTS_DIR / "excel_route_rsrp.png", extent=extent)
+    rsrq_map = plot_rsrq_coverage_map(map_df, PLOTS_DIR / "excel_route_rsrq.png", extent=extent)
+    sinr_map = plot_sinr_coverage_map(map_df, PLOTS_DIR / "excel_route_sinr.png", extent=extent)
+    rsrp_band: dict[str, Path] = {}
+    rsrq_band: dict[str, Path] = {}
+    sinr_band: dict[str, Path] = {}
+    for layer in REPORT_LAYERS:
+        part = best_server(filter_by_layer(df, layer))
+        rsrp_band[layer] = plot_rsrp_coverage_map(
+            part, PLOTS_DIR / f"excel_route_rsrp_{layer}.png", layer=layer, extent=extent
+        )
+        rsrq_band[layer] = plot_rsrq_coverage_map(
+            part, PLOTS_DIR / f"excel_route_rsrq_{layer}.png", layer=layer, extent=extent
+        )
+        sinr_band[layer] = plot_sinr_coverage_map(
+            part, PLOTS_DIR / f"excel_route_sinr_{layer}.png", layer=layer, extent=extent
+        )
+    scatter_sinr = save_rsrp_scatter(df, "SINR", PLOTS_DIR / "excel_scatter_rsrp_sinr.png", "SINR (dB)", "RSRP vs SINR", ylim=(-10, 32))
+    scatter_rsrq = save_rsrp_scatter(df, "RSRQ", PLOTS_DIR / "excel_scatter_rsrp_rsrq.png", "RSRQ (dB)", "RSRP vs RSRQ", ylim=(-24, 0))
+    rsrp_spots = find_bad_spots(map_df, "RSRP")
+    rsrq_spots = find_bad_spots(map_df, "RSRQ")
+    sinr_spots = find_bad_spots(map_df, "SINR")
+    rsrp_bad = plot_rsrp_bad_spot_map(map_df, rsrp_spots, PLOTS_DIR / "excel_bad_spots_rsrp.png", extent=extent)
+    rsrq_bad = plot_rsrq_bad_spot_map(map_df, rsrq_spots, PLOTS_DIR / "excel_bad_spots_rsrq.png", extent=extent)
+    sinr_bad = plot_sinr_bad_spot_map(map_df, sinr_spots, PLOTS_DIR / "excel_bad_spots_sinr.png", extent=extent)
+    rsrp_zooms = plot_bad_spot_zoom_grid(
+        map_df, rsrp_spots, PLOTS_DIR / "excel_bad_spots_rsrp_zooms.png",
+        "RSRP", rsrp_map_class(map_df["RSRP"]), MAP_RSRP_LABELS, MAP_RSRP_COLORS,
+        "RSRP zoomed locations (first all-band map)",
+    )
+    rsrq_zooms = plot_bad_spot_zoom_grid(
+        map_df, rsrq_spots, PLOTS_DIR / "excel_bad_spots_rsrq_zooms.png",
+        "RSRQ", rsrq_map_class(map_df["RSRQ"]), MAP_RSRQ_LABELS, MAP_RSRQ_COLORS,
+        "RSRQ zoomed locations (first all-band map)",
+    )
+    sinr_zooms = plot_bad_spot_zoom_grid(
+        map_df, sinr_spots, PLOTS_DIR / "excel_bad_spots_sinr_zooms.png",
+        "SINR", sinr_map_class(map_df["SINR"]), MAP_SINR_LABELS, MAP_SINR_COLORS,
+        "SINR zoomed locations (first all-band map)",
+    )
+    shutil.copy2(rsrp_bad, PLOTS_DIR / "08_bad_spots_rsrp.png")
+    shutil.copy2(rsrq_bad, PLOTS_DIR / "08_bad_spots_rsrq.png")
+    shutil.copy2(sinr_bad, PLOTS_DIR / "08_bad_spots_sinr.png")
+    save_binned_vs_preview(df, PLOTS_DIR / "excel_rsrp_vs_sinr_lines.png")
+    save_report_preview(df, PLOTS_DIR / "excel_rsrp_rsrq_sinr_histograms.png")
+
+    wb = Workbook()
+    cover = wb.active
+    cover.title = "Cover"
+    rsrp_ws = wb.create_sheet("RSRP")
+    rsrq_ws = wb.create_sheet("RSRQ")
+    sinr_ws = wb.create_sheet("SINR")
+    bad_rsrp_ws = wb.create_sheet("Bad Spot RSRP")
+    bad_rsrq_ws = wb.create_sheet("Bad Spot RSRQ")
+    bad_sinr_ws = wb.create_sheet("Bad Spot SINR")
+    time_ws = wb.create_sheet("RSRP vs KPIs")
+    sample_ws = wb.create_sheet("Sample Log")
+    data_ws = wb.create_sheet("_ChartData")
+    data_ws.sheet_state = "hidden"
+
+    blocks = write_chart_data(data_ws, df)
+    build_cover(cover, df)
+    add_cover_charts(cover, data_ws, blocks)
+    build_kpi_sheet(rsrp_ws, "RSRP", "dBm", rsrp_bad, placeholder, rsrp_band)
+    build_kpi_sheet(rsrq_ws, "RSRQ", "dB", rsrq_bad, placeholder, rsrq_band)
+    build_kpi_sheet(sinr_ws, "SINR", "dB", sinr_bad, placeholder, sinr_band)
+    build_kpi_bad_spot_sheet(bad_rsrp_ws, "RSRP", rsrp_spots, rsrp_bad, rsrp_zooms)
+    build_kpi_bad_spot_sheet(bad_rsrq_ws, "RSRQ", rsrq_spots, rsrq_bad, rsrq_zooms)
+    build_kpi_bad_spot_sheet(bad_sinr_ws, "SINR", sinr_spots, sinr_bad, sinr_zooms)
+    build_rsrp_vs_sheet(time_ws, data_ws, blocks["vs_n"], scatter_sinr, scatter_rsrq)
+    build_sample_log(sample_ws, df)
+
+    for ws in wb.worksheets:
+        apply_sheet_view(ws)
+
+    wb.properties.title = "Bogura Drive-Test Report IDLE Mode"
+    wb.properties.subject = "IDLE Mode"
+    wb.properties.description = (
+        "Bogura drive-test report, IDLE Mode. "
+        "KPI sheets: combined all-band maps with bad spots on top. Bad Spot RSRP/RSRQ/SINR: consecutive 200 m stretches and discrete 1 km2 areas. Analysis: RSRP vs SINR/RSRQ."
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(out_path)
+    shutil.copy2(out_path, VERSIONED_XLSX)
+    print(f"Wrote Excel report: {out_path}")
+    print(f"Wrote versioned copy: {VERSIONED_XLSX}")
+    return out_path
+
+
+if __name__ == "__main__":
+    from merge_and_analyze import MERGED_CSV, extract_archives, load_merged_csv, merge_parts
+
+    if MERGED_CSV.exists():
+        frame = load_merged_csv()
+    else:
+        extract_archives()
+        frame = merge_parts()
+    path = build_report(frame)
+    result = verify_report(path)
+    print(result)
+    if result["problems"]:
+        raise SystemExit("Excel view checks failed: " + "; ".join(result["problems"]))
+    print("Verified: no freeze panes, no gridlines, RSRP/RSRQ/SINR charts present.")
