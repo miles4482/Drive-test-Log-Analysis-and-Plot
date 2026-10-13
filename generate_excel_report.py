@@ -36,6 +36,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from merge_and_analyze import (
     OUTPUT_DIR,
     PLOTS_DIR,
+    SITE_DB_PATH,
     MAP_RSRP_COLORS,
     MAP_RSRP_LABELS,
     MAP_RSRQ_COLORS,
@@ -68,7 +69,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.30"
+REPORT_VERSION = "1.31"
 # Every poor run is a bad spot, so a dense KPI produces over a thousand of them.
 # The map marks them all; the table lists the longest ones a team can act on.
 BAD_SPOT_TABLE_MAX = 300
@@ -520,6 +521,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
         ["Unique Cell Ids", int(df["Cell Id"].nunique())],
         ["Longitude range", f"{df['Longitude'].min():.5f} – {df['Longitude'].max():.5f}"],
         ["Latitude range", f"{df['Latitude'].min():.5f} – {df['Latitude'].max():.5f}"],
+        ["Site database", SITE_DB_PATH.name if SITE_DB_PATH.exists() else "not provided"],
     ]
     write_table(ws, 6, 1, ["Item", "Value"], info_rows, num_formats={1: "#,##0"})
     ws.cell(12, 2).number_format = "yyyy-mm-dd hh:mm:ss"

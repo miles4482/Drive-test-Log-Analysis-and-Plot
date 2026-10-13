@@ -7,7 +7,8 @@ LTE **IDLE Mode scanner** logs from **Bogura** (Robi). The current source is `Bo
 | File(s) | Role | After extract |
 | --- | --- | --- |
 | `Borga_Idle_V2.0.7z` | IDLE Mode scanner export | `extracted/Borga_Idle_V2.0/1.csv` … `15.csv` |
-| `Physical_Site_Database_V1.0.xlsb` | Physical site / sector database | Kept in the repo; not overlaid on current maps |
+| `Physical_Site_Database_V2.0.xlsx` | Physical site / sector database, reconciled against the V2.0 scanner cells (see its `Change_Log` sheet) | Referenced on the Cover; not overlaid on current maps |
+| `Physical_Site_Database_V1.0.xlsb` | Previous site database | Kept for reference |
 
 Scanner columns include `Time`, `Longitude`, `Latitude`, `Cell Id`, `DL EARFCN`, `NB RSRP`, `NB RSRQ`, `NB RS SINR` (mapped to RSRP / RSRQ / SINR). Campaign is **Scanner**. Files 1–15 cover 11–21 May 2026.
 
@@ -99,17 +100,17 @@ Throughput (PDCP DL) and CQI are on the same legend sheet but are not in these I
 - Rings shrink and thin as the count grows (2.6 km haloed up to 40 spots, 1.4 km up to 250, 0.8 km beyond), so the marks never cover the colour they mark. Poor SINR covers 11 % of the drive, so its marks merge at district scale and the zoom panels and table carry the detail
 - Each sheet lists the 16 longest runs as zoom panels and up to 300 in the table, longest first, and states the full count
 
-## Download Excel report (v1.30)
+## Download Excel report (v1.31)
 
-**v1.30 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.30.xlsx
+**v1.31 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.31.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.30.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.31.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.30.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.31.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
 Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 

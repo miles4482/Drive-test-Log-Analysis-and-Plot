@@ -27,7 +27,7 @@ IDLE_ARCHIVE = ROOT / "Borga_Idle_V2.0.7z"
 IDLE_DIR = EXTRACT_DIR / "Borga_Idle_V2.0"
 MERGED_CSV = OUTPUT_DIR / "Bogura_merged.csv.gz"
 SUMMARY_MD = OUTPUT_DIR / "analysis_summary.md"
-SITE_DB_PATH = ROOT / "Physical_Site_Database_V1.0.xlsb"
+SITE_DB_PATH = ROOT / "Physical_Site_Database_V2.0.xlsx"
 
 SCANNER_RENAME = {
     "NB RSRP": "RSRP",
@@ -217,19 +217,22 @@ def load_site_sectors(path: Path | None = None, layer: str | None = None) -> pd.
         if not db_path.exists():
             _SITE_CELLS = pd.DataFrame()
             return _SITE_CELLS
-        from pyxlsb import open_workbook
+        if db_path.suffix.lower() == ".xlsb":
+            from pyxlsb import open_workbook
 
-        rows: list[list] = []
-        cols: list[str] = []
-        with open_workbook(str(db_path)) as wb:
-            sheet = wb.get_sheet(wb.sheets[0])
-            for i, row in enumerate(sheet.rows()):
-                vals = [c.v for c in row]
-                if i == 0:
-                    cols = [str(v) for v in vals]
-                    continue
-                rows.append(vals)
-        cells = pd.DataFrame(rows, columns=cols)
+            rows: list[list] = []
+            cols: list[str] = []
+            with open_workbook(str(db_path)) as wb:
+                sheet = wb.get_sheet(wb.sheets[0])
+                for i, row in enumerate(sheet.rows()):
+                    vals = [c.v for c in row]
+                    if i == 0:
+                        cols = [str(v) for v in vals]
+                        continue
+                    rows.append(vals)
+            cells = pd.DataFrame(rows, columns=cols)
+        else:
+            cells = pd.read_excel(db_path, sheet_name=0, engine="openpyxl")
         cells = cells.rename(columns={c: c.strip() for c in cells.columns})
         for col in ("Lat", "Lon", "Azimuth", "EARFCN"):
             if col in cells.columns:
