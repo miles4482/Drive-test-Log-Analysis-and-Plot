@@ -55,7 +55,7 @@
 
 ## Notes
 
-- Campaign is **Scanner** (NB RSRP / NB RSRQ / NB RS SINR). Coverage maps use the strongest RSRP at each timestamp so weak neighbors do not paint over the route.
+- Campaign is **Scanner** (NB RSRP / NB RSRQ / NB RS SINR). Coverage maps use the strongest RSRP per scanner sweep (~4 s / 40 m) so every band measured at a location competes for best server.
 - Files 1.csv–15.csv cover 11–21 May 2026. Operator is Robi. Layers: L900 (B8), L1800 (B3), L2100 (B1), L2600 (B41).
 
 Plots are written to `output/plots/`.
