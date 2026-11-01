@@ -595,7 +595,10 @@ def _draw_coverage_points(
         return
     color_of = dict(zip(labels, colors))
     order = list(labels) if poor_on_top else list(reversed(labels))
+    # Consecutive segments of one class become one polyline, so a vector export
+    # has clean joins and a few thousand paths rather than one per 50 m.
     segments: dict[str, list] = {lab: [] for lab in labels}
+    casing: list = []
     run_start = 0
     breaks = list(np.flatnonzero(new_pass)) + [len(pts)]
     alone: dict[str, list] = {lab: [] for lab in labels}
@@ -604,13 +607,19 @@ def _draw_coverage_points(
             lab = classes[run_start]
             if lab in alone:
                 alone[lab].append(pts[run_start])
-        for i in range(run_start, end - 1):
-            lab = classes[i]
-            if lab in segments:
-                segments[lab].append([pts[i], pts[i + 1]])
+        elif end - run_start > 1:
+            casing.append(pts[run_start:end])
+            i = run_start
+            while i < end - 1:
+                lab = classes[i]
+                j = i
+                while j + 1 < end - 1 and classes[j + 1] == lab:
+                    j += 1
+                if lab in segments:
+                    segments[lab].append(pts[i:j + 2])
+                i = j + 1
         run_start = end
     # Casing, then each legend colour. Poor bins are last so they stay visible.
-    casing = [seg for lab in labels for seg in segments[lab]]
     if casing:
         ax.add_collection(LineCollection(
             casing, colors="#2C3E50", linewidths=MAP_ROUTE_LW + 1.3,
@@ -1414,7 +1423,7 @@ def _add_spot_outline(
                     edgecolor="#FFFFFF",
                     linestyle="solid",
                     linewidth=lw + 2.0,
-                    zorder=5.6,
+                    zorder=19,
                 )
             )
     else:
@@ -1429,7 +1438,8 @@ def _add_spot_outline(
             edgecolor="#000000",
             linestyle=style,
             linewidth=lw,
-            zorder=6,
+            # Above every route colour (zorder 3..8), or the wide trace hides the ring.
+            zorder=20,
         )
     )
 
@@ -1464,9 +1474,17 @@ def plot_bad_spot_map(
     legend_title: str,
     max_points: int = MAP_MAX_POINTS,
     extent: tuple[float, float, float, float] | None = None,
+    basemap: bool = True,
 ) -> Path:
-    """First all-band coverage map with tight, unnumbered black outlines on poor stretches."""
+    """First all-band coverage map with tight, unnumbered black outlines on poor stretches.
+
+    A .svg path writes a pure vector file: no basemap, transparent background,
+    and text kept as text.
+    """
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    vector = path.suffix.lower() == ".svg"
+    if vector:
+        basemap = False
     geo = df.dropna(subset=["Longitude", "Latitude", column]).copy()
     fig, ax = plt.subplots(figsize=(8.0, 9.2))
     _draw_coverage_points(
@@ -1480,7 +1498,8 @@ def plot_bad_spot_map(
         ax.set_xlim(lon_min, lon_max)
         ax.set_ylim(lat_min, lat_max)
     ax.set_aspect("equal", adjustable="box")
-    _add_basemap(ax)
+    if basemap:
+        _add_basemap(ax)
     handles = _coverage_legend_handles(labels, colors)
     handles.extend(
         [
@@ -1488,7 +1507,7 @@ def plot_bad_spot_map(
             Line2D([0], [0], color="#000000", lw=2.0, linestyle=(0, (1, 1.4)), label="Discrete area ≥ 1 km²"),
         ]
     )
-    ax.legend(
+    legend = ax.legend(
         handles=handles,
         title=legend_title,
         loc="center left",
@@ -1504,7 +1523,14 @@ def plot_bad_spot_map(
     ax.set_title(title)
     hide_map_axes(ax)
     fig.tight_layout()
-    fig.savefig(path, dpi=MAP_DPI, facecolor="white", bbox_inches="tight")
+    if vector:
+        fig.patch.set_alpha(0.0)
+        ax.patch.set_alpha(0.0)
+        legend.get_frame().set_facecolor("none")
+        with plt.rc_context({"svg.fonttype": "none", "svg.hashsalt": "bogura"}):
+            fig.savefig(path, format="svg", transparent=True, bbox_inches="tight", pad_inches=0.15)
+    else:
+        fig.savefig(path, dpi=MAP_DPI, facecolor="white", bbox_inches="tight")
     plt.close(fig)
     return path
 
@@ -1591,6 +1617,15 @@ def plot_rsrp_bad_spot_map(
         legend_title="RSRP (dBm)",
         extent=extent,
     )
+
+
+def export_rsrp_map_svg(df: pd.DataFrame, path: Path | None = None) -> Path:
+    """Vector copy of the RSRP sheet's combined Idle map, from the same track and spots."""
+    track = best_server(df)
+    spots = find_bad_spots(track, "RSRP")
+    out = path or (PLOTS_DIR / "svg" / "rsrp_combined_idle.svg")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    return plot_rsrp_bad_spot_map(track, spots, out, extent=coverage_extent(track))
 
 
 def plot_rsrq_bad_spot_map(
