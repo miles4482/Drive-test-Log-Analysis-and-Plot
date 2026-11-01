@@ -1523,16 +1523,23 @@ def plot_bad_spot_map(
     ax.set_title(title)
     hide_map_axes(ax)
     fig.tight_layout()
-    if vector:
+    _save_map(fig, path, legends=[legend])
+    return path
+
+
+def _save_map(fig, path: Path, legends=()) -> None:
+    """PNG at MAP_DPI on white, or for .svg a transparent vector file with text kept as text."""
+    if path.suffix.lower() == ".svg":
         fig.patch.set_alpha(0.0)
-        ax.patch.set_alpha(0.0)
-        legend.get_frame().set_facecolor("none")
+        for ax in fig.axes:
+            ax.patch.set_alpha(0.0)
+        for legend in legends:
+            legend.get_frame().set_facecolor("none")
         with plt.rc_context({"svg.fonttype": "none", "svg.hashsalt": "bogura"}):
             fig.savefig(path, format="svg", transparent=True, bbox_inches="tight", pad_inches=0.15)
     else:
         fig.savefig(path, dpi=MAP_DPI, facecolor="white", bbox_inches="tight")
     plt.close(fig)
-    return path
 
 
 def plot_bad_spot_zoom_grid(
@@ -1545,10 +1552,14 @@ def plot_bad_spot_zoom_grid(
     colors: list[str],
     title: str,
 ) -> Path | None:
-    """Zoomed all-band coverage around each identified spot, with no numbers."""
+    """Zoomed all-band coverage around each identified spot, with no numbers.
+
+    A .svg path writes a pure vector file without the basemap, like plot_bad_spot_map.
+    """
     if spots is None or spots.empty:
         return None
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    vector = path.suffix.lower() == ".svg"
     work = spots.head(BAD_SPOT_MAX_ZOOMS)
     n = len(work)
     cols = BAD_SPOT_ZOOM_COLS
@@ -1580,7 +1591,8 @@ def plot_bad_spot_zoom_grid(
         ax.set_xlim(zext[0], zext[1])
         ax.set_ylim(zext[2], zext[3])
         ax.set_aspect("equal", adjustable="box")
-        _add_basemap(ax)
+        if not vector:
+            _add_basemap(ax)
         _add_spot_outline(ax, spot)
         hide_map_axes(ax)
         kind = str(spot.get("kind", "consecutive"))
@@ -1592,8 +1604,7 @@ def plot_bad_spot_zoom_grid(
         ax.set_title(caption, fontsize=8)
     fig.suptitle(title, fontsize=11, fontweight="bold")
     fig.tight_layout()
-    fig.savefig(path, dpi=MAP_DPI, facecolor="white", bbox_inches="tight")
-    plt.close(fig)
+    _save_map(fig, path)
     return path
 
 

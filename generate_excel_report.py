@@ -10,11 +10,13 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+import hashlib
 import math
 import re
 import shutil
 import zipfile
 
+import cairosvg
 import matplotlib
 
 matplotlib.use("Agg")
@@ -71,7 +73,14 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.33"
+REPORT_VERSION = "1.34"
+SVG_DIR = PLOTS_DIR / "svg"
+SVG_FALLBACK_SCALE = 3.0
+SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
+SVG_BLIP_NS = "http://schemas.microsoft.com/office/drawing/2016/SVG/main"
+IMAGE_REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+# PNG fallback -> SVG it was rendered from; these pictures get an SVG layer in the workbook.
+SVG_LAYERS: dict[Path, Path] = {}
 # Every poor run is a bad spot, so a dense KPI produces over a thousand of them.
 # The map marks them all; the table lists the longest ones a team can act on.
 BAD_SPOT_TABLE_MAX = 300
@@ -155,11 +164,89 @@ def map_range_counts(series: pd.Series, classifier, labels) -> pd.Series:
     return classifier(series).value_counts(dropna=True).reindex(labels, fill_value=0)
 
 
-def add_image(ws: Worksheet, path: Path, anchor: str, width: int, height: int) -> None:
+def add_image(ws: Worksheet, path: Path, anchor: str, width: int, height: int) -> tuple[int, int]:
+    """Place the picture inside a width x height box without stretching it; returns its size."""
     img = XLImage(str(path))
-    img.width = width
-    img.height = height
+    fit = min(width / img.width, height / img.height)
+    img.width = round(img.width * fit)
+    img.height = round(img.height * fit)
     ws.add_image(img, anchor)
+    return img.width, img.height
+
+
+def svg_with_fallback(svg_path: Path | None, png_path: Path) -> Path | None:
+    """Render the PNG that viewers without SVG support show, and pair it with its SVG."""
+    if svg_path is None:
+        return None
+    cairosvg.svg2png(
+        url=str(svg_path), write_to=str(png_path), scale=SVG_FALLBACK_SCALE, background_color="white"
+    )
+    SVG_LAYERS[png_path.resolve()] = svg_path
+    return png_path
+
+
+def embed_svg_layers(path: Path) -> int:
+    """Attach each paired SVG to its picture as an Office svgBlip.
+
+    Excel 365 then draws the vector map; older Excel and other viewers keep the PNG.
+    Returns the number of pictures that received an SVG layer.
+    """
+    by_digest = {
+        hashlib.sha1(png.read_bytes()).hexdigest(): svg for png, svg in SVG_LAYERS.items() if png.exists()
+    }
+    with zipfile.ZipFile(path) as zf:
+        names = zf.namelist()
+        parts = {name: zf.read(name) for name in names}
+    svg_for_media: dict[str, str] = {}
+    for name in names:
+        if name.startswith("xl/media/") and name.lower().endswith(".png"):
+            svg = by_digest.get(hashlib.sha1(parts[name]).hexdigest())
+            if svg is not None:
+                svg_name = name[:-4] + ".svg"
+                parts[svg_name] = svg.read_bytes()
+                svg_for_media[name] = svg_name
+    embedded = 0
+    for rels_name in [n for n in names if re.fullmatch(r"xl/drawings/_rels/drawing\d+\.xml\.rels", n)]:
+        drawing_name = "xl/drawings/" + rels_name.rsplit("/", 1)[1][: -len(".rels")]
+        rels = parts[rels_name].decode("utf-8")
+        drawing = parts[drawing_name].decode("utf-8")
+        next_id = max((int(i) for i in re.findall(r'Id="rId(\d+)"', rels)), default=0) + 1
+        added = []
+        for rel in re.findall(r"<Relationship\b[^>]*/>", rels):
+            rid = re.search(r'Id="([^"]+)"', rel).group(1)
+            target = re.search(r'Target="([^"]+)"', rel).group(1)
+            media = target.lstrip("/") if target.startswith("/") else "xl/media/" + target.rsplit("/", 1)[1]
+            svg_name = svg_for_media.get(media)
+            if svg_name is None:
+                continue
+            svg_rid = f"rId{next_id}"
+            next_id += 1
+            svg_target = "/" + svg_name if target.startswith("/") else "../media/" + svg_name.rsplit("/", 1)[1]
+            added.append(f'<Relationship Type="{IMAGE_REL_TYPE}" Target="{svg_target}" Id="{svg_rid}" />')
+            blip = re.compile(r'<a:blip\b([^>]*\br:embed="' + re.escape(rid) + r'"[^>]*?)\s*/>')
+            drawing, hits = blip.subn(
+                lambda m: (
+                    f"<a:blip{m.group(1)}><a:extLst><a:ext uri=\"{SVG_BLIP_EXT_URI}\">"
+                    f"<asvg:svgBlip xmlns:asvg=\"{SVG_BLIP_NS}\" r:embed=\"{svg_rid}\" />"
+                    "</a:ext></a:extLst></a:blip>"
+                ),
+                drawing,
+            )
+            embedded += hits
+        if added:
+            parts[rels_name] = rels.replace("</Relationships>", "".join(added) + "</Relationships>").encode("utf-8")
+            parts[drawing_name] = drawing.encode("utf-8")
+    types = parts["[Content_Types].xml"].decode("utf-8")
+    if svg_for_media and 'Extension="svg"' not in types:
+        types = types.replace("<Override ", '<Default Extension="svg" ContentType="image/svg+xml" /><Override ', 1)
+        parts["[Content_Types].xml"] = types.encode("utf-8")
+    order = names + [n for n in parts if n not in names]
+    tmp = path.with_suffix(".tmp.xlsx")
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name in order:
+            zf.writestr(name, parts[name])
+    tmp.replace(path)
+    return embedded
 
 
 def banner(ws: Worksheet, title: str, subtitle: str, last_col: int = 12) -> None:
@@ -661,12 +748,12 @@ def build_kpi_sheet(
     section_bar(ws, 4, f"{name} coverage map {em} IDLE Mode  |  Combined view  |  bad spots", 1, 8)
     section_bar(ws, 4, f"{name} coverage map {em} Active Mode  |  {ACTIVE_OPERATOR}", 10, 18)
     if map_path and map_path.exists():
-        add_image(ws, map_path, "A6", width=620, height=520)
+        add_image(ws, map_path, "A6", width=620, height=760)
     if active_map and active_map.exists():
-        add_image(ws, active_map, "J6", width=560, height=480)
+        add_image(ws, active_map, "J6", width=620, height=760)
 
-    start_row = 34
-    block = 28
+    start_row = 6 + 760 // 20 + 3
+    block = 700 // 20 + 5
     active_band_maps = active_band_maps or {}
     for i, layer in enumerate(REPORT_LAYERS):
         row = start_row + i * block
@@ -674,10 +761,10 @@ def build_kpi_sheet(
         section_bar(ws, row, f"{name} coverage map {em} Active Mode_{layer}", 10, 18)
         band_path = band_maps.get(layer)
         if band_path and band_path.exists():
-            add_image(ws, band_path, f"A{row + 2}", width=560, height=470)
+            add_image(ws, band_path, f"A{row + 2}", width=560, height=700)
         active_path = active_band_maps.get(layer)
         if active_path and active_path.exists():
-            add_image(ws, active_path, f"J{row + 2}", width=560, height=470)
+            add_image(ws, active_path, f"J{row + 2}", width=560, height=700)
 
 
 def _kind_label(kind: object, kpi: object = None) -> str:
@@ -814,19 +901,21 @@ def build_kpi_bad_spot_sheet(
         "colour you can see. A poor run is a thin black dashed oval, and a discrete patch of at "
         "least 1 km\u00b2 is a thin black dotted circle. "
         + _detection_summary(kpi, spots)
-        + " Numbers are not drawn on the maps.",
+        + " Numbers are not drawn on the maps. The maps on this sheet are vector SVG drawings "
+        "(no street basemap) that stay sharp at any zoom in Excel 365; older viewers show a PNG copy.",
         size=11,
         wrap=True,
     )
-    ws.row_dimensions[4].height = 22
-    ws.row_dimensions[5].height = 22
-    ws.row_dimensions[6].height = 22
+    ws.row_dimensions[4].height = 26
+    ws.row_dimensions[5].height = 26
+    ws.row_dimensions[6].height = 26
 
     section_bar(ws, 8, f"Combined view {em} all-band {mode}  |  {kpi} bad spots", 1, last_col)
+    map_h = 0
     if combined_map.exists():
-        add_image(ws, combined_map, "A10", width=760, height=660)
+        _, map_h = add_image(ws, combined_map, "A10", width=760, height=900)
 
-    zoom_row = 46
+    zoom_row = 10 + max(map_h, 660) // 20 + 3
     zoom_title = f"{kpi} zoomed locations"
     shown_zooms = 0 if spots is None or spots.empty else min(len(spots), BAD_SPOT_MAX_ZOOMS)
     if spots is not None and len(spots) > shown_zooms:
@@ -834,7 +923,7 @@ def build_kpi_bad_spot_sheet(
     section_bar(ws, zoom_row, zoom_title, 1, last_col)
     zoom_h = _zoom_display_height(zooms, spots)
     if zooms is not None and zooms.exists():
-        add_image(ws, zooms, f"A{zoom_row + 2}", width=860, height=zoom_h)
+        _, zoom_h = add_image(ws, zooms, f"A{zoom_row + 2}", width=860, height=zoom_h)
         table_row = zoom_row + 2 + zoom_h // 20 + 4
     else:
         table_row = zoom_row + 3
@@ -1192,6 +1281,20 @@ def verify_report(path: Path) -> dict:
         info["problems"].append("RSRP vs KPIs_Active: expected three charts")
     wb.close()
     with zipfile.ZipFile(path) as zf:
+        svg_parts = [n for n in zf.namelist() if n.startswith("xl/media/") and n.endswith(".svg")]
+        svg_blips = sum(
+            zf.read(n).decode("utf-8").count("<asvg:svgBlip")
+            for n in zf.namelist()
+            if re.fullmatch(r"xl/drawings/drawing\d+\.xml", n)
+        )
+        info["svg_maps"] = svg_blips
+        bad_sheets = sum(1 for name in info["sheets"] if name.startswith("Bad Spot "))
+        if svg_blips < bad_sheets:
+            info["problems"].append(f"only {svg_blips} SVG map layers for {bad_sheets} bad-spot sheets")
+        for item in svg_parts:
+            body = zf.read(item)
+            if b"<image" in body or b"base64," in body:
+                info["problems"].append(f"{item}: SVG embeds a raster image")
         for item in zf.namelist():
             if not item.startswith("xl/charts/chart"):
                 continue
@@ -1306,33 +1409,30 @@ def _render_mode(df: pd.DataFrame, picker, tag: str, extent, mode_label: str | N
     sinr_spots = find_bad_spots(map_df, "SINR")
     title_bit = f" — {mode_label}" if mode_label else ""
     zoom_bit = mode_label or "first all-band map"
-    rsrp_bad = plot_rsrp_bad_spot_map(
-        map_df, rsrp_spots, PLOTS_DIR / f"excel_bad_spots_rsrp{suffix}.png",
-        extent=extent, title=f"Combined view — RSRP{title_bit}",
-    )
-    rsrq_bad = plot_rsrq_bad_spot_map(
-        map_df, rsrq_spots, PLOTS_DIR / f"excel_bad_spots_rsrq{suffix}.png",
-        extent=extent, title=f"Combined view — RSRQ{title_bit}",
-    )
-    sinr_bad = plot_sinr_bad_spot_map(
-        map_df, sinr_spots, PLOTS_DIR / f"excel_bad_spots_sinr{suffix}.png",
-        extent=extent, title=f"Combined view — SINR{title_bit}",
-    )
-    rsrp_zooms = plot_bad_spot_zoom_grid(
-        map_df, rsrp_spots, PLOTS_DIR / f"excel_bad_spots_rsrp_zooms{suffix}.png",
-        "RSRP", rsrp_map_class(map_df["RSRP"]), MAP_RSRP_LABELS, MAP_RSRP_COLORS,
-        f"RSRP zoomed locations ({zoom_bit})",
-    )
-    rsrq_zooms = plot_bad_spot_zoom_grid(
-        map_df, rsrq_spots, PLOTS_DIR / f"excel_bad_spots_rsrq_zooms{suffix}.png",
-        "RSRQ", rsrq_map_class(map_df["RSRQ"]), MAP_RSRQ_LABELS, MAP_RSRQ_COLORS,
-        f"RSRQ zoomed locations ({zoom_bit})",
-    )
-    sinr_zooms = plot_bad_spot_zoom_grid(
-        map_df, sinr_spots, PLOTS_DIR / f"excel_bad_spots_sinr_zooms{suffix}.png",
-        "SINR", sinr_map_class(map_df["SINR"]), MAP_SINR_LABELS, MAP_SINR_COLORS,
-        f"SINR zoomed locations ({zoom_bit})",
-    )
+    mode_name = "active" if tag else "idle"
+    SVG_DIR.mkdir(parents=True, exist_ok=True)
+    bad_maps = {}
+    zoom_maps = {}
+    for kpi, plot_map, classify, labels, colors in (
+        ("RSRP", plot_rsrp_bad_spot_map, rsrp_map_class, MAP_RSRP_LABELS, MAP_RSRP_COLORS),
+        ("RSRQ", plot_rsrq_bad_spot_map, rsrq_map_class, MAP_RSRQ_LABELS, MAP_RSRQ_COLORS),
+        ("SINR", plot_sinr_bad_spot_map, sinr_map_class, MAP_SINR_LABELS, MAP_SINR_COLORS),
+    ):
+        key = kpi.lower()
+        spots = {"RSRP": rsrp_spots, "RSRQ": rsrq_spots, "SINR": sinr_spots}[kpi]
+        combined_svg = plot_map(
+            map_df, spots, SVG_DIR / f"bad_spots_{key}_combined_{mode_name}.svg",
+            extent=extent, title=f"Combined view — {kpi}{title_bit}",
+        )
+        bad_maps[kpi] = svg_with_fallback(combined_svg, PLOTS_DIR / f"excel_bad_spots_{key}{suffix}.png")
+        zoom_svg = plot_bad_spot_zoom_grid(
+            map_df, spots, SVG_DIR / f"bad_spots_{key}_zooms_{mode_name}.svg",
+            kpi, classify(map_df[kpi]), labels, colors,
+            f"{kpi} zoomed locations ({zoom_bit})",
+        )
+        zoom_maps[kpi] = svg_with_fallback(zoom_svg, PLOTS_DIR / f"excel_bad_spots_{key}_zooms{suffix}.png")
+    rsrp_bad, rsrq_bad, sinr_bad = bad_maps["RSRP"], bad_maps["RSRQ"], bad_maps["SINR"]
+    rsrp_zooms, rsrq_zooms, sinr_zooms = zoom_maps["RSRP"], zoom_maps["RSRQ"], zoom_maps["SINR"]
     return {
         "map_df": map_df,
         "rsrp_band": rsrp_band, "rsrq_band": rsrq_band, "sinr_band": sinr_band,
@@ -1460,6 +1560,8 @@ def build_report(df: pd.DataFrame, active: pd.DataFrame | None = None, out_path:
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(out_path)
+    n_svg = embed_svg_layers(out_path)
+    print(f"Embedded {n_svg} bad-spot maps as SVG")
     shutil.copy2(out_path, VERSIONED_XLSX)
     print(f"Wrote Excel report: {out_path}")
     print(f"Wrote versioned copy: {VERSIONED_XLSX}")
