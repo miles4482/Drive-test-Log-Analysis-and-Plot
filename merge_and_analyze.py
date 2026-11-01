@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import math
 import subprocess
 import sys
+import urllib.request
 from collections import deque
 from pathlib import Path
 
@@ -12,6 +14,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from matplotlib.patches import Ellipse, PathPatch
 from matplotlib.path import Path as MPath
@@ -408,6 +411,156 @@ def _bin_route_values(
     return binned, classifier(binned["value"])
 
 
+# A drive-test export draws the route as a solid trace, not a cloud of
+# sub-pixel dots. At city scale a 50 m bin is smaller than one pixel, so a
+# scatter turns the two greens into one blurry line.
+MAP_DPI = 200
+MAP_ROUTE_LW = 3.2
+_TILE_CACHE = Path("/tmp/bogura_tiles")
+_BASEMAP_CACHE: dict[tuple, object] = {}
+
+
+def _merc_lat(y: float, n: float) -> float:
+    merc = math.pi * (1.0 - 2.0 * y / n)
+    return math.degrees(math.atan(math.sinh(merc)))
+
+
+def _tile_bounds(x: int, y: int, z: int) -> tuple[float, float, float, float]:
+    """West, east, south, north of one Web-Mercator tile."""
+    n = 2**z
+    west = x / n * 360.0 - 180.0
+    east = (x + 1) / n * 360.0 - 180.0
+    north = _merc_lat(y, n)
+    south = _merc_lat(y + 1, n)
+    return west, east, south, north
+
+
+def _choose_zoom(span_deg: float) -> int:
+    """Zoom where the view is about six tiles across, so streets stay readable."""
+    best = 10
+    for z in range(9, 16):
+        tiles = span_deg / (360.0 / 2**z)
+        if tiles <= 11:
+            best = z
+        else:
+            break
+    return best
+
+
+def _fetch_tile(z: int, x: int, y: int):
+    from PIL import Image
+
+    path = _TILE_CACHE / f"{z}_{x}_{y}.png"
+    if path.exists() and path.stat().st_size > 200:
+        return Image.open(path).convert("RGB")
+    url = f"https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+    req = urllib.request.Request(url, headers={"User-Agent": "BoguraDriveTestReport/1.33 (coverage map export)"})
+    _TILE_CACHE.mkdir(parents=True, exist_ok=True)
+    import time
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                path.write_bytes(resp.read())
+            return Image.open(path).convert("RGB")
+        except Exception as exc:
+            last_error = exc
+            time.sleep(1.5 * (attempt + 1))
+    raise last_error if last_error else RuntimeError(f"tile {z}/{x}/{y}")
+
+
+def _add_basemap(ax) -> None:
+    """Light street map under the route, the way a log export is drawn on a map."""
+    try:
+        _add_basemap_image(ax)
+    except Exception as exc:
+        print(f"Basemap skipped: {exc}")
+
+
+def _add_basemap_image(ax) -> None:
+    from PIL import Image
+
+    west, east = ax.get_xlim()
+    south, north = ax.get_ylim()
+    if east <= west or north <= south:
+        return
+    z = _choose_zoom(max(east - west, north - south))
+    n = 2**z
+    x0 = max(0, int((west + 180.0) / 360.0 * n))
+    x1 = min(n - 1, int((east + 180.0) / 360.0 * n))
+    def tile_y(lat: float) -> int:
+        lat_r = math.radians(max(-85.0, min(85.0, lat)))
+        return int((1.0 - math.log(math.tan(lat_r) + 1.0 / math.cos(lat_r)) / math.pi) / 2.0 * n)
+    y0 = max(0, min(tile_y(north), n - 1))
+    y1 = max(0, min(tile_y(south), n - 1))
+    if y1 < y0:
+        y0, y1 = y1, y0
+    key = (z, x0, x1, y0, y1)
+    image = _BASEMAP_CACHE.get(key)
+    if image is None:
+        width = (x1 - x0 + 1) * 256
+        height = (y1 - y0 + 1) * 256
+        canvas = Image.new("RGB", (width, height), (244, 244, 244))
+        for iy, y in enumerate(range(y0, y1 + 1)):
+            for ix, x in enumerate(range(x0, x1 + 1)):
+                try:
+                    canvas.paste(_fetch_tile(z, x, y), (ix * 256, iy * 256))
+                except Exception:
+                    continue
+        image = np.asarray(canvas)
+        _BASEMAP_CACHE[key] = image
+    west_m, _, _, north_m = _tile_bounds(x0, y0, z)
+    _, east_m, south_m, _ = _tile_bounds(x1, y1, z)
+    ax.imshow(
+        image, extent=(west_m, east_m, south_m, north_m),
+        origin="upper", interpolation="bilinear", zorder=0, aspect="auto",
+    )
+    ax.set_xlim(west, east)
+    ax.set_ylim(south, north)
+    ax.set_aspect("equal", adjustable="box")
+    ax.text(
+        0.01, 0.01, "© OpenStreetMap",
+        transform=ax.transAxes, fontsize=6, color="#5D6D7E", ha="left", va="bottom", zorder=6,
+    )
+
+
+def _route_pieces(geo: pd.DataFrame, column: str, bin_m: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Time-ordered 50 m vertices, coloured by that bin's median, split on gaps."""
+    work = geo.dropna(subset=["Longitude", "Latitude", column]).copy()
+    if "Time" in work.columns:
+        sort_cols = ["Source", "Time"] if "Source" in work.columns else ["Time"]
+        work = work.sort_values(sort_cols)
+    lat = pd.to_numeric(work["Latitude"], errors="coerce")
+    lon = pd.to_numeric(work["Longitude"], errors="coerce")
+    val = pd.to_numeric(work[column], errors="coerce")
+    ok = lat.notna() & lon.notna() & val.notna()
+    work = work.loc[ok]
+    if work.empty:
+        return np.empty((0, 2)), np.empty(0, dtype=object), np.empty(0, dtype=bool)
+    lat = lat[ok]
+    lon = lon[ok]
+    val = val[ok]
+    dlat, dlon = _bin_steps(lat, bin_m)
+    key = pd.MultiIndex.from_arrays(
+        [np.floor(lat / dlat).astype(np.int64), np.floor(lon / dlon).astype(np.int64)]
+    )
+    median = val.groupby(key).transform("median")
+    classes = MAP_CLASSIFIERS[column](median)
+    # One vertex per visit to a bin, in drive order, so the trace follows the road.
+    changed = np.empty(len(work), dtype=bool)
+    changed[0] = True
+    keys = key.to_numpy()
+    changed[1:] = keys[1:] != keys[:-1]
+    step = np.zeros(len(work))
+    step[1:] = _equirect_km(lat.to_numpy()[:-1], lon.to_numpy()[:-1], lat.to_numpy()[1:], lon.to_numpy()[1:]) * 1000.0
+    source = work["Source"].to_numpy() if "Source" in work.columns else np.zeros(len(work))
+    new_pass = np.zeros(len(work), dtype=bool)
+    new_pass[1:] = (source[1:] != source[:-1]) | (step[1:] > 120.0)
+    keep = changed | new_pass
+    pts = np.column_stack([lon.to_numpy()[keep], lat.to_numpy()[keep]])
+    return pts, classes.to_numpy()[keep], new_pass[keep]
+
+
 def _draw_coverage_points(
     ax,
     geo: pd.DataFrame,
@@ -420,26 +573,60 @@ def _draw_coverage_points(
     bin_m: float | None = None,
     column: str | None = None,
 ) -> None:
-    """Same point style as the first all-band RSRP / RSRQ / SINR maps.
+    """Solid drive trace, worst colour on top, same 50 m bins as the bad spots.
 
-    Worst bins are drawn last: a good sample must never hide a poor one, or the
-    map contradicts the bad spots circled on it.
+    A dark casing under the colour keeps yellow and the two greens readable on
+    the street map, the way a log-export route sits on the road.
     """
     if geo.empty:
         return
-    sample = downsample(geo, max_points=max_points)
-    classes = class_series.reindex(sample.index)
-    size = 5
     classifier = MAP_CLASSIFIERS.get(column or "")
-    if bin_m and classifier is not None and column in sample.columns:
-        sample, classes = _bin_route_values(sample, sample[column], classifier, bin_m)
-        size = 6
-    order = list(zip(labels, colors)) if poor_on_top else list(zip(reversed(labels), reversed(colors)))
-    for label, color in order:
-        part = sample[classes == label]
-        if part.empty:
+    if not (bin_m and classifier is not None and column in geo.columns):
+        sample = downsample(geo, max_points=max_points)
+        classes = class_series.reindex(sample.index)
+        for label, color in zip(labels, colors):
+            part = sample[classes == label]
+            if part.empty:
+                continue
+            ax.scatter(part["Longitude"], part["Latitude"], s=12, c=color, linewidths=0, zorder=3)
+        return
+    pts, classes, new_pass = _route_pieces(geo, column, bin_m)
+    if len(pts) == 0:
+        return
+    color_of = dict(zip(labels, colors))
+    order = list(labels) if poor_on_top else list(reversed(labels))
+    segments: dict[str, list] = {lab: [] for lab in labels}
+    run_start = 0
+    breaks = list(np.flatnonzero(new_pass)) + [len(pts)]
+    alone: dict[str, list] = {lab: [] for lab in labels}
+    for end in breaks:
+        if end - run_start == 1:
+            lab = classes[run_start]
+            if lab in alone:
+                alone[lab].append(pts[run_start])
+        for i in range(run_start, end - 1):
+            lab = classes[i]
+            if lab in segments:
+                segments[lab].append([pts[i], pts[i + 1]])
+        run_start = end
+    # Casing, then each legend colour. Poor bins are last so they stay visible.
+    casing = [seg for lab in labels for seg in segments[lab]]
+    if casing:
+        ax.add_collection(LineCollection(
+            casing, colors="#2C3E50", linewidths=MAP_ROUTE_LW + 1.3,
+            capstyle="round", joinstyle="round", zorder=2,
+        ))
+    for z, lab in enumerate(order):
+        segs = segments.get(lab) or []
+        if not segs:
             continue
-        ax.scatter(part["Longitude"], part["Latitude"], s=size, c=color, linewidths=0, rasterized=True, zorder=2)
+        ax.add_collection(LineCollection(
+            segs, colors=color_of[lab], linewidths=MAP_ROUTE_LW,
+            capstyle="round", joinstyle="round", zorder=3 + z,
+        ))
+        if alone[lab]:
+            xy = np.vstack(alone[lab])
+            ax.scatter(xy[:, 0], xy[:, 1], s=18, c=color_of[lab], linewidths=0, zorder=3 + z)
 
 
 def _coverage_legend_handles(labels: list[str], colors: list[str]) -> list:
@@ -508,10 +695,11 @@ def plot_discrete_coverage_map(
         title_fontsize=10,
     )
     ax.set_aspect("equal", adjustable="box")
+    _add_basemap(ax)
     ax.set_title(title)
     hide_map_axes(ax)
     fig.tight_layout()
-    fig.savefig(path, dpi=140, facecolor="white", bbox_inches="tight")
+    fig.savefig(path, dpi=MAP_DPI, facecolor="white", bbox_inches="tight")
     plt.close(fig)
     return path
 
@@ -1292,6 +1480,7 @@ def plot_bad_spot_map(
         ax.set_xlim(lon_min, lon_max)
         ax.set_ylim(lat_min, lat_max)
     ax.set_aspect("equal", adjustable="box")
+    _add_basemap(ax)
     handles = _coverage_legend_handles(labels, colors)
     handles.extend(
         [
@@ -1315,7 +1504,7 @@ def plot_bad_spot_map(
     ax.set_title(title)
     hide_map_axes(ax)
     fig.tight_layout()
-    fig.savefig(path, dpi=140, facecolor="white", bbox_inches="tight")
+    fig.savefig(path, dpi=MAP_DPI, facecolor="white", bbox_inches="tight")
     plt.close(fig)
     return path
 
@@ -1365,6 +1554,7 @@ def plot_bad_spot_zoom_grid(
         ax.set_xlim(zext[0], zext[1])
         ax.set_ylim(zext[2], zext[3])
         ax.set_aspect("equal", adjustable="box")
+        _add_basemap(ax)
         _add_spot_outline(ax, spot)
         hide_map_axes(ax)
         kind = str(spot.get("kind", "consecutive"))
@@ -1376,7 +1566,7 @@ def plot_bad_spot_zoom_grid(
         ax.set_title(caption, fontsize=8)
     fig.suptitle(title, fontsize=11, fontweight="bold")
     fig.tight_layout()
-    fig.savefig(path, dpi=140, facecolor="white", bbox_inches="tight")
+    fig.savefig(path, dpi=MAP_DPI, facecolor="white", bbox_inches="tight")
     plt.close(fig)
     return path
 

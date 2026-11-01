@@ -71,7 +71,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.32"
+REPORT_VERSION = "1.33"
 # Every poor run is a bad spot, so a dense KPI produces over a thousand of them.
 # The map marks them all; the table lists the longest ones a team can act on.
 BAD_SPOT_TABLE_MAX = 300
