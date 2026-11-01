@@ -106,21 +106,21 @@ Active best server is the **strongest carrier at each timestamp** (the UE logs e
 - Each sheet lists the 16 longest circles as zoom panels and up to 300 in the table, longest first, and states the full count
 - Published circle counts, with 0 discrete areas: Idle RSRP 41, RSRQ 45, SINR 204; Active RSRP 163, RSRQ 52, SINR 190. These rules are locked in `LOGIC_LOCK`. `verify_report` fails if a rebuild moves a threshold, a colour, the circle size, or a count
 
-### Maps are satellite, and each bad-spot circle is its own shape (v1.36)
+### Maps are satellite, and each bad-spot circle is its own shape (v1.37)
 
 Every coverage map and bad-spot map is drawn on Esri World Imagery. On the combined bad-spot view the orange circles are not painted into the picture: each one is a separate Excel shape named Circle 1, Circle 2, … in the same order as the table, so it can be dragged on its own. The same circle on a zoom panel is also its own shape, not painted into that picture. The RSRP, RSRQ and SINR sheets show the route only. A circle is at most 10 km across. Where the poor road is in separate pockets, several circles sit inside that 10 km neighbourhood.
 
-## Download Excel report (v1.36)
+## Download Excel report (v1.37)
 
-**v1.36 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.36.xlsx
+**v1.37 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.37.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.36.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.37.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.36.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.37.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
 Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 

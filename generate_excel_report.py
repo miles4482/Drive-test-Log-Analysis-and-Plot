@@ -77,7 +77,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.36"
+REPORT_VERSION = "1.37"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -341,6 +341,7 @@ def embed_circle_shapes(path: Path) -> int:
             for name in names:
                 zf.writestr(name, parts[name])
         tmp.replace(path)
+    spread_circle_anchors(path)
     return placed
 
 
@@ -368,6 +369,135 @@ def _circle_anchor(circle, shape_id, col, col_off, row, row_off, pic_cx, pic_cy,
         "<txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang=\"en-US\"/></a:p></txBody>"
         "</sp><clientData/></oneCellAnchor>"
     )
+
+
+def _column_width_px(width: float) -> int:
+    """Excel's display width for a stored column width, in pixels at 96 dpi."""
+    if width < 1:
+        return int(width * 12 + 0.5)
+    return int(width * 7 + 0.5) + 5
+
+
+def _sheet_metric(sheet_xml: bytes):
+    """Column widths and row heights for one worksheet, in EMUs."""
+    ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    root = ET.fromstring(sheet_xml)
+    fmt = root.find(f"{ns}sheetFormatPr")
+    default_pt = float(fmt.attrib.get("defaultRowHeight", "15")) if fmt is not None else 15.0
+    default_width = 8.43
+    if fmt is not None and "defaultColWidth" in fmt.attrib:
+        default_width = float(fmt.attrib["defaultColWidth"])
+    col_px: dict[int, int] = {}
+    cols = root.find(f"{ns}cols")
+    if cols is not None:
+        for col in cols:
+            px = _column_width_px(float(col.attrib.get("width", default_width)))
+            for index in range(int(col.attrib["min"]), int(col.attrib["max"]) + 1):
+                col_px[index] = px
+    row_pt: dict[int, float] = {}
+    for row in root.findall(f"{ns}sheetData/{ns}row"):
+        if "ht" in row.attrib:
+            row_pt[int(row.attrib["r"])] = float(row.attrib["ht"])
+    return col_px, default_width, row_pt, default_pt
+
+
+def _spread_drawing_anchors(drawing: str, sheet_xml: bytes) -> str:
+    """Move each circle's anchor into the cell under its bad spot.
+
+    A from-offset larger than the cell is ignored by Excel, which stacks every
+    circle on the picture's first cell. The offset is split across the columns
+    and rows the picture covers, and each circle keeps its own cell.
+    """
+    col_px, default_width, row_pt, default_pt = _sheet_metric(sheet_xml)
+    px_emu = 9525
+    pt_emu = 12700
+
+    def col_emu(index0: int) -> int:
+        return col_px.get(index0 + 1, _column_width_px(default_width)) * px_emu
+
+    def row_emu(index0: int) -> int:
+        return int(round(row_pt.get(index0 + 1, default_pt) * pt_emu))
+
+    def prefix(count: int, size_of) -> list[int]:
+        total = [0]
+        for i in range(count):
+            total.append(total[-1] + size_of(i))
+        return total
+
+    col_at = prefix(50, col_emu)
+    row_at = prefix(500, row_emu)
+
+    def locate(at: list[int], absolute: int) -> tuple[int, int]:
+        absolute = max(0, absolute)
+        lo, hi = 0, len(at) - 2
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if at[mid] <= absolute:
+                lo = mid
+            else:
+                hi = mid - 1
+        offset = absolute - at[lo]
+        room = at[lo + 1] - at[lo]
+        if offset >= room:
+            offset = max(0, room - 1)
+        return lo, int(offset)
+
+    def place(match: re.Match) -> str:
+        block = match.group(0)
+        if 'prst="ellipse"' not in block:
+            return block
+        found = re.search(
+            r"<from><col>(\d+)</col><colOff>(\d+)</colOff><row>(\d+)</row><rowOff>(\d+)</rowOff></from>",
+            block,
+        )
+        if found is None:
+            return block
+        col, col_off, row, row_off = (int(v) for v in found.groups())
+        if col >= len(col_at) - 1 or row >= len(row_at) - 1:
+            return block
+        new_col, new_col_off = locate(col_at, col_at[col] + col_off)
+        new_row, new_row_off = locate(row_at, row_at[row] + row_off)
+        updated = (
+            f"<from><col>{new_col}</col><colOff>{new_col_off}</colOff>"
+            f"<row>{new_row}</row><rowOff>{new_row_off}</rowOff></from>"
+        )
+        return block.replace(found.group(0), updated, 1)
+
+    return re.sub(r"<oneCellAnchor>.*?</oneCellAnchor>", place, drawing, flags=re.S)
+
+
+def spread_circle_anchors(path: Path) -> int:
+    """Re-anchor every bad-spot circle so Excel draws it on its own bad spot."""
+    with zipfile.ZipFile(path) as zf:
+        names = zf.namelist()
+        parts = {name: zf.read(name) for name in names}
+    moved = 0
+    drawings = _sheet_drawings(parts)
+    main = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    rel_ns = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+    wb = ET.fromstring(parts["xl/workbook.xml"])
+    book_rels = ET.fromstring(parts["xl/_rels/workbook.xml.rels"])
+    rid_target = {rel.attrib["Id"]: rel.attrib["Target"].lstrip("/") for rel in book_rels}
+    sheet_part = {}
+    for node in wb.find(f"{main}sheets"):
+        sheet_part[node.attrib["name"]] = rid_target[node.attrib[f"{rel_ns}id"]]
+    changed = False
+    for sheet, drawing_name in drawings.items():
+        if not sheet.startswith("Bad Spot"):
+            continue
+        original = parts[drawing_name].decode("utf-8")
+        updated = _spread_drawing_anchors(original, parts[sheet_part[sheet]])
+        if updated != original:
+            parts[drawing_name] = updated.encode("utf-8")
+            moved += original.count('prst="ellipse"')
+            changed = True
+    if changed:
+        tmp = path.with_suffix(".tmp.xlsx")
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+            for name in names:
+                zf.writestr(name, parts[name])
+        tmp.replace(path)
+    return moved
 
 
 _CIRCLE_NOTE_OLD = (
@@ -501,6 +631,9 @@ def refresh_zoom_circles(src: Path | None = None) -> Path:
         for name in order:
             zf.writestr(name, parts[name])
     tmp.replace(VERSIONED_XLSX)
+    if VERSIONED_XLSX.resolve() != REPORT_XLSX.resolve():
+        shutil.copy2(VERSIONED_XLSX, REPORT_XLSX)
+    spread_circle_anchors(VERSIONED_XLSX)
     if VERSIONED_XLSX.resolve() != REPORT_XLSX.resolve():
         shutil.copy2(VERSIONED_XLSX, REPORT_XLSX)
     print(f"Wrote {VERSIONED_XLSX}", flush=True)
