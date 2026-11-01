@@ -14,6 +14,7 @@ import hashlib
 import math
 import re
 import shutil
+import xml.etree.ElementTree as ET
 import zipfile
 
 import cairosvg
@@ -76,7 +77,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.35"
+REPORT_VERSION = "1.36"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -252,11 +253,31 @@ def embed_svg_layers(path: Path) -> int:
     return embedded
 
 
+def _sheet_drawings(parts: dict[str, bytes]) -> dict[str, str]:
+    """Map a worksheet name to its drawing part, when the sheet has one."""
+    main = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    rel_ns = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+    wb = ET.fromstring(parts["xl/workbook.xml"])
+    book_rels = ET.fromstring(parts["xl/_rels/workbook.xml.rels"])
+    rid_target = {rel.attrib["Id"]: rel.attrib["Target"].lstrip("/") for rel in book_rels}
+    found = {}
+    for sheet in wb.find(f"{main}sheets"):
+        sheet_path = rid_target[sheet.attrib[f"{rel_ns}id"]]
+        rels_path = sheet_path.replace("worksheets/", "worksheets/_rels/") + ".rels"
+        if rels_path not in parts:
+            continue
+        for rel in ET.fromstring(parts[rels_path]):
+            target = rel.attrib["Target"].lstrip("/")
+            if "drawings/drawing" in target:
+                found[sheet.attrib["name"]] = target
+    return found
+
+
 def embed_circle_shapes(path: Path) -> int:
     """Add one Excel oval per bad-spot circle, anchored on top of its map picture.
 
     Each oval is its own drawing object, so it can be dragged without moving the
-    map or the other circles.
+    map or the other circles. Ovals are added only on Bad Spot sheets.
     """
     if not MAP_CIRCLE_PIXELS:
         return 0
@@ -274,8 +295,13 @@ def embed_circle_shapes(path: Path) -> int:
         if name.startswith("xl/media/") and name.lower().endswith(".png")
     }
     placed = 0
+    bad_spot_drawings = {
+        drawing for sheet, drawing in _sheet_drawings(parts).items() if sheet.startswith("Bad Spot")
+    }
     for rels_name in [n for n in names if re.fullmatch(r"xl/drawings/_rels/drawing\d+\.xml\.rels", n)]:
         drawing_name = "xl/drawings/" + rels_name.rsplit("/", 1)[1][: -len(".rels")]
+        if drawing_name not in bad_spot_drawings:
+            continue
         rels = parts[rels_name].decode("utf-8")
         drawing = parts[drawing_name].decode("utf-8")
         rid_media = {}
@@ -303,26 +329,7 @@ def embed_circle_shapes(path: Path) -> int:
                 continue
             col, col_off, row, row_off, pic_cx, pic_cy = (int(v) for v in origin.groups())
             for circle in geom["circles"]:
-                left = max(0.0, min(float(circle["x"]), img_w - 1))
-                top = max(0.0, min(float(circle["y"]), img_h - 1))
-                width = max(1.0, min(float(circle["w"]), img_w - left))
-                height = max(1.0, min(float(circle["h"]), img_h - top))
-                dash = "sysDot" if circle.get("dotted") else "dash"
-                extras.append(
-                    "<oneCellAnchor>"
-                    f"<from><col>{col}</col><colOff>{col_off + int(left / img_w * pic_cx)}</colOff>"
-                    f"<row>{row}</row><rowOff>{row_off + int(top / img_h * pic_cy)}</rowOff></from>"
-                    f"<ext cx=\"{max(1, int(width / img_w * pic_cx))}\" cy=\"{max(1, int(height / img_h * pic_cy))}\"/>"
-                    "<sp><nvSpPr>"
-                    f"<cNvPr id=\"{next_shape}\" name=\"{circle['name']}\"/><cNvSpPr/></nvSpPr>"
-                    "<spPr><a:xfrm><a:off x=\"0\" y=\"0\"/>"
-                    f"<a:ext cx=\"{max(1, int(width / img_w * pic_cx))}\" cy=\"{max(1, int(height / img_h * pic_cy))}\"/>"
-                    "</a:xfrm><a:prstGeom prst=\"ellipse\"><a:avLst/></a:prstGeom><a:noFill/>"
-                    "<a:ln w=\"28575\"><a:solidFill><a:srgbClr val=\"FF6600\"/></a:solidFill>"
-                    f"<a:prstDash val=\"{dash}\"/></a:ln></spPr>"
-                    "<txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang=\"en-US\"/></a:p></txBody>"
-                    "</sp><clientData/></oneCellAnchor>"
-                )
+                extras.append(_circle_anchor(circle, next_shape, col, col_off, row, row_off, pic_cx, pic_cy, img_w, img_h))
                 next_shape += 1
                 placed += 1
         if extras:
@@ -335,6 +342,169 @@ def embed_circle_shapes(path: Path) -> int:
                 zf.writestr(name, parts[name])
         tmp.replace(path)
     return placed
+
+
+def _circle_anchor(circle, shape_id, col, col_off, row, row_off, pic_cx, pic_cy, img_w, img_h) -> str:
+    """One movable oval, positioned as a fraction of the picture it sits on."""
+    left = max(0.0, min(float(circle["x"]), img_w - 1))
+    top = max(0.0, min(float(circle["y"]), img_h - 1))
+    width = max(1.0, min(float(circle["w"]), img_w - left))
+    height = max(1.0, min(float(circle["h"]), img_h - top))
+    dash = "sysDot" if circle.get("dotted") else "dash"
+    cx = max(1, int(width / img_w * pic_cx))
+    cy = max(1, int(height / img_h * pic_cy))
+    return (
+        "<oneCellAnchor>"
+        f"<from><col>{col}</col><colOff>{col_off + int(left / img_w * pic_cx)}</colOff>"
+        f"<row>{row}</row><rowOff>{row_off + int(top / img_h * pic_cy)}</rowOff></from>"
+        f"<ext cx=\"{cx}\" cy=\"{cy}\"/>"
+        "<sp><nvSpPr>"
+        f"<cNvPr id=\"{shape_id}\" name=\"{circle['name']}\"/><cNvSpPr/></nvSpPr>"
+        "<spPr><a:xfrm><a:off x=\"0\" y=\"0\"/>"
+        f"<a:ext cx=\"{cx}\" cy=\"{cy}\"/>"
+        "</a:xfrm><a:prstGeom prst=\"ellipse\"><a:avLst/></a:prstGeom><a:noFill/>"
+        "<a:ln w=\"28575\"><a:solidFill><a:srgbClr val=\"FF6600\"/></a:solidFill>"
+        f"<a:prstDash val=\"{dash}\"/></a:ln></spPr>"
+        "<txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang=\"en-US\"/></a:p></txBody>"
+        "</sp><clientData/></oneCellAnchor>"
+    )
+
+
+_CIRCLE_NOTE_OLD = (
+    "Each circle is a separate orange shape on the satellite map, named "
+    "Circle 1, Circle 2, and so on, in the same order as the table, so a circle can be dragged "
+    "without moving the others."
+)
+_CIRCLE_NOTE_NEW = (
+    "Each circle is a separate orange shape on the combined map, named "
+    "Circle 1, Circle 2, and so on, in the same order as the table. Each zoom panel has that "
+    "same circle as its own shape, not painted into the picture, so you can drag it. The RSRP, "
+    "RSRQ and SINR sheets do not repeat these circles."
+)
+
+
+def refresh_zoom_circles(src: Path | None = None) -> Path:
+    """Update an existing report without redrawing the sheets that stay the same.
+
+    Removes the circle shapes from the RSRP, RSRQ and SINR sheets, redraws only
+    the zoom pictures without a painted circle, and adds one movable circle on
+    each zoom panel.
+    """
+    import io
+    from PIL import Image
+
+    from merge_and_analyze import ACTIVE_MERGED, MERGED_CSV, load_active_merged, load_merged_csv
+
+    src = src or REPORT_XLSX
+    print("Loading drive logs", flush=True)
+    idle = load_merged_csv() if MERGED_CSV.exists() else None
+    active = load_active_merged() if ACTIVE_MERGED.exists() else None
+    if idle is None or active is None:
+        raise SystemExit("Merged drive logs are missing; a full report build is required.")
+    if "Operator" in active.columns:
+        active = active.loc[active["Operator"] == ACTIVE_OPERATOR].copy()
+    print(f"Idle rows {len(idle):,}  Active {ACTIVE_OPERATOR} rows {len(active):,}", flush=True)
+    idle_track = best_server(idle)
+    active_track = best_carrier(active)
+    MAP_CIRCLE_PIXELS.clear()
+    zoom_for_sheet = {}
+    for tag, frame in (("", idle_track), ("active", active_track)):
+        suffix = f"_{tag}" if tag else ""
+        zoom_bit = "Active" if tag else "first all-band map"
+        for kpi, classify, labels, colors in (
+            ("RSRP", rsrp_map_class, MAP_RSRP_LABELS, MAP_RSRP_COLORS),
+            ("RSRQ", rsrq_map_class, MAP_RSRQ_LABELS, MAP_RSRQ_COLORS),
+            ("SINR", sinr_map_class, MAP_SINR_LABELS, MAP_SINR_COLORS),
+        ):
+            print(f"Drawing {kpi} zooms ({tag or 'idle'})", flush=True)
+            spots = find_bad_spots(frame, kpi)
+            path = PLOTS_DIR / f"excel_bad_spots_{kpi.lower()}_zooms{suffix}.png"
+            plot_bad_spot_zoom_grid(
+                frame, spots, path, kpi, classify(frame[kpi]), labels, colors,
+                f"{kpi} zoomed locations ({zoom_bit})", shapes=True,
+            )
+            sheet = f"Bad Spot {kpi}" + ("_Active" if tag else "")
+            zoom_for_sheet[sheet] = path
+            recorded = len(MAP_CIRCLE_PIXELS[str(path.resolve())]["circles"])
+            print(f"  {sheet}: {recorded} movable circles", flush=True)
+
+    print("Updating the workbook", flush=True)
+    with zipfile.ZipFile(src) as zf:
+        names = zf.namelist()
+        parts = {name: zf.read(name) for name in names}
+    drawings = _sheet_drawings(parts)
+    for sheet, drawing_name in drawings.items():
+        if sheet.startswith("Bad Spot"):
+            continue
+        drawing = parts[drawing_name].decode("utf-8")
+        stripped = re.sub(
+            r'<oneCellAnchor>(?:(?!</oneCellAnchor>).)*prst="ellipse".*?</oneCellAnchor>',
+            "",
+            drawing,
+            flags=re.S,
+        )
+        parts[drawing_name] = stripped.encode("utf-8")
+
+    for sheet, png in zoom_for_sheet.items():
+        drawing_name = drawings[sheet]
+        rels_name = drawing_name.replace("drawings/", "drawings/_rels/") + ".rels"
+        rels = parts[rels_name].decode("utf-8")
+        drawing = parts[drawing_name].decode("utf-8")
+        rid_media = {}
+        for rel in re.findall(r"<Relationship\b[^>]*/>", rels):
+            rid = re.search(r'Id="([^"]+)"', rel).group(1)
+            target = re.search(r'Target="([^"]+)"', rel).group(1)
+            media = target.lstrip("/") if target.startswith("/") else "xl/media/" + target.rsplit("/", 1)[1]
+            rid_media[rid] = media
+        pictures = []
+        for block in re.findall(r"<oneCellAnchor>.*?</oneCellAnchor>", drawing, flags=re.S):
+            if "<pic>" not in block:
+                continue
+            row = int(re.search(r"<row>(\d+)</row>", block).group(1))
+            pictures.append((row, block))
+        _row, zoom_block = max(pictures)
+        embed = re.search(r'r:embed="([^"]+)"', zoom_block).group(1)
+        media = rid_media[embed]
+        image = Image.open(png).convert("RGB")
+        buf = io.BytesIO()
+        image.save(buf, "JPEG", quality=74, optimize=True)
+        parts[media] = buf.getvalue()
+        geom = MAP_CIRCLE_PIXELS[str(Path(png).resolve())]
+        img_w, img_h = geom["size"]
+        origin = re.search(
+            r"<from><col>(\d+)</col><colOff>(\d+)</colOff><row>(\d+)</row><rowOff>(\d+)</rowOff></from><ext cx=\"(\d+)\" cy=\"(\d+)\"",
+            zoom_block,
+        )
+        col, col_off, row, row_off, pic_cx, pic_cy = (int(v) for v in origin.groups())
+        next_shape = max(int(i) for i in re.findall(r'<cNvPr id="(\d+)"', drawing)) + 1
+        extras = []
+        for circle in geom["circles"]:
+            extras.append(_circle_anchor(circle, next_shape, col, col_off, row, row_off, pic_cx, pic_cy, img_w, img_h))
+            next_shape += 1
+        parts[drawing_name] = drawing.replace("</wsDr>", "".join(extras) + "</wsDr>").encode("utf-8")
+        print(f"  {sheet}: replaced zoom picture, added {len(extras)} circles", flush=True)
+
+    note_hits = 0
+    for name, body in list(parts.items()):
+        if not name.endswith(".xml"):
+            continue
+        text = body.decode("utf-8")
+        if _CIRCLE_NOTE_OLD not in text:
+            continue
+        parts[name] = text.replace(_CIRCLE_NOTE_OLD, _CIRCLE_NOTE_NEW).encode("utf-8")
+        note_hits += text.count(_CIRCLE_NOTE_OLD)
+    print(f"Updated circle note in {note_hits} place(s)", flush=True)
+
+    order = [n for n in names if n in parts]
+    tmp = src.with_suffix(".tmp.xlsx")
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name in order:
+            zf.writestr(name, parts[name])
+    tmp.replace(VERSIONED_XLSX)
+    if VERSIONED_XLSX.resolve() != REPORT_XLSX.resolve():
+        shutil.copy2(VERSIONED_XLSX, REPORT_XLSX)
+    print(f"Wrote {VERSIONED_XLSX}", flush=True)
+    return VERSIONED_XLSX
 
 
 def compress_workbook_images(path: Path, quality: int = 74) -> int:
@@ -1040,9 +1210,10 @@ def build_kpi_bad_spot_sheet(
         + " Maps and rules read the same 50 m road bins: a bin is coloured by the median of the "
         "samples measured in it and counts as poor only when that median is at or below the "
         "threshold, and poor bins are drawn on top of good ones. A circle can therefore only sit on "
-        "colour you can see. Each circle is a separate orange shape on the satellite map, named "
-        "Circle 1, Circle 2, and so on, in the same order as the table, so a circle can be dragged "
-        "without moving the others. Several circles can sit inside one 10 km neighbourhood when the "
+        "colour you can see. Each circle is a separate orange shape on the combined map, named "
+        "Circle 1, Circle 2, and so on, in the same order as the table. Each zoom panel has that "
+        "same circle as its own shape, not painted into the picture, so you can drag it. The RSRP, "
+        "RSRQ and SINR sheets do not repeat these circles. Several circles can sit inside one 10 km neighbourhood when the "
         "poor road is not one stretch. A discrete patch of at least 1 km\u00b2 is a dotted circle. "
         + _detection_summary(kpi, spots)
         + " Numbers are not drawn on the maps.",
@@ -1440,8 +1611,12 @@ def verify_report(path: Path) -> dict:
             if re.fullmatch(r"xl/drawings/drawing\d+\.xml", n)
         )
         info["circle_shapes"] = ellipses
-        # Each combined map is placed twice: on the KPI sheet and on its Bad Spot sheet.
-        expected_shapes = 2 * sum(runs + areas for runs, areas in LOGIC_LOCK["counts"].values())
+        # Bad Spot sheets only. The combined map has one shape per circle, and each
+        # of the longest zoom panels has one more shape for that same circle.
+        expected_shapes = 0
+        for runs, areas in LOGIC_LOCK["counts"].values():
+            n = runs + areas
+            expected_shapes += n + min(BAD_SPOT_MAX_ZOOMS, n)
         if ellipses != expected_shapes:
             info["problems"].append(f"{ellipses} circle shapes, expected {expected_shapes}")
         for item in zf.namelist():
@@ -1575,6 +1750,7 @@ def _render_mode(df: pd.DataFrame, picker, tag: str, extent, mode_label: str | N
             map_df, spots, PLOTS_DIR / f"excel_bad_spots_{key}_zooms{suffix}.png",
             kpi, classify(map_df[kpi]), labels, colors,
             f"{kpi} zoomed locations ({zoom_bit})",
+            shapes=True,
         )
     rsrp_bad, rsrq_bad, sinr_bad = bad_maps["RSRP"], bad_maps["RSRQ"], bad_maps["SINR"]
     rsrp_zooms, rsrq_zooms, sinr_zooms = zoom_maps["RSRP"], zoom_maps["RSRQ"], zoom_maps["SINR"]
@@ -1716,6 +1892,16 @@ def build_report(df: pd.DataFrame, active: pd.DataFrame | None = None, out_path:
 
 
 if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) > 1 and sys.argv[1] == "refresh-circles":
+        path = refresh_zoom_circles()
+        result = verify_report(path)
+        print(result)
+        if result["problems"]:
+            raise SystemExit("Excel view checks failed: " + "; ".join(result["problems"]))
+        print("Verified: zoom circles are separate shapes, and the KPI sheets have none.")
+        raise SystemExit(0)
     from merge_and_analyze import (
         ACTIVE_ARCHIVE,
         ACTIVE_MERGED,

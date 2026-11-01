@@ -1709,15 +1709,20 @@ def plot_bad_spot_map(
     return path
 
 
-def _record_circle_pixels(fig, ax, path: Path, spots: pd.DataFrame, tight) -> None:
-    """Store each circle's box in pixels of the PNG that savefig is about to write."""
+def _record_circle_pixels(fig, ax, path: Path, spots: pd.DataFrame, tight, axes=None) -> None:
+    """Store each circle's box in pixels of the PNG that savefig is about to write.
+
+    axes, when set, is one axes per spot, in the same order. A zoom grid uses that
+    so each panel records its own circle.
+    """
     dpi = float(fig.dpi)
     save_dpi = float(MAP_DPI)
     circles = []
     for n, (_, spot) in enumerate(spots.iterrows(), start=1):
+        use_ax = axes[n - 1] if axes is not None else ax
         cx, cy, w, h, _angle, _style = _spot_outline(spot)
-        x0, y_lo = ax.transData.transform((cx - w / 2.0, cy - h / 2.0))
-        x1, y_hi = ax.transData.transform((cx + w / 2.0, cy + h / 2.0))
+        x0, y_lo = use_ax.transData.transform((cx - w / 2.0, cy - h / 2.0))
+        x1, y_hi = use_ax.transData.transform((cx + w / 2.0, cy + h / 2.0))
 
         def to_saved_x(px: float) -> float:
             return (px / dpi - tight.x0) * save_dpi
@@ -1741,11 +1746,12 @@ def _record_circle_pixels(fig, ax, path: Path, spots: pd.DataFrame, tight) -> No
     }
 
 
-def _save_map(fig, path: Path, legends=(), ax=None, spots: pd.DataFrame | None = None) -> None:
+def _save_map(fig, path: Path, legends=(), ax=None, spots: pd.DataFrame | None = None, axes=None) -> None:
     """PNG at MAP_DPI on white, or for .svg a transparent vector file with text kept as text.
 
     When spots is set, each circle is recorded against the PNG and is not drawn
-    into it. The workbook turns those records into separate shapes.
+    into it. The workbook turns those records into separate shapes. axes is one
+    axes per spot for a grid of zoom panels.
     """
     pad = 0.15
     if path.suffix.lower() == ".svg":
@@ -1758,10 +1764,10 @@ def _save_map(fig, path: Path, legends=(), ax=None, spots: pd.DataFrame | None =
             fig.savefig(path, format="svg", transparent=True, bbox_inches="tight", pad_inches=pad)
     else:
         bbox_arg: object = "tight"
-        if ax is not None and spots is not None and not spots.empty:
+        if spots is not None and not spots.empty and (ax is not None or axes is not None):
             fig.canvas.draw()
             tight = fig.get_tightbbox(fig.canvas.get_renderer()).padded(pad)
-            _record_circle_pixels(fig, ax, path, spots, tight)
+            _record_circle_pixels(fig, ax, path, spots, tight, axes=axes)
             bbox_arg = tight
             pad = 0.0
         fig.savefig(path, dpi=MAP_DPI, facecolor="white", bbox_inches=bbox_arg, pad_inches=pad)
@@ -1777,10 +1783,13 @@ def plot_bad_spot_zoom_grid(
     labels: list[str],
     colors: list[str],
     title: str,
+    shapes: bool = False,
 ) -> Path | None:
     """Zoomed all-band coverage around each identified spot, with no numbers.
 
     A .svg path writes a pure vector file without the basemap, like plot_bad_spot_map.
+    shapes=True leaves each circle out of the picture and records it so the workbook
+    can place a separate shape on that panel.
     """
     if spots is None or spots.empty:
         return None
@@ -1793,6 +1802,7 @@ def plot_bad_spot_zoom_grid(
     fig, axes = plt.subplots(rows, cols, figsize=(3.15 * cols, 3.35 * rows))
     axes_flat = np.atleast_1d(axes).ravel()
     geo = df.dropna(subset=["Longitude", "Latitude", column]).copy()
+    panel_axes = []
     for i, ax in enumerate(axes_flat):
         if i >= n:
             ax.set_axis_off()
@@ -1819,7 +1829,10 @@ def plot_bad_spot_zoom_grid(
         ax.set_aspect("equal", adjustable="box")
         if not vector:
             _add_basemap(ax)
-        _add_spot_outline(ax, spot)
+        if shapes:
+            panel_axes.append(ax)
+        else:
+            _add_spot_outline(ax, spot)
         hide_map_axes(ax)
         kind = str(spot.get("kind", "consecutive"))
         if kind == "discrete":
@@ -1830,7 +1843,10 @@ def plot_bad_spot_zoom_grid(
         ax.set_title(caption, fontsize=8)
     fig.suptitle(title, fontsize=11, fontweight="bold")
     fig.tight_layout()
-    _save_map(fig, path)
+    if shapes and panel_axes:
+        _save_map(fig, path, axes=panel_axes, spots=work.reset_index(drop=True))
+    else:
+        _save_map(fig, path)
     return path
 
 
