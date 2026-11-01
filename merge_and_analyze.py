@@ -807,12 +807,25 @@ def plot_sinr_coverage_map(
     )
 
 
-# Bad-spot rules:
-# 1) A location is poor when the KPI is at or below the threshold.
-# 2) Every run of poor road is a bad spot, however short: a 50 m hole is still a hole.
-#    Runs are reported longest first, so the 200 m mark separates the stretches worth
-#    driving out to from the single bins.
-# 3) Poor locations that never form a 200 m run, but cover >= 1 km², get a large circle.
+# Bad-spot contract, kept as it stands through report v1.34.
+# 1) Poor is inclusive: RSRP <= -115 dBm (magenta and red; yellow is not poor),
+#    RSRQ <= -20 dB (red), SINR <= 0 dB (orange and red).
+# 2) A bin of road is 50 m. Its colour and its poor/good call both use the median
+#    of the samples in it, and poor bins are drawn on top of good ones, so a ring
+#    can only sit on colour the map shows.
+# 3) Every poor run is a bad spot, however short. A single bin is reported as 50 m.
+#    A run stays one run across a gap of at most 150 m and 60 s on the same pass,
+#    and is split once its span passes 2 km. BAD_SPOT_MIN_CONSEC_M is only the
+#    fallback for a KPI that does not set its own minimum; the three KPIs set 0.
+# 4) Poor bins left over from rule 3 that cover >= 1 km², span at least 0.45 km
+#    each way, contain >= 20 poor bins and are at least half poor are a discrete
+#    area (dotted ring, at most 15). Rule 3 already takes every run on this drive,
+#    so the discrete count is 0; the rule stays.
+# 5) Overview rings sit above the route and shrink with the count: 2.6 km with a
+#    white halo up to 40 spots, 1.4 km up to 250, 0.8 km after that. The sheet
+#    zooms the 16 longest and tables the 300 longest.
+# Idle best server is the strongest band in each scanner sweep (4 s or 40 m).
+# Active best server is the strongest Robi carrier sharing one timestamp.
 BAD_SPOT_MIN_CONSEC_M = 200.0
 BAD_SPOT_DISCRETE_AREA_KM2 = 1.0
 # Best-server samples are one scanner sweep apart (<= 40 m), so a poor stretch may
@@ -854,6 +867,54 @@ BAD_SPOT_RULES = {
 
 def min_consecutive_m(column: str) -> float:
     return float(BAD_SPOT_RULES[column].get("min_consecutive_m", BAD_SPOT_MIN_CONSEC_M))
+
+
+# Expected values for the contract above. Kept separate from the live constants so
+# a later edit that retunes a rule fails the report check instead of passing quietly.
+# Spot counts are the published v1.34 result (consecutive, discrete) per sheet.
+LOGIC_LOCK = {
+    "active_operator": "Robi",
+    "sweep_s": 4.0,
+    "sweep_m": 40.0,
+    "bin_m": 50.0,
+    "gap_m": 150.0,
+    "gap_s": 60.0,
+    "span_km": 2.0,
+    "discrete_km2": 1.0,
+    "discrete_share": 0.50,
+    "poor": {"RSRP": -115.0, "RSRQ": -20.0, "SINR": 0.0},
+    "min_consecutive_m": {"RSRP": 0.0, "RSRQ": 0.0, "SINR": 0.0},
+    "rsrp_greens": ("#00B050", "#92D050"),
+    "ring_tiers": ((40, 2.6, 2.15, True), (250, 1.4, 0.70, False), (10**9, 0.8, 0.50, False)),
+    "counts": {
+        "Bad Spot RSRP": (98, 0),
+        "Bad Spot RSRQ": (216, 0),
+        "Bad Spot SINR": (1237, 0),
+        "Bad Spot RSRP_Active": (641, 0),
+        "Bad Spot RSRQ_Active": (79, 0),
+        "Bad Spot SINR_Active": (1413, 0),
+    },
+}
+
+
+def logic_drift() -> list[str]:
+    """Report any live constant that no longer matches LOGIC_LOCK."""
+    problems = []
+    if ACTIVE_OPERATOR != LOGIC_LOCK["active_operator"]:
+        problems.append(f"active operator is {ACTIVE_OPERATOR}")
+    live_windows = (BEST_SERVER_SWEEP_S, BEST_SERVER_SWEEP_M, MAP_BIN_M, BAD_SPOT_MAX_SAMPLE_GAP_M, BAD_SPOT_MAX_SAMPLE_GAP_S, BAD_SPOT_CONSEC_MAX_SPAN_KM, BAD_SPOT_DISCRETE_AREA_KM2, BAD_SPOT_DISCRETE_MIN_SHARE)
+    locked_windows = (LOGIC_LOCK["sweep_s"], LOGIC_LOCK["sweep_m"], LOGIC_LOCK["bin_m"], LOGIC_LOCK["gap_m"], LOGIC_LOCK["gap_s"], LOGIC_LOCK["span_km"], LOGIC_LOCK["discrete_km2"], LOGIC_LOCK["discrete_share"])
+    if live_windows != locked_windows:
+        problems.append(f"distance/time windows {live_windows} != {locked_windows}")
+    for kpi, threshold in LOGIC_LOCK["poor"].items():
+        rule = BAD_SPOT_RULES[kpi]
+        if float(rule["threshold"]) != threshold or float(rule["min_consecutive_m"]) != LOGIC_LOCK["min_consecutive_m"][kpi]:
+            problems.append(f"{kpi} rule {rule['threshold']}, min {rule['min_consecutive_m']}")
+    if tuple(MAP_RSRP_COLORS[1:3]) != LOGIC_LOCK["rsrp_greens"]:
+        problems.append(f"RSRP greens are {MAP_RSRP_COLORS[1:3]}")
+    if BAD_SPOT_OVERVIEW_TIERS != LOGIC_LOCK["ring_tiers"]:
+        problems.append("overview ring tiers changed")
+    return problems
 
 
 def consecutive_label(column: str) -> str:
@@ -1146,7 +1207,7 @@ def _consecutive_bad_spots(
 
 
 def _discrete_area_bad_spots(leftover: pd.DataFrame, column: str, threshold: float) -> pd.DataFrame:
-    """Rule 3: leftover poor samples covering >= 1 km², not a 200 m consecutive stretch.
+    """Rule 4: leftover poor bins covering >= 1 km² that never joined a poor run.
 
     Cluster on a ~1 km grid and only keep compact patches (not a thin road network).
     """

@@ -104,6 +104,7 @@ Active best server is the **strongest carrier at each timestamp** (the UE logs e
 - **Discrete area:** leftover poor bins covering at least 1 km² where that area is at least half poor (thin black dotted circle)
 - Rings shrink and thin as the count grows (2.6 km haloed up to 40 spots, 1.4 km up to 250, 0.8 km beyond), so the marks never cover the colour they mark. Poor SINR covers 11 % of the drive, so its marks merge at district scale and the zoom panels and table carry the detail
 - Each sheet lists the 16 longest runs as zoom panels and up to 300 in the table, longest first, and states the full count
+- These rules and the published counts (Idle 98 / 216 / 1,237 and Active 641 / 79 / 1,413, with 0 discrete areas) are locked in `LOGIC_LOCK`. `verify_report` fails if a rebuild moves a threshold, a colour, the sweep window, or a count
 
 ### Bad-spot maps are SVG (v1.34)
 

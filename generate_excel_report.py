@@ -56,6 +56,8 @@ from merge_and_analyze import (
     BAD_SPOT_RULES,
     consecutive_label,
     find_bad_spots,
+    logic_drift,
+    LOGIC_LOCK,
     min_consecutive_m,
     best_carrier,
     best_server,
@@ -1279,6 +1281,14 @@ def verify_report(path: Path) -> dict:
         info["problems"].append("missing RSRP vs KPIs_Active sheet")
     elif info["sheets"]["RSRP vs KPIs_Active"]["charts"] < 3:
         info["problems"].append("RSRP vs KPIs_Active: expected three charts")
+    info["problems"].extend(logic_drift())
+    count_re = re.compile(r"find ([\d,]+) .*? and ([\d,]+) discrete")
+    for sheet, (runs, areas) in LOGIC_LOCK["counts"].items():
+        text = str(wb[sheet].cell(4, 1).value or "") if sheet in wb.sheetnames else ""
+        found = count_re.search(text)
+        got = None if found is None else (int(found.group(1).replace(",", "")), int(found.group(2).replace(",", "")))
+        if got != (runs, areas):
+            info["problems"].append(f"{sheet}: bad-spot count {got}, locked {(runs, areas)}")
     wb.close()
     with zipfile.ZipFile(path) as zf:
         svg_parts = [n for n in zf.namelist() if n.startswith("xl/media/") and n.endswith(".svg")]
