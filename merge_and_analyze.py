@@ -28,6 +28,13 @@ IDLE_DIR = EXTRACT_DIR / "Borga_Idle_V2.0"
 MERGED_CSV = OUTPUT_DIR / "Bogura_merged.csv.gz"
 SUMMARY_MD = OUTPUT_DIR / "analysis_summary.md"
 SITE_DB_PATH = ROOT / "Physical_Site_Database_V2.0.xlsx"
+# Active Mode UE log. The archive name still says Idle; the rows are campaign AUTO DATA.
+ACTIVE_ARCHIVE = ROOT / "Borga_Idle_V2.7z"
+ACTIVE_DIR = EXTRACT_DIR / "data"
+ACTIVE_MERGED = OUTPUT_DIR / "Bogura_active_merged.csv.gz"
+# Idle maps are the Robi scanner. The active file also carries a Grameenphone UE on the
+# same drive; only Robi is drawn so Active sits beside Idle for the same network.
+ACTIVE_OPERATOR = "Robi"
 
 SCANNER_RENAME = {
     "NB RSRP": "RSRP",
@@ -464,6 +471,7 @@ def plot_discrete_coverage_map(
     max_points: int = MAP_MAX_POINTS,
     extent: tuple[float, float, float, float] | None = None,
     layer: str | None = None,
+    empty_message: str = "No IDLE samples on this band",
 ) -> Path:
     """Drive route colored by discrete KPI ranges, with an RSRP-style side legend."""
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -483,7 +491,7 @@ def plot_discrete_coverage_map(
         ax.text(
             0.5,
             0.5,
-            "No IDLE samples on this band",
+            empty_message,
             transform=ax.transAxes,
             ha="center",
             va="center",
@@ -515,11 +523,15 @@ def plot_rsrp_coverage_map(
     *,
     layer: str | None = None,
     extent: tuple[float, float, float, float] | None = None,
+    mode_label: str | None = None,
 ) -> Path:
     """Discrete RSRP coverage map with a range legend (no lon/lat chrome)."""
     title = "Bogura coverage map — RSRP"
+    if mode_label:
+        title = f"{title} — {mode_label}"
     if layer:
         title = f"{title} — {layer}"
+    empty = f"No {mode_label} samples on this band" if mode_label else "No IDLE samples on this band"
     return plot_discrete_coverage_map(
         df,
         path,
@@ -532,6 +544,7 @@ def plot_rsrp_coverage_map(
         max_points=max_points,
         extent=extent,
         layer=layer,
+        empty_message=empty,
     )
 
 
@@ -542,10 +555,14 @@ def plot_rsrq_coverage_map(
     *,
     layer: str | None = None,
     extent: tuple[float, float, float, float] | None = None,
+    mode_label: str | None = None,
 ) -> Path:
     title = "Bogura coverage map — RSRQ"
+    if mode_label:
+        title = f"{title} — {mode_label}"
     if layer:
         title = f"{title} — {layer}"
+    empty = f"No {mode_label} samples on this band" if mode_label else "No IDLE samples on this band"
     return plot_discrete_coverage_map(
         df,
         path,
@@ -558,6 +575,7 @@ def plot_rsrq_coverage_map(
         max_points=max_points,
         extent=extent,
         layer=layer,
+        empty_message=empty,
     )
 
 
@@ -568,10 +586,14 @@ def plot_sinr_coverage_map(
     *,
     layer: str | None = None,
     extent: tuple[float, float, float, float] | None = None,
+    mode_label: str | None = None,
 ) -> Path:
     title = "Bogura coverage map — SINR"
+    if mode_label:
+        title = f"{title} — {mode_label}"
     if layer:
         title = f"{title} — {layer}"
+    empty = f"No {mode_label} samples on this band" if mode_label else "No IDLE samples on this band"
     return plot_discrete_coverage_map(
         df,
         path,
@@ -584,6 +606,7 @@ def plot_sinr_coverage_map(
         max_points=max_points,
         extent=extent,
         layer=layer,
+        empty_message=empty,
     )
 
 
@@ -1364,6 +1387,7 @@ def plot_rsrp_bad_spot_map(
     path: Path,
     *,
     extent: tuple[float, float, float, float] | None = None,
+    title: str = "Combined view — RSRP",
 ) -> Path:
     return plot_bad_spot_map(
         df,
@@ -1373,7 +1397,7 @@ def plot_rsrp_bad_spot_map(
         labels=MAP_RSRP_LABELS,
         colors=MAP_RSRP_COLORS,
         spots=spots,
-        title="Combined view — RSRP",
+        title=title,
         legend_title="RSRP (dBm)",
         extent=extent,
     )
@@ -1385,6 +1409,7 @@ def plot_rsrq_bad_spot_map(
     path: Path,
     *,
     extent: tuple[float, float, float, float] | None = None,
+    title: str = "Combined view — RSRQ",
 ) -> Path:
     return plot_bad_spot_map(
         df,
@@ -1394,7 +1419,7 @@ def plot_rsrq_bad_spot_map(
         labels=MAP_RSRQ_LABELS,
         colors=MAP_RSRQ_COLORS,
         spots=spots,
-        title="Combined view — RSRQ",
+        title=title,
         legend_title="RSRQ (dB)",
         extent=extent,
     )
@@ -1406,6 +1431,7 @@ def plot_sinr_bad_spot_map(
     path: Path,
     *,
     extent: tuple[float, float, float, float] | None = None,
+    title: str = "Combined view — SINR",
 ) -> Path:
     return plot_bad_spot_map(
         df,
@@ -1415,19 +1441,25 @@ def plot_sinr_bad_spot_map(
         labels=MAP_SINR_LABELS,
         colors=MAP_SINR_COLORS,
         spots=spots,
-        title="Combined view — SINR",
+        title=title,
         legend_title="SINR (dB)",
         extent=extent,
     )
 
 
-def require_7z() -> str:
+def extract_7z(archive: Path, dest: Path) -> None:
+    """Extract a 7z archive. Uses the 7z binary when it is installed, else py7zr."""
     from shutil import which
 
+    dest.mkdir(parents=True, exist_ok=True)
     exe = which("7z") or which("7za")
-    if not exe:
-        sys.exit("7z is required. Install it with: sudo apt-get install p7zip-full")
-    return exe
+    if exe:
+        subprocess.run([exe, "x", f"-o{dest}", str(archive), "-y"], check=True)
+        return
+    import py7zr
+
+    with py7zr.SevenZipFile(archive) as zf:
+        zf.extractall(path=dest)
 
 
 def idle_csv_files() -> list[Path]:
@@ -1436,18 +1468,33 @@ def idle_csv_files() -> list[Path]:
     return sorted(IDLE_DIR.glob("*.csv"), key=lambda p: int(p.stem) if p.stem.isdigit() else p.stem)
 
 
+def active_csv_files() -> list[Path]:
+    if not ACTIVE_DIR.exists():
+        return []
+    return sorted(ACTIVE_DIR.glob("*.csv"), key=lambda p: int(p.stem) if p.stem.isdigit() else p.stem)
+
+
 def extract_archives() -> None:
     EXTRACT_DIR.mkdir(parents=True, exist_ok=True)
     if not IDLE_ARCHIVE.exists():
         sys.exit(f"Missing idle archive: {IDLE_ARCHIVE.name}")
     print(f"Extracting {IDLE_ARCHIVE.name} -> {IDLE_DIR}")
-    subprocess.run(
-        [require_7z(), "x", f"-o{EXTRACT_DIR}", str(IDLE_ARCHIVE), "-y"],
-        check=True,
-    )
+    extract_7z(IDLE_ARCHIVE, EXTRACT_DIR)
     files = idle_csv_files()
     if not files:
         sys.exit(f"Extraction finished but no CSV files were found in {IDLE_DIR}")
+    print(f"  {len(files)} CSV files")
+
+
+def extract_active_archive() -> None:
+    EXTRACT_DIR.mkdir(parents=True, exist_ok=True)
+    if not ACTIVE_ARCHIVE.exists():
+        sys.exit(f"Missing active archive: {ACTIVE_ARCHIVE.name}")
+    print(f"Extracting {ACTIVE_ARCHIVE.name} -> {ACTIVE_DIR}")
+    extract_7z(ACTIVE_ARCHIVE, EXTRACT_DIR)
+    files = active_csv_files()
+    if not files:
+        sys.exit(f"Extraction finished but no CSV files were found in {ACTIVE_DIR}")
     print(f"  {len(files)} CSV files")
 
 
@@ -1542,6 +1589,28 @@ def best_server(df: pd.DataFrame) -> pd.DataFrame:
     return work.loc[idx].drop(columns=["_sweep"]).reset_index(drop=True)
 
 
+def best_carrier(df: pd.DataFrame) -> pd.DataFrame:
+    """Active Mode best server: strongest RSRP among carriers logged at one instant.
+
+    Unlike the idle scanner, the UE writes every carrier of the connection at the
+    same timestamp, so there is no sweep window to reconstruct. One row per
+    Source+Time keeps the serving connection and lets the carriers compete.
+    """
+    work = df.dropna(subset=["RSRP", "Time", "Latitude", "Longitude"]).copy()
+    if work.empty:
+        return work
+    work["RSRP"] = pd.to_numeric(work["RSRP"], errors="coerce")
+    work["Latitude"] = pd.to_numeric(work["Latitude"], errors="coerce")
+    work["Longitude"] = pd.to_numeric(work["Longitude"], errors="coerce")
+    work["Time"] = pd.to_datetime(work["Time"], errors="coerce")
+    work = work.dropna(subset=["RSRP", "Latitude", "Longitude", "Time"])
+    if work.empty:
+        return work
+    keys = ["Source", "Time"] if "Source" in work.columns else ["Time"]
+    idx = work.groupby(keys, sort=False)["RSRP"].idxmax()
+    return work.loc[idx].reset_index(drop=True)
+
+
 def coverage_extent(df: pd.DataFrame) -> tuple[float, float, float, float]:
     """Padded lon/lat box so all-band and per-band maps share the same view."""
     geo = df.dropna(subset=["Longitude", "Latitude"])
@@ -1597,6 +1666,46 @@ def merge_parts() -> pd.DataFrame:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     merged.to_csv(MERGED_CSV, index=False, compression="gzip")
     print(f"Wrote merged file: {MERGED_CSV} ({len(merged):,} rows)")
+    return merged
+
+
+def load_active_csv(path: Path) -> pd.DataFrame:
+    """Active Mode UE export. KPIs are already named RSRP / RSRQ / SINR."""
+    print(f"Loading active {path.name} ...")
+    df = pd.read_csv(path)
+    missing = [c for c in COLUMNS if c not in df.columns]
+    if missing:
+        sys.exit(f"{path.name} is missing columns: {missing}")
+    keep = [c for c in df.columns if c in set(COLUMNS) | {
+        "Operator", "Data Technology", "Technology Band", "Collection", "Campaign",
+    }]
+    df = df[keep].copy()
+    df["Time"] = pd.to_datetime(df["Time"], errors="coerce")
+    for col in ("RSRP", "RSRQ", "SINR", "Longitude", "Latitude", "DL EARFCN"):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["Cell Id"] = pd.to_numeric(df["Cell Id"], errors="coerce").astype("Int64")
+    df["DL EARFCN"] = df["DL EARFCN"].astype("Int64")
+    df["Source"] = path.name
+    df["Band"] = df["DL EARFCN"].map(earfcn_to_band)
+    df["Layer"] = df["DL EARFCN"].map(earfcn_to_layer)
+    print(f"  {len(df):,} rows")
+    return df
+
+
+def merge_active() -> pd.DataFrame:
+    files = active_csv_files()
+    if not files:
+        sys.exit(f"No active CSV files in {ACTIVE_DIR}; run extract first")
+    frames = [load_active_csv(p) for p in files]
+    merged = pd.concat(frames, ignore_index=True)
+    merged = merged.drop_duplicates(subset=["Time", "Operator", "Cell Id", "DL EARFCN", "RSRP"], keep="first")
+    sort_cols = ["Time", "Source"]
+    if "Operator" in merged.columns:
+        sort_cols = ["Time", "Operator", "Source"]
+    merged = merged.sort_values(sort_cols, kind="mergesort").reset_index(drop=True)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    merged.to_csv(ACTIVE_MERGED, index=False, compression="gzip")
+    print(f"Wrote merged active file: {ACTIVE_MERGED} ({len(merged):,} rows)")
     return merged
 
 
@@ -1787,9 +1896,7 @@ def plot_all(df: pd.DataFrame) -> None:
     print(f"Wrote plots to {PLOTS_DIR}")
 
 
-def load_merged_csv() -> pd.DataFrame:
-    print(f"Loading existing merged file {MERGED_CSV}")
-    df = pd.read_csv(MERGED_CSV)
+def _finalize_merged(df: pd.DataFrame) -> pd.DataFrame:
     df["Time"] = pd.to_datetime(df["Time"], errors="coerce")
     df["Cell Id"] = pd.to_numeric(df["Cell Id"], errors="coerce").astype("Int64")
     df["DL EARFCN"] = pd.to_numeric(df["DL EARFCN"], errors="coerce").astype("Int64")
@@ -1798,19 +1905,34 @@ def load_merged_csv() -> pd.DataFrame:
     return df
 
 
+def load_merged_csv() -> pd.DataFrame:
+    print(f"Loading existing merged file {MERGED_CSV}")
+    return _finalize_merged(pd.read_csv(MERGED_CSV))
+
+
+def load_active_merged() -> pd.DataFrame:
+    print(f"Loading existing merged file {ACTIVE_MERGED}")
+    return _finalize_merged(pd.read_csv(ACTIVE_MERGED))
+
+
 def main() -> None:
     if "--from-merged" in sys.argv:
         if not MERGED_CSV.exists():
             sys.exit(f"{MERGED_CSV} not found; run without --from-merged first")
         merged = load_merged_csv()
+        if not ACTIVE_MERGED.exists():
+            sys.exit(f"{ACTIVE_MERGED} not found; run without --from-merged first")
+        active = load_active_merged()
     else:
         extract_archives()
         merged = merge_parts()
+        extract_active_archive()
+        active = merge_active()
     write_summary(merged)
     plot_all(merged)
     from generate_excel_report import build_report, verify_report
 
-    report_path = build_report(merged)
+    report_path = build_report(merged, active)
     result = verify_report(report_path)
     if result["problems"]:
         raise SystemExit("Excel view checks failed: " + "; ".join(result["problems"]))

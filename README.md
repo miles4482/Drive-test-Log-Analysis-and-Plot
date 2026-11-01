@@ -1,20 +1,23 @@
 # Drive-test Log Analysis and Plot
 
-LTE **IDLE Mode scanner** logs from **Bogura** (Robi). The current source is `Borga_Idle_V2.0.7z`.
+LTE **IDLE Mode scanner** and **Active Mode UE** logs from **Bogura** (Robi). Idle source is `Borga_Idle_V2.0.7z`. Active source is `Borga_Idle_V2.7z` (campaign AUTO DATA).
 
 ## What these files are
 
 | File(s) | Role | After extract |
 | --- | --- | --- |
 | `Borga_Idle_V2.0.7z` | IDLE Mode scanner export | `extracted/Borga_Idle_V2.0/1.csv` … `15.csv` |
+| `Borga_Idle_V2.7z` | Active Mode UE export (Robi and Grameenphone) | `extracted/data/1.csv` … `15.csv` |
 | `Physical_Site_Database_V2.0.xlsx` | Physical site / sector database, reconciled against the V2.0 scanner cells (see its `Change_Log` sheet) | Referenced on the Cover; not overlaid on current maps |
 | `Physical_Site_Database_V1.0.xlsb` | Previous site database | Kept for reference |
 
-Scanner columns include `Time`, `Longitude`, `Latitude`, `Cell Id`, `DL EARFCN`, `NB RSRP`, `NB RSRQ`, `NB RS SINR` (mapped to RSRP / RSRQ / SINR). Campaign is **Scanner**. Files 1–15 cover 11–21 May 2026.
+Idle scanner columns include `Time`, `Longitude`, `Latitude`, `Cell Id`, `DL EARFCN`, `NB RSRP`, `NB RSRQ`, `NB RS SINR` (mapped to RSRP / RSRQ / SINR). Campaign is **Scanner**. Files 1–15 cover 11–21 May 2026.
+
+Active columns are already named `RSRP`, `RSRQ`, `SINR`, plus `Operator`, `Data Technology`, `DL EARFCN` and `Cell Id`. Campaign is **AUTO DATA**. The report draws the **Robi** UE only, so Active maps sit beside the Robi Idle scanner. Grameenphone rows stay in the merged CSV.
 
 ```
-Borga_Idle_V2.0.7z  -->  1.csv … 15.csv
-1.csv + … + 15.csv  -->  output/Bogura_merged.csv.gz  (final file)
+Borga_Idle_V2.0.7z  -->  1.csv … 15.csv  -->  output/Bogura_merged.csv.gz
+Borga_Idle_V2.7z    -->  data/1.csv … 15.csv  -->  output/Bogura_active_merged.csv.gz
 ```
 
 ## How to rebuild the final file and plots
@@ -89,9 +92,11 @@ RSRP / RSRQ / SINR coverage maps use the Page 1 legend:
 
 Throughput (PDCP DL) and CQI are on the same legend sheet but are not in these IDLE logs, so those maps are not drawn yet.
 
-**RSRP / RSRQ / SINR sheets** show the **combined all-band IDLE map on top with bad spots marked**, then band-wise IDLE maps for L900, L1800, L2100 and L2600. Those maps do not overlay site pies. Active Mode cells stay blank until those logs are provided.
+**RSRP / RSRQ / SINR sheets** show the **combined all-band IDLE map on the left with bad spots marked**, then band-wise IDLE maps for L900, L1800, L2100 and L2600. The right side is the same view for **Active Mode (Robi UE)**. Those maps do not overlay site pies.
 
-**Bad Spot RSRP / RSRQ / SINR** are separate sheets (one KPI each). Each sheet puts the **combined all-band view with marks on top**, then zoomed local inspection. Map numbers are omitted.
+**Bad Spot RSRP / RSRQ / SINR** are the Idle sheets. **Bad Spot RSRP_Active / RSRQ_Active / SINR_Active** apply the same rules to the Active Robi track. Each sheet puts the **combined all-band view with marks on top**, then zoomed local inspection. Map numbers are omitted.
+
+Active best server is the **strongest carrier at each timestamp** (the UE logs every carrier together). Idle best server stays the strongest band per scanner sweep.
 
 - Poor is **RSRP ≤ −115 dBm** (magenta and red only; yellow is not a bad-spot colour), **RSRQ ≤ −20 dB** (red), **SINR ≤ 0 dB** (orange and red)
 - Maps and rules read the same **50 m road bins**: a bin is coloured by the median of the samples measured in it and counts as poor only when that median is at or below the threshold, and poor bins are drawn on top of good ones — so a circle can only sit on colour the map actually shows
@@ -100,26 +105,28 @@ Throughput (PDCP DL) and CQI are on the same legend sheet but are not in these I
 - Rings shrink and thin as the count grows (2.6 km haloed up to 40 spots, 1.4 km up to 250, 0.8 km beyond), so the marks never cover the colour they mark. Poor SINR covers 11 % of the drive, so its marks merge at district scale and the zoom panels and table carry the detail
 - Each sheet lists the 16 longest runs as zoom panels and up to 300 in the table, longest first, and states the full count
 
-## Download Excel report (v1.31)
+## Download Excel report (v1.32)
 
-**v1.31 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.31.xlsx
+**v1.32 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.32.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.31.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.32.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.31.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.32.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
 Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 
 | Sheet | Contents |
 | --- | --- |
-| Cover | IDLE Mode bar, dataset/KPI tables on the left, histograms on the right, Active Mode bar at the bottom |
-| RSRP / RSRQ / SINR | Combined all-band IDLE map on top with bad spots marked, then L900 / L1800 / L2100 / L2600 IDLE maps (no site pies); Active Mode remains a placeholder |
-| Bad Spot RSRP / RSRQ / SINR | One sheet per KPI: combined all-band view with marks on top, zoomed local views, and that KPI’s table |
-| RSRP vs KPIs | RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter plots with trend |
-| Sample Log | Evenly spaced subset of the merged samples |
+| Cover | IDLE dataset and KPI tables, histograms, and an Active Mode dataset for the Robi UE |
+| RSRP / RSRQ / SINR | Idle combined and L900 / L1800 / L2100 / L2600 maps on the left; Active Robi maps on the right |
+| Bad Spot RSRP / RSRQ / SINR | Idle bad spots, one sheet per KPI |
+| Bad Spot RSRP_Active / RSRQ_Active / SINR_Active | Active Robi bad spots, same rules, one sheet per KPI |
+| RSRP vs KPIs | Idle: RSRP vs SINR, RSRP vs RSRQ, dual-axis chart, scatter with trend |
+| RSRP vs KPIs_Active | The same chart set for the Active Robi UE |
+| Sample Log | Evenly spaced subset of the Idle samples |
 
 Every sheet has freeze panes disabled and worksheet gridlines turned off (screen and print). Charts are native Excel objects, not just pictures.

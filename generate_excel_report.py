@@ -34,6 +34,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from merge_and_analyze import (
+    ACTIVE_OPERATOR,
     OUTPUT_DIR,
     PLOTS_DIR,
     SITE_DB_PATH,
@@ -54,6 +55,7 @@ from merge_and_analyze import (
     consecutive_label,
     find_bad_spots,
     min_consecutive_m,
+    best_carrier,
     best_server,
     plot_rsrp_bad_spot_map,
     plot_rsrp_coverage_map,
@@ -69,7 +71,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.31"
+REPORT_VERSION = "1.32"
 # Every poor run is a bad spot, so a dense KPI produces over a thousand of them.
 # The map marks them all; the table lists the longest ones a team can act on.
 BAD_SPOT_TABLE_MAX = 300
@@ -495,12 +497,29 @@ def write_chart_data(ws: Worksheet, df: pd.DataFrame) -> dict:
     return blocks
 
 
-def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
+def write_vs_block(ws: Worksheet, df: pd.DataFrame, cat_col: int, sinr_col: int, rsrq_col: int) -> int:
+    """Mean SINR and RSRQ for each 1 dB RSRP bin, used by the RSRP vs KPIs charts."""
+    rsrp_vs_bins = list(range(-80, -126, -1))
+    pair = df.copy()
+    pair["rsrp_bin"] = pd.to_numeric(pair["RSRP"], errors="coerce").round().astype("Int64")
+    ws.cell(1, cat_col, "RSRP_dBm")
+    ws.cell(1, sinr_col, "SINR")
+    ws.cell(1, rsrq_col, "RSRQ")
+    all_mean = pair.groupby("rsrp_bin")[["SINR", "RSRQ"]].mean()
+    for i, b in enumerate(rsrp_vs_bins, start=2):
+        ws.cell(i, cat_col, int(b))
+        if b in all_mean.index:
+            ws.cell(i, sinr_col, None if pd.isna(all_mean.loc[b, "SINR"]) else float(all_mean.loc[b, "SINR"]))
+            ws.cell(i, rsrq_col, None if pd.isna(all_mean.loc[b, "RSRQ"]) else float(all_mean.loc[b, "RSRQ"]))
+    return len(rsrp_vs_bins)
+
+
+def build_cover(ws: Worksheet, df: pd.DataFrame, active: pd.DataFrame | None = None, active_raw_n: int = 0) -> None:
     last_col = 20
     banner(
         ws,
         "  Bogura Drive-Test Report",
-        f"  Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}  |  IDLE Mode  |  Gridlines off  |  Freeze panes off",
+        f"  Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}  |  IDLE + Active Mode  |  Gridlines off  |  Freeze panes off",
         last_col=last_col,
     )
     set_widths(ws, {get_column_letter(i): 14 for i in range(1, last_col + 1)})
@@ -546,12 +565,12 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
 
     write_cell(ws, 18, 1, "How to read this workbook", size=14, bold=True)
     notes = [
-        "Cover \u2014 dataset and KPI tables on the left, IDLE Mode plots on the right, Active Mode section at the bottom.",
-        "RSRP / RSRQ / SINR \u2014 Idle V2.0 scanner: combined all-band map on top (with bad spots marked), then L900 / L1800 / L2100 / L2600 IDLE maps (strongest band per scanner sweep, no site pies); Active Mode stays blank until those logs are provided.",
-        "Bad Spot RSRP / RSRQ / SINR \u2014 one sheet per KPI: combined all-band view with marks on top, then zoomed local inspection. Poor is RSRP at or below -115 dBm (magenta/red), RSRQ at or below -20 dB (red), SINR at or below 0 dB (orange/red); every poor run is circled, however short.",
-        "RSRP vs KPIs \u2014 RSRP vs SINR, RSRP vs RSRQ, dual-axis combined chart, and scatter with trend.",
-        "Sample Log \u2014 evenly spaced subset of the merged samples (full merged scanner log stays in output/Bogura_merged.csv.gz).",
-        "These files are IDLE Mode. Active Mode coverage maps will be added when those logs are provided.",
+        "Cover \u2014 Idle dataset and KPI tables on the left, Idle plots on the right, Active Mode dataset at the bottom.",
+        "RSRP / RSRQ / SINR \u2014 Idle scanner on the left (combined all-band map with bad spots, then L900 / L1800 / L2100 / L2600). Active Mode Robi UE on the right, same layers. No site pies.",
+        "Bad Spot RSRP / RSRQ / SINR are Idle. Bad Spot RSRP_Active / RSRQ_Active / SINR_Active apply the same poor-run rules to the Active Robi track.",
+        "Poor is RSRP at or below -115 dBm (magenta/red), RSRQ at or below -20 dB (red), SINR at or below 0 dB (orange/red); every poor run is circled, however short.",
+        "RSRP vs KPIs is Idle. RSRP vs KPIs_Active is the same chart set for the Active Robi UE.",
+        "Sample Log \u2014 evenly spaced subset of the Idle samples (full logs: output/Bogura_merged.csv.gz and output/Bogura_active_merged.csv.gz).",
     ]
     for i, text in enumerate(notes):
         ws.merge_cells(start_row=19 + i, start_column=1, end_row=19 + i, end_column=11)
@@ -583,7 +602,47 @@ def build_cover(ws: Worksheet, df: pd.DataFrame) -> None:
         wrap=True,
     )
     ws.merge_cells(start_row=36, start_column=5, end_row=36, end_column=8)
-    section_bar(ws, 42, "Active Mode", 1, 20)
+    section_bar(ws, 42, "Active Mode", 1, last_col)
+    if active is None or active.empty:
+        write_cell(ws, 44, 1, "Active Mode log was not provided.", size=12, color="7F8C8D")
+        return
+    write_cell(ws, 44, 1, "Dataset", size=14, bold=True)
+    other_n = max(0, int(active_raw_n) - int(len(active)))
+    info_rows = [
+        ["Mode", "Active (UE data)"],
+        ["Archive", "Borga_Idle_V2.7z"],
+        ["Campaign", "AUTO DATA"],
+        ["Plotted operator", ACTIVE_OPERATOR],
+        ["Plotted samples", int(len(active))],
+        ["Other operator samples", other_n],
+        ["CSV files", int(active["Source"].nunique())],
+        ["Start time", active["Time"].min()],
+        ["End time", active["Time"].max()],
+        ["Unique Cell Ids", int(active["Cell Id"].nunique())],
+    ]
+    write_table(ws, 45, 1, ["Item", "Value"], info_rows, num_formats={1: "#,##0"})
+    ws.cell(53, 2).number_format = "yyyy-mm-dd hh:mm:ss"
+    ws.cell(54, 2).number_format = "yyyy-mm-dd hh:mm:ss"
+    write_cell(ws, 44, 4, f"Radio KPIs ({ACTIVE_OPERATOR}, all samples)", size=14, bold=True)
+    stats_headers = ["KPI", "Count", "Min", "P5", "Median", "Mean", "P95", "Max"]
+    stats_rows = []
+    for name in ("RSRP", "RSRQ", "SINR"):
+        st = kpi_stats(active[name])
+        stats_rows.append(
+            [name, st["Count"], st["Min"], st["P5"], st["Median"], st["Mean"], st["P95"], st["Max"]]
+        )
+    write_table(
+        ws, 45, 4, stats_headers, stats_rows,
+        num_formats={1: "#,##0", 2: "0.00", 3: "0.00", 4: "0.00", 5: "0.00", 6: "0.00", 7: "0.00"},
+    )
+    ws.merge_cells(start_row=50, start_column=4, end_row=51, end_column=11)
+    write_cell(
+        ws, 50, 4,
+        f"Maps and bad spots use {ACTIVE_OPERATOR} only, so Active sits beside the Idle scanner of the same network. "
+        f"The other operator ({other_n:,} samples) stays in output/Bogura_active_merged.csv.gz and is not drawn. "
+        "Active best server is the strongest carrier at each timestamp.",
+        size=9, wrap=True,
+    )
 
 
 def build_kpi_sheet(
@@ -591,22 +650,24 @@ def build_kpi_sheet(
     name: str,
     unit: str,
     map_path: Path | None,
-    placeholder_path: Path | None,
+    active_map: Path | None,
     band_maps: dict[str, Path],
+    active_band_maps: dict[str, Path] | None = None,
 ):
     last_col = 18
     em = "\u2014"
-    banner(ws, f"  {name} Report", f"  Unit: {unit}  |  IDLE Mode coverage map  |  Gridlines off", last_col=last_col)
+    banner(ws, f"  {name} Report", f"  Unit: {unit}  |  IDLE and Active coverage maps  |  Gridlines off", last_col=last_col)
     set_widths(ws, {get_column_letter(i): 14 for i in range(1, last_col + 1)})
     section_bar(ws, 4, f"{name} coverage map {em} IDLE Mode  |  Combined view  |  bad spots", 1, 8)
-    section_bar(ws, 4, f"{name} coverage map {em} Active Mode", 10, 18)
+    section_bar(ws, 4, f"{name} coverage map {em} Active Mode  |  {ACTIVE_OPERATOR}", 10, 18)
     if map_path and map_path.exists():
         add_image(ws, map_path, "A6", width=620, height=520)
-    if placeholder_path and placeholder_path.exists():
-        add_image(ws, placeholder_path, "J6", width=520, height=360)
+    if active_map and active_map.exists():
+        add_image(ws, active_map, "J6", width=560, height=480)
 
     start_row = 34
     block = 28
+    active_band_maps = active_band_maps or {}
     for i, layer in enumerate(REPORT_LAYERS):
         row = start_row + i * block
         section_bar(ws, row, f"{name} coverage map {em} IDLE Mode_{layer}", 1, 8)
@@ -614,17 +675,9 @@ def build_kpi_sheet(
         band_path = band_maps.get(layer)
         if band_path and band_path.exists():
             add_image(ws, band_path, f"A{row + 2}", width=560, height=470)
-        note_row = row + 12
-        ws.merge_cells(start_row=note_row, start_column=10, end_row=note_row + 1, end_column=18)
-        write_cell(
-            ws,
-            note_row,
-            10,
-            "Log file will be provided later",
-            size=11,
-            color="7F8C8D",
-            align="center",
-        )
+        active_path = active_band_maps.get(layer)
+        if active_path and active_path.exists():
+            add_image(ws, active_path, f"J{row + 2}", width=560, height=470)
 
 
 def _kind_label(kind: object, kpi: object = None) -> str:
@@ -726,6 +779,8 @@ def build_kpi_bad_spot_sheet(
     spots: pd.DataFrame,
     combined_map: Path,
     zooms: Path | None,
+    *,
+    mode: str = "IDLE Mode",
 ) -> None:
     """One Bad Spot sheet per KPI: combined all-band view on top, then zooms and table."""
     last_col = 16
@@ -733,19 +788,26 @@ def build_kpi_bad_spot_sheet(
     banner(
         ws,
         f"  Bad Spot Analysis  {em}  {kpi}",
-        "  IDLE Mode  |  Combined all-band view on top  |  Zoomed spots  |  No numbering",
+        f"  {mode}  |  Combined all-band view on top  |  Zoomed spots  |  No numbering",
         last_col=last_col,
     )
     set_widths(ws, {get_column_letter(i): 13 for i in range(1, last_col + 1)})
     ws.column_dimensions["A"].width = 16
     ws.column_dimensions["C"].width = 24
-    section_bar(ws, 3, "IDLE Mode", 1, last_col)
+    section_bar(ws, 3, mode, 1, last_col)
     ws.merge_cells(start_row=4, start_column=1, end_row=6, end_column=last_col)
+    active_rule = ""
+    if mode.startswith("Active"):
+        active_rule = (
+            f"Active Mode is the {ACTIVE_OPERATOR} UE. Best server is the strongest carrier logged "
+            "at that timestamp, because the UE reports every carrier together. "
+        )
     write_cell(
         ws,
         4,
         1,
-        BAD_SPOT_KPI_NOTES[kpi]
+        active_rule
+        + BAD_SPOT_KPI_NOTES[kpi]
         + " Maps and rules read the same 50 m road bins: a bin is coloured by the median of the "
         "samples measured in it and counts as poor only when that median is at or below the "
         "threshold, and poor bins are drawn on top of good ones. A circle can therefore only sit on "
@@ -760,7 +822,7 @@ def build_kpi_bad_spot_sheet(
     ws.row_dimensions[5].height = 22
     ws.row_dimensions[6].height = 22
 
-    section_bar(ws, 8, f"Combined view {em} all-band IDLE  |  {kpi} bad spots", 1, last_col)
+    section_bar(ws, 8, f"Combined view {em} all-band {mode}  |  {kpi} bad spots", 1, last_col)
     if combined_map.exists():
         add_image(ws, combined_map, "A10", width=760, height=660)
 
@@ -874,8 +936,8 @@ def add_vs_line_chart(ws_data, ws_dest, anchor, title, cat_col, data_min, data_m
     return chart
 
 
-def add_dual_axis_vs_chart(ws_data, ws_dest, anchor, n_rows, width=16, height=9):
-    cats = Reference(ws_data, min_col=50, min_row=2, max_row=1 + n_rows)
+def add_dual_axis_vs_chart(ws_data, ws_dest, anchor, n_rows, width=16, height=9, cat_col=50, sinr_col=51, rsrq_col=52):
+    cats = Reference(ws_data, min_col=cat_col, min_row=2, max_row=1 + n_rows)
     sinr = LineChart()
     sinr.style = 10
     sinr.title = "RSRP vs SINR vs RSRQ"
@@ -883,7 +945,7 @@ def add_dual_axis_vs_chart(ws_data, ws_dest, anchor, n_rows, width=16, height=9)
     sinr.x_axis.title = "RSRP (dBm)"
     sinr.width = width
     sinr.height = height
-    sinr.add_data(Reference(ws_data, min_col=51, min_row=1, max_row=1 + n_rows), titles_from_data=True)
+    sinr.add_data(Reference(ws_data, min_col=sinr_col, min_row=1, max_row=1 + n_rows), titles_from_data=True)
     sinr.set_categories(cats)
     style_smooth_line(sinr.series[0], VS_SINR_LINE)
     sinr.legend.position = "b"
@@ -891,7 +953,7 @@ def add_dual_axis_vs_chart(ws_data, ws_dest, anchor, n_rows, width=16, height=9)
     rsrq = LineChart()
     rsrq.y_axis.axId = 200
     rsrq.y_axis.title = "RSRQ (dB)"
-    rsrq.add_data(Reference(ws_data, min_col=52, min_row=1, max_row=1 + n_rows), titles_from_data=True)
+    rsrq.add_data(Reference(ws_data, min_col=rsrq_col, min_row=1, max_row=1 + n_rows), titles_from_data=True)
     style_smooth_line(rsrq.series[0], VS_RSRQ_LINE)
     sinr.y_axis.crosses = "min"
     rsrq.y_axis.crosses = "max"
@@ -1004,25 +1066,31 @@ def save_binned_vs_preview(df: pd.DataFrame, path: Path) -> Path:
     return path
 
 
-def build_rsrp_vs_sheet(ws, data_ws, n_rows: int, scatter_sinr: Path, scatter_rsrq: Path) -> None:
-    banner(
-        ws,
-        "  RSRP vs KPIs IDLE Mode",
-        "  Idle V2.0 scanner  |  Smooth mean lines and scatter with trend  |  Gridlines off",
-        last_col=12,
-    )
+def build_rsrp_vs_sheet(
+    ws, data_ws, n_rows: int, scatter_sinr: Path, scatter_rsrq: Path,
+    *,
+    title: str = "  RSRP vs KPIs IDLE Mode",
+    subtitle: str = "  Idle V2.0 scanner  |  Smooth mean lines and scatter with trend  |  Gridlines off",
+    cat_col: int = 50,
+    sinr_col: int = 51,
+    rsrq_col: int = 52,
+) -> None:
+    banner(ws, title, subtitle, last_col=12)
     set_widths(ws, {get_column_letter(i): 14 for i in range(1, 13)})
     add_vs_line_chart(
         data_ws, ws, "A4", "RSRP vs SINR",
-        50, 51, 51, 2, 1 + n_rows, "SINR (dB)",
+        cat_col, sinr_col, sinr_col, 2, 1 + n_rows, "SINR (dB)",
         [VS_SINR_LINE], width=15, height=8,
     )
     add_vs_line_chart(
         data_ws, ws, "I4", "RSRP vs RSRQ",
-        50, 52, 52, 2, 1 + n_rows, "RSRQ (dB)",
+        cat_col, rsrq_col, rsrq_col, 2, 1 + n_rows, "RSRQ (dB)",
         [VS_RSRQ_LINE], width=15, height=8,
     )
-    add_dual_axis_vs_chart(data_ws, ws, "A22", n_rows, width=22, height=8)
+    add_dual_axis_vs_chart(
+        data_ws, ws, "A22", n_rows, width=22, height=8,
+        cat_col=cat_col, sinr_col=sinr_col, rsrq_col=rsrq_col,
+    )
     write_cell(ws, 48, 1, "RSRP vs SINR scatter (trend line)", size=14, bold=True)
     write_cell(ws, 48, 8, "RSRP vs RSRQ scatter (trend line)", size=14, bold=True)
     if scatter_sinr.exists():
@@ -1110,11 +1178,18 @@ def verify_report(path: Path) -> dict:
                 info["problems"].append(f"{name}/{title}: missing horizontal axis title")
             if not y_title:
                 info["problems"].append(f"{name}/{title}: missing vertical axis title")
-    for name in ("Bad Spot RSRP", "Bad Spot RSRQ", "Bad Spot SINR"):
+    for name in (
+        "Bad Spot RSRP", "Bad Spot RSRQ", "Bad Spot SINR",
+        "Bad Spot RSRP_Active", "Bad Spot RSRQ_Active", "Bad Spot SINR_Active",
+    ):
         if name not in info["sheets"]:
             info["problems"].append(f"missing {name} sheet")
         elif info["sheets"][name]["images"] < 1:
             info["problems"].append(f"{name}: expected combined map image")
+    if "RSRP vs KPIs_Active" not in info["sheets"]:
+        info["problems"].append("missing RSRP vs KPIs_Active sheet")
+    elif info["sheets"]["RSRP vs KPIs_Active"]["charts"] < 3:
+        info["problems"].append("RSRP vs KPIs_Active: expected three charts")
     wb.close()
     with zipfile.ZipFile(path) as zf:
         for item in zf.namelist():
@@ -1190,64 +1265,121 @@ def save_report_preview(df: pd.DataFrame, path: Path) -> Path:
     return path
 
 
-def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
-    if "Band" not in df.columns:
-        df = df.copy()
-        df["Band"] = df["DL EARFCN"].map(earfcn_to_band)
-    if "Layer" not in df.columns:
-        df = df.copy()
-        df["Layer"] = pd.to_numeric(df["DL EARFCN"], errors="coerce").map(earfcn_to_layer)
+def _with_layers(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    if "Band" not in out.columns:
+        out["Band"] = out["DL EARFCN"].map(earfcn_to_band)
+    if "Layer" not in out.columns:
+        out["Layer"] = pd.to_numeric(out["DL EARFCN"], errors="coerce").map(earfcn_to_layer)
+    return out
 
-    placeholder = save_active_placeholder(PLOTS_DIR / "active_mode_placeholder.png")
-    map_df = best_server(df)
-    extent = coverage_extent(map_df)
-    rsrp_map = plot_rsrp_coverage_map(map_df, PLOTS_DIR / "excel_route_rsrp.png", extent=extent)
-    rsrq_map = plot_rsrq_coverage_map(map_df, PLOTS_DIR / "excel_route_rsrq.png", extent=extent)
-    sinr_map = plot_sinr_coverage_map(map_df, PLOTS_DIR / "excel_route_sinr.png", extent=extent)
+
+def _render_mode(df: pd.DataFrame, picker, tag: str, extent, mode_label: str | None) -> dict:
+    """Coverage maps, bad-spot maps and spot tables for one mode.
+
+    tag is "" for Idle (existing file names) and "active" for the Active Mode copies.
+    """
+    suffix = f"_{tag}" if tag else ""
+    map_df = picker(df)
+    plot_rsrp_coverage_map(map_df, PLOTS_DIR / f"excel_route_rsrp{suffix}.png", extent=extent, mode_label=mode_label)
+    plot_rsrq_coverage_map(map_df, PLOTS_DIR / f"excel_route_rsrq{suffix}.png", extent=extent, mode_label=mode_label)
+    plot_sinr_coverage_map(map_df, PLOTS_DIR / f"excel_route_sinr{suffix}.png", extent=extent, mode_label=mode_label)
     rsrp_band: dict[str, Path] = {}
     rsrq_band: dict[str, Path] = {}
     sinr_band: dict[str, Path] = {}
     for layer in REPORT_LAYERS:
-        part = best_server(filter_by_layer(df, layer))
+        part = picker(filter_by_layer(df, layer))
         rsrp_band[layer] = plot_rsrp_coverage_map(
-            part, PLOTS_DIR / f"excel_route_rsrp_{layer}.png", layer=layer, extent=extent
+            part, PLOTS_DIR / f"excel_route_rsrp_{layer}{suffix}.png",
+            layer=layer, extent=extent, mode_label=mode_label,
         )
         rsrq_band[layer] = plot_rsrq_coverage_map(
-            part, PLOTS_DIR / f"excel_route_rsrq_{layer}.png", layer=layer, extent=extent
+            part, PLOTS_DIR / f"excel_route_rsrq_{layer}{suffix}.png",
+            layer=layer, extent=extent, mode_label=mode_label,
         )
         sinr_band[layer] = plot_sinr_coverage_map(
-            part, PLOTS_DIR / f"excel_route_sinr_{layer}.png", layer=layer, extent=extent
+            part, PLOTS_DIR / f"excel_route_sinr_{layer}{suffix}.png",
+            layer=layer, extent=extent, mode_label=mode_label,
         )
-    scatter_sinr = save_rsrp_scatter(df, "SINR", PLOTS_DIR / "excel_scatter_rsrp_sinr.png", "SINR (dB)", "RSRP vs SINR", ylim=(-10, 32))
-    scatter_rsrq = save_rsrp_scatter(df, "RSRQ", PLOTS_DIR / "excel_scatter_rsrp_rsrq.png", "RSRQ (dB)", "RSRP vs RSRQ", ylim=(-24, 0))
     rsrp_spots = find_bad_spots(map_df, "RSRP")
     rsrq_spots = find_bad_spots(map_df, "RSRQ")
     sinr_spots = find_bad_spots(map_df, "SINR")
-    rsrp_bad = plot_rsrp_bad_spot_map(map_df, rsrp_spots, PLOTS_DIR / "excel_bad_spots_rsrp.png", extent=extent)
-    rsrq_bad = plot_rsrq_bad_spot_map(map_df, rsrq_spots, PLOTS_DIR / "excel_bad_spots_rsrq.png", extent=extent)
-    sinr_bad = plot_sinr_bad_spot_map(map_df, sinr_spots, PLOTS_DIR / "excel_bad_spots_sinr.png", extent=extent)
+    title_bit = f" — {mode_label}" if mode_label else ""
+    zoom_bit = mode_label or "first all-band map"
+    rsrp_bad = plot_rsrp_bad_spot_map(
+        map_df, rsrp_spots, PLOTS_DIR / f"excel_bad_spots_rsrp{suffix}.png",
+        extent=extent, title=f"Combined view — RSRP{title_bit}",
+    )
+    rsrq_bad = plot_rsrq_bad_spot_map(
+        map_df, rsrq_spots, PLOTS_DIR / f"excel_bad_spots_rsrq{suffix}.png",
+        extent=extent, title=f"Combined view — RSRQ{title_bit}",
+    )
+    sinr_bad = plot_sinr_bad_spot_map(
+        map_df, sinr_spots, PLOTS_DIR / f"excel_bad_spots_sinr{suffix}.png",
+        extent=extent, title=f"Combined view — SINR{title_bit}",
+    )
     rsrp_zooms = plot_bad_spot_zoom_grid(
-        map_df, rsrp_spots, PLOTS_DIR / "excel_bad_spots_rsrp_zooms.png",
+        map_df, rsrp_spots, PLOTS_DIR / f"excel_bad_spots_rsrp_zooms{suffix}.png",
         "RSRP", rsrp_map_class(map_df["RSRP"]), MAP_RSRP_LABELS, MAP_RSRP_COLORS,
-        "RSRP zoomed locations (first all-band map)",
+        f"RSRP zoomed locations ({zoom_bit})",
     )
     rsrq_zooms = plot_bad_spot_zoom_grid(
-        map_df, rsrq_spots, PLOTS_DIR / "excel_bad_spots_rsrq_zooms.png",
+        map_df, rsrq_spots, PLOTS_DIR / f"excel_bad_spots_rsrq_zooms{suffix}.png",
         "RSRQ", rsrq_map_class(map_df["RSRQ"]), MAP_RSRQ_LABELS, MAP_RSRQ_COLORS,
-        "RSRQ zoomed locations (first all-band map)",
+        f"RSRQ zoomed locations ({zoom_bit})",
     )
     sinr_zooms = plot_bad_spot_zoom_grid(
-        map_df, sinr_spots, PLOTS_DIR / "excel_bad_spots_sinr_zooms.png",
+        map_df, sinr_spots, PLOTS_DIR / f"excel_bad_spots_sinr_zooms{suffix}.png",
         "SINR", sinr_map_class(map_df["SINR"]), MAP_SINR_LABELS, MAP_SINR_COLORS,
-        "SINR zoomed locations (first all-band map)",
+        f"SINR zoomed locations ({zoom_bit})",
     )
-    shutil.copy2(rsrp_bad, PLOTS_DIR / "08_bad_spots_rsrp.png")
-    shutil.copy2(rsrq_bad, PLOTS_DIR / "08_bad_spots_rsrq.png")
-    shutil.copy2(sinr_bad, PLOTS_DIR / "08_bad_spots_sinr.png")
+    return {
+        "map_df": map_df,
+        "rsrp_band": rsrp_band, "rsrq_band": rsrq_band, "sinr_band": sinr_band,
+        "rsrp_spots": rsrp_spots, "rsrq_spots": rsrq_spots, "sinr_spots": sinr_spots,
+        "rsrp_bad": rsrp_bad, "rsrq_bad": rsrq_bad, "sinr_bad": sinr_bad,
+        "rsrp_zooms": rsrp_zooms, "rsrq_zooms": rsrq_zooms, "sinr_zooms": sinr_zooms,
+    }
+
+
+def build_report(df: pd.DataFrame, active: pd.DataFrame | None = None, out_path: Path = REPORT_XLSX) -> Path:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    df = _with_layers(df)
+    active_raw_n = 0
+    active_robi = None
+    if active is not None and not active.empty:
+        active = _with_layers(active)
+        active_raw_n = len(active)
+        if "Operator" in active.columns:
+            active_robi = active.loc[active["Operator"] == ACTIVE_OPERATOR].copy()
+        else:
+            active_robi = active
+        print(f"Active Mode plotted: {len(active_robi):,} {ACTIVE_OPERATOR} rows of {active_raw_n:,}")
+
+    idle_track = best_server(df)
+    extent = coverage_extent(idle_track)
+    idle = _render_mode(df, best_server, "", extent, None)
+    active_view = None
+    if active_robi is not None and not active_robi.empty:
+        active_view = _render_mode(active_robi, best_carrier, "active", extent, "Active")
+
+    scatter_sinr = save_rsrp_scatter(df, "SINR", PLOTS_DIR / "excel_scatter_rsrp_sinr.png", "SINR (dB)", "RSRP vs SINR", ylim=(-10, 32))
+    scatter_rsrq = save_rsrp_scatter(df, "RSRQ", PLOTS_DIR / "excel_scatter_rsrp_rsrq.png", "RSRQ (dB)", "RSRP vs RSRQ", ylim=(-24, 0))
+    shutil.copy2(idle["rsrp_bad"], PLOTS_DIR / "08_bad_spots_rsrp.png")
+    shutil.copy2(idle["rsrq_bad"], PLOTS_DIR / "08_bad_spots_rsrq.png")
+    shutil.copy2(idle["sinr_bad"], PLOTS_DIR / "08_bad_spots_sinr.png")
     save_binned_vs_preview(df, PLOTS_DIR / "excel_rsrp_vs_sinr_lines.png")
     save_report_preview(df, PLOTS_DIR / "excel_rsrp_rsrq_sinr_histograms.png")
+    if active_view is not None:
+        save_rsrp_scatter(
+            active_robi, "SINR", PLOTS_DIR / "excel_scatter_rsrp_sinr_active.png",
+            "SINR (dB)", "RSRP vs SINR — Active", ylim=(-10, 32),
+        )
+        save_rsrp_scatter(
+            active_robi, "RSRQ", PLOTS_DIR / "excel_scatter_rsrp_rsrq_active.png",
+            "RSRQ (dB)", "RSRP vs RSRQ — Active", ylim=(-24, 0),
+        )
 
     wb = Workbook()
     cover = wb.active
@@ -1258,31 +1390,73 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
     bad_rsrp_ws = wb.create_sheet("Bad Spot RSRP")
     bad_rsrq_ws = wb.create_sheet("Bad Spot RSRQ")
     bad_sinr_ws = wb.create_sheet("Bad Spot SINR")
+    bad_rsrp_a = wb.create_sheet("Bad Spot RSRP_Active")
+    bad_rsrq_a = wb.create_sheet("Bad Spot RSRQ_Active")
+    bad_sinr_a = wb.create_sheet("Bad Spot SINR_Active")
     time_ws = wb.create_sheet("RSRP vs KPIs")
+    time_active_ws = wb.create_sheet("RSRP vs KPIs_Active")
     sample_ws = wb.create_sheet("Sample Log")
     data_ws = wb.create_sheet("_ChartData")
     data_ws.sheet_state = "hidden"
 
     blocks = write_chart_data(data_ws, df)
-    build_cover(cover, df)
+    active_vs_n = blocks["vs_n"]
+    if active_view is not None:
+        active_vs_n = write_vs_block(data_ws, active_robi, 54, 55, 56)
+    build_cover(cover, df, active_robi, active_raw_n)
     add_cover_charts(cover, data_ws, blocks)
-    build_kpi_sheet(rsrp_ws, "RSRP", "dBm", rsrp_bad, placeholder, rsrp_band)
-    build_kpi_sheet(rsrq_ws, "RSRQ", "dB", rsrq_bad, placeholder, rsrq_band)
-    build_kpi_sheet(sinr_ws, "SINR", "dB", sinr_bad, placeholder, sinr_band)
-    build_kpi_bad_spot_sheet(bad_rsrp_ws, "RSRP", rsrp_spots, rsrp_bad, rsrp_zooms)
-    build_kpi_bad_spot_sheet(bad_rsrq_ws, "RSRQ", rsrq_spots, rsrq_bad, rsrq_zooms)
-    build_kpi_bad_spot_sheet(bad_sinr_ws, "SINR", sinr_spots, sinr_bad, sinr_zooms)
+    empty_bands: dict[str, Path] = {}
+    build_kpi_sheet(
+        rsrp_ws, "RSRP", "dBm", idle["rsrp_bad"],
+        None if active_view is None else active_view["rsrp_bad"],
+        idle["rsrp_band"], empty_bands if active_view is None else active_view["rsrp_band"],
+    )
+    build_kpi_sheet(
+        rsrq_ws, "RSRQ", "dB", idle["rsrq_bad"],
+        None if active_view is None else active_view["rsrq_bad"],
+        idle["rsrq_band"], empty_bands if active_view is None else active_view["rsrq_band"],
+    )
+    build_kpi_sheet(
+        sinr_ws, "SINR", "dB", idle["sinr_bad"],
+        None if active_view is None else active_view["sinr_bad"],
+        idle["sinr_band"], empty_bands if active_view is None else active_view["sinr_band"],
+    )
+    build_kpi_bad_spot_sheet(bad_rsrp_ws, "RSRP", idle["rsrp_spots"], idle["rsrp_bad"], idle["rsrp_zooms"])
+    build_kpi_bad_spot_sheet(bad_rsrq_ws, "RSRQ", idle["rsrq_spots"], idle["rsrq_bad"], idle["rsrq_zooms"])
+    build_kpi_bad_spot_sheet(bad_sinr_ws, "SINR", idle["sinr_spots"], idle["sinr_bad"], idle["sinr_zooms"])
+    if active_view is not None:
+        build_kpi_bad_spot_sheet(
+            bad_rsrp_a, "RSRP", active_view["rsrp_spots"], active_view["rsrp_bad"], active_view["rsrp_zooms"],
+            mode="Active Mode",
+        )
+        build_kpi_bad_spot_sheet(
+            bad_rsrq_a, "RSRQ", active_view["rsrq_spots"], active_view["rsrq_bad"], active_view["rsrq_zooms"],
+            mode="Active Mode",
+        )
+        build_kpi_bad_spot_sheet(
+            bad_sinr_a, "SINR", active_view["sinr_spots"], active_view["sinr_bad"], active_view["sinr_zooms"],
+            mode="Active Mode",
+        )
+        build_rsrp_vs_sheet(
+            time_active_ws, data_ws, active_vs_n,
+            PLOTS_DIR / "excel_scatter_rsrp_sinr_active.png",
+            PLOTS_DIR / "excel_scatter_rsrp_rsrq_active.png",
+            title="  RSRP vs KPIs Active Mode",
+            subtitle=f"  {ACTIVE_OPERATOR} UE  |  Strongest carrier per timestamp  |  Gridlines off",
+            cat_col=54, sinr_col=55, rsrq_col=56,
+        )
     build_rsrp_vs_sheet(time_ws, data_ws, blocks["vs_n"], scatter_sinr, scatter_rsrq)
     build_sample_log(sample_ws, df)
 
     for ws in wb.worksheets:
         apply_sheet_view(ws)
 
-    wb.properties.title = "Bogura Drive-Test Report IDLE Mode"
-    wb.properties.subject = "IDLE Mode"
+    wb.properties.title = "Bogura Drive-Test Report IDLE and Active Mode"
+    wb.properties.subject = "IDLE and Active Mode"
     wb.properties.description = (
-        "Bogura drive-test report, IDLE Mode. "
-        "KPI sheets: combined all-band maps with bad spots on top. Bad Spot RSRP/RSRQ/SINR: every poor run, plus discrete 1 km2 areas. Analysis: RSRP vs SINR/RSRQ."
+        "Bogura drive-test report. Idle scanner on the left and on Bad Spot RSRP/RSRQ/SINR. "
+        "Active Mode Robi UE on the right and on Bad Spot *_Active and RSRP vs KPIs_Active. "
+        "Poor runs use the same thresholds in both modes."
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(out_path)
@@ -1293,16 +1467,33 @@ def build_report(df: pd.DataFrame, out_path: Path = REPORT_XLSX) -> Path:
 
 
 if __name__ == "__main__":
-    from merge_and_analyze import MERGED_CSV, extract_archives, load_merged_csv, merge_parts
+    from merge_and_analyze import (
+        ACTIVE_ARCHIVE,
+        ACTIVE_MERGED,
+        MERGED_CSV,
+        extract_active_archive,
+        extract_archives,
+        load_active_merged,
+        load_merged_csv,
+        merge_active,
+        merge_parts,
+    )
 
     if MERGED_CSV.exists():
         frame = load_merged_csv()
     else:
         extract_archives()
         frame = merge_parts()
-    path = build_report(frame)
+    if ACTIVE_MERGED.exists():
+        active_frame = load_active_merged()
+    elif ACTIVE_ARCHIVE.exists():
+        extract_active_archive()
+        active_frame = merge_active()
+    else:
+        active_frame = None
+    path = build_report(frame, active_frame)
     result = verify_report(path)
     print(result)
     if result["problems"]:
         raise SystemExit("Excel view checks failed: " + "; ".join(result["problems"]))
-    print("Verified: no freeze panes, no gridlines, RSRP/RSRQ/SINR charts present.")
+    print("Verified: no freeze panes, no gridlines, Idle and Active sheets present.")
