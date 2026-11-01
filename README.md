@@ -92,7 +92,7 @@ RSRP / RSRQ / SINR coverage maps use the Page 1 legend:
 
 Throughput (PDCP DL) and CQI are on the same legend sheet but are not in these IDLE logs, so those maps are not drawn yet.
 
-**RSRP / RSRQ / SINR sheets** show the **combined all-band IDLE map on the left with bad spots marked**, then band-wise IDLE maps for L900, L1800, L2100 and L2600. The right side is the same view for **Active Mode (Robi UE)**. Those maps do not overlay site pies.
+**RSRP / RSRQ / SINR sheets** show the **combined all-band IDLE map on the left with bad spots marked**, then band-wise IDLE maps for L900, L1800, L2100 and L2600. The right side is the same view for **Active Mode (Robi UE)**. Every map sits on satellite imagery. Those maps do not overlay site pies.
 
 **Bad Spot RSRP / RSRQ / SINR** are the Idle sheets. **Bad Spot RSRP_Active / RSRQ_Active / SINR_Active** apply the same rules to the Active Robi track. Each sheet puts the **combined all-band view with marks on top**, then zoomed local inspection. Map numbers are omitted.
 
@@ -100,36 +100,27 @@ Active best server is the **strongest carrier at each timestamp** (the UE logs e
 
 - Poor is **RSRP ≤ −115 dBm** (magenta and red only; yellow is not a bad-spot colour), **RSRQ ≤ −20 dB** (red), **SINR ≤ 0 dB** (orange and red)
 - Maps and rules read the same **50 m road bins**: a bin is coloured by the median of the samples measured in it and counts as poor only when that median is at or below the threshold, and poor bins are drawn on top of good ones — so a circle can only sit on colour the map actually shows
-- **Every poor run is circled**, however short, because a 50 m coverage hole is still a hole. A single poor bin is reported as 50 m. The drive yields 98 RSRP runs, 216 RSRQ runs and 1,237 SINR runs
-- **Discrete area:** leftover poor bins covering at least 1 km² where that area is at least half poor (thin black dotted circle)
-- Rings shrink and thin as the count grows (2.6 km haloed up to 40 spots, 1.4 km up to 250, 0.8 km beyond), so the marks never cover the colour they mark. Poor SINR covers 11 % of the drive, so its marks merge at district scale and the zoom panels and table carry the detail
-- Each sheet lists the 16 longest runs as zoom panels and up to 300 in the table, longest first, and states the full count
-- These rules and the published counts (Idle 98 / 216 / 1,237 and Active 641 / 79 / 1,413, with 0 discrete areas) are locked in `LOGIC_LOCK`. `verify_report` fails if a rebuild moves a threshold, a colour, the sweep window, or a count
+- **Every poor run is covered by a circle.** Runs within 2 km join one circle when the poor road inside it spans at most 7 km, so the drawn circle stays within 10 km and covers that road. A longer poor road is split into several circles. Pockets more than 2 km apart stay separate circles even inside the same 10 km neighbourhood
+- **Each circle is its own Excel shape** (orange, named Circle 1, Circle 2, … in the same order as the table) and can be dragged without moving the map or the other circles
+- **Discrete area:** leftover poor bins covering at least 1 km² where that area is at least half poor (dotted circle). With every run already covered, this drive has none
+- Each sheet lists the 16 longest circles as zoom panels and up to 300 in the table, longest first, and states the full count
+- Published circle counts, with 0 discrete areas: Idle RSRP 41, RSRQ 45, SINR 204; Active RSRP 163, RSRQ 52, SINR 190. These rules are locked in `LOGIC_LOCK`. `verify_report` fails if a rebuild moves a threshold, a colour, the circle size, or a count
 
-### Bad-spot maps are SVG (v1.34)
+### Maps are satellite, and each bad-spot circle is its own shape (v1.35)
 
-Every bad-spot map — the combined view and the zoom panels, Idle and Active, on the Bad Spot sheets and at the top of the RSRP / RSRQ / SINR sheets — is a vector SVG inside the workbook: transparent background, real text, no street basemap, no embedded picture. Excel 365 draws the SVG, so it stays sharp at any zoom; older Excel and other viewers show a PNG rendered from the same SVG. All maps keep their true shape instead of being stretched to fit a box.
+Every coverage map and bad-spot map is drawn on Esri World Imagery. On the combined bad-spot view the orange circles are not painted into the picture: each one is a separate Excel shape named Circle 1, Circle 2, … in the same order as the table, so it can be dragged on its own. A circle is at most 10 km across. Where the poor road is in separate pockets, several circles sit inside that 10 km neighbourhood.
 
-The same SVGs are saved on their own under `output/plots/svg/`:
+## Download Excel report (v1.35)
 
-| File | Map |
-| --- | --- |
-| `bad_spots_{rsrp,rsrq,sinr}_combined_idle.svg` | Idle combined view with bad spots |
-| `bad_spots_{rsrp,rsrq,sinr}_zooms_idle.svg` | Idle zoom panels |
-| `bad_spots_{rsrp,rsrq,sinr}_combined_active.svg` | Active combined view with bad spots |
-| `bad_spots_{rsrp,rsrq,sinr}_zooms_active.svg` | Active zoom panels |
-
-## Download Excel report (v1.34)
-
-**v1.34 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.34.xlsx
+**v1.35 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.35.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.34.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.35.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.34.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.35.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
 Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 

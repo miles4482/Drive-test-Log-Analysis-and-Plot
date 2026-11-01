@@ -58,6 +58,7 @@ from merge_and_analyze import (
     find_bad_spots,
     logic_drift,
     LOGIC_LOCK,
+    MAP_CIRCLE_PIXELS,
     min_consecutive_m,
     best_carrier,
     best_server,
@@ -75,7 +76,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.34"
+REPORT_VERSION = "1.35"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -249,6 +250,142 @@ def embed_svg_layers(path: Path) -> int:
             zf.writestr(name, parts[name])
     tmp.replace(path)
     return embedded
+
+
+def embed_circle_shapes(path: Path) -> int:
+    """Add one Excel oval per bad-spot circle, anchored on top of its map picture.
+
+    Each oval is its own drawing object, so it can be dragged without moving the
+    map or the other circles.
+    """
+    if not MAP_CIRCLE_PIXELS:
+        return 0
+    by_digest = {}
+    for png, geom in MAP_CIRCLE_PIXELS.items():
+        file = Path(png)
+        if file.exists() and geom.get("circles"):
+            by_digest[hashlib.sha1(file.read_bytes()).hexdigest()] = geom
+    with zipfile.ZipFile(path) as zf:
+        names = zf.namelist()
+        parts = {name: zf.read(name) for name in names}
+    media_digest = {
+        name: hashlib.sha1(parts[name]).hexdigest()
+        for name in names
+        if name.startswith("xl/media/") and name.lower().endswith(".png")
+    }
+    placed = 0
+    for rels_name in [n for n in names if re.fullmatch(r"xl/drawings/_rels/drawing\d+\.xml\.rels", n)]:
+        drawing_name = "xl/drawings/" + rels_name.rsplit("/", 1)[1][: -len(".rels")]
+        rels = parts[rels_name].decode("utf-8")
+        drawing = parts[drawing_name].decode("utf-8")
+        rid_media = {}
+        for rel in re.findall(r"<Relationship\b[^>]*/>", rels):
+            rid = re.search(r'Id="([^"]+)"', rel).group(1)
+            target = re.search(r'Target="([^"]+)"', rel).group(1)
+            media = target.lstrip("/") if target.startswith("/") else "xl/media/" + target.rsplit("/", 1)[1]
+            rid_media[rid] = media
+        next_shape = max((int(i) for i in re.findall(r'<cNvPr id="(\d+)"', drawing)), default=0) + 1
+        extras = []
+        for block in re.findall(r"<oneCellAnchor>.*?</oneCellAnchor>", drawing, flags=re.S):
+            embed = re.search(r'r:embed="([^"]+)"', block)
+            if embed is None:
+                continue
+            digest = media_digest.get(rid_media.get(embed.group(1), ""))
+            geom = by_digest.get(digest or "")
+            if geom is None:
+                continue
+            img_w, img_h = geom["size"]
+            origin = re.search(
+                r"<from><col>(\d+)</col><colOff>(\d+)</colOff><row>(\d+)</row><rowOff>(\d+)</rowOff></from><ext cx=\"(\d+)\" cy=\"(\d+)\"",
+                block,
+            )
+            if origin is None or img_w <= 0 or img_h <= 0:
+                continue
+            col, col_off, row, row_off, pic_cx, pic_cy = (int(v) for v in origin.groups())
+            for circle in geom["circles"]:
+                left = max(0.0, min(float(circle["x"]), img_w - 1))
+                top = max(0.0, min(float(circle["y"]), img_h - 1))
+                width = max(1.0, min(float(circle["w"]), img_w - left))
+                height = max(1.0, min(float(circle["h"]), img_h - top))
+                dash = "sysDot" if circle.get("dotted") else "dash"
+                extras.append(
+                    "<oneCellAnchor>"
+                    f"<from><col>{col}</col><colOff>{col_off + int(left / img_w * pic_cx)}</colOff>"
+                    f"<row>{row}</row><rowOff>{row_off + int(top / img_h * pic_cy)}</rowOff></from>"
+                    f"<ext cx=\"{max(1, int(width / img_w * pic_cx))}\" cy=\"{max(1, int(height / img_h * pic_cy))}\"/>"
+                    "<sp><nvSpPr>"
+                    f"<cNvPr id=\"{next_shape}\" name=\"{circle['name']}\"/><cNvSpPr/></nvSpPr>"
+                    "<spPr><a:xfrm><a:off x=\"0\" y=\"0\"/>"
+                    f"<a:ext cx=\"{max(1, int(width / img_w * pic_cx))}\" cy=\"{max(1, int(height / img_h * pic_cy))}\"/>"
+                    "</a:xfrm><a:prstGeom prst=\"ellipse\"><a:avLst/></a:prstGeom><a:noFill/>"
+                    "<a:ln w=\"28575\"><a:solidFill><a:srgbClr val=\"FF6600\"/></a:solidFill>"
+                    f"<a:prstDash val=\"{dash}\"/></a:ln></spPr>"
+                    "<txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang=\"en-US\"/></a:p></txBody>"
+                    "</sp><clientData/></oneCellAnchor>"
+                )
+                next_shape += 1
+                placed += 1
+        if extras:
+            drawing = drawing.replace("</wsDr>", "".join(extras) + "</wsDr>")
+            parts[drawing_name] = drawing.encode("utf-8")
+    if placed:
+        tmp = path.with_suffix(".tmp.xlsx")
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+            for name in names:
+                zf.writestr(name, parts[name])
+        tmp.replace(path)
+    return placed
+
+
+def compress_workbook_images(path: Path, quality: int = 74) -> int:
+    """Store the satellite maps as JPEG so the workbook stays a normal download.
+
+    Picture size and the circle shapes are unchanged; only the photo bytes shrink.
+    """
+    from PIL import Image
+    import io
+
+    with zipfile.ZipFile(path) as zf:
+        names = zf.namelist()
+        parts = {name: zf.read(name) for name in names}
+    renamed = {}
+    for name in list(parts):
+        if not (name.startswith("xl/media/") and name.lower().endswith(".png")):
+            continue
+        if len(parts[name]) < 400_000:
+            continue
+        image = Image.open(io.BytesIO(parts[name])).convert("RGB")
+        buf = io.BytesIO()
+        image.save(buf, "JPEG", quality=quality, optimize=True)
+        jpg = name[:-4] + ".jpg"
+        parts[jpg] = buf.getvalue()
+        del parts[name]
+        renamed[name] = jpg
+    if not renamed:
+        return 0
+    for name, body in list(parts.items()):
+        if not name.endswith(".rels"):
+            continue
+        text = body.decode("utf-8")
+        for old, new in renamed.items():
+            text = text.replace(old, new)
+            text = text.replace(old.rsplit("/", 1)[1], new.rsplit("/", 1)[1])
+        parts[name] = text.encode("utf-8")
+    types = parts["[Content_Types].xml"].decode("utf-8")
+    if 'Extension="jpg"' not in types:
+        types = types.replace(
+            "<Default ",
+            '<Default Extension="jpg" ContentType="image/jpeg" /><Default ',
+            1,
+        )
+        parts["[Content_Types].xml"] = types.encode("utf-8")
+    order = [n for n in names if n in parts] + [n for n in parts if n not in names]
+    tmp = path.with_suffix(".tmp.xlsx")
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name in order:
+            zf.writestr(name, parts[name])
+    tmp.replace(path)
+    return len(renamed)
 
 
 def banner(ws: Worksheet, title: str, subtitle: str, last_col: int = 12) -> None:
@@ -779,30 +916,33 @@ def _kind_label(kind: object, kpi: object = None) -> str:
 BAD_SPOT_KPI_NOTES = {
     "RSRP": (
         "Poor is RSRP at or below -115 dBm (magenta and red only; yellow is not a bad-spot colour). "
-        "Every poor run is circled, however short, because a 50 m coverage hole is still a hole. "
-        "The combined view at the top is the same all-band best-server map as the RSRP sheet, with bad spots marked. "
+        "Every poor run is covered by a circle. Nearby runs join one circle, up to 10 km across, "
+        "and a longer poor road is split into several circles. "
+        "The combined view at the top is the all-band best-server map on satellite imagery. "
         "Best server is the strongest band per scanner sweep, so a weak band is never mapped as the coverage of a road."
     ),
     "RSRQ": (
-        "Poor is RSRQ at or below -20 dB (red), and every poor run is circled, however short. "
-        "The combined view at the top is the same all-band best-server map as the RSRQ sheet, with bad spots marked."
+        "Poor is RSRQ at or below -20 dB (red), and every poor run is covered by a circle. "
+        "Nearby runs join one circle, up to 10 km across, and separate pockets stay separate circles. "
+        "The combined view at the top is the all-band best-server map on satellite imagery."
     ),
     "SINR": (
-        "Poor is SINR at or below 0 dB (orange and red), and every poor run is circled, however short. "
-        "Poor SINR covers so much of this drive that the marks merge at district scale: read the zoom "
-        "panels and the table below for the runs worth acting on. "
-        "The combined view at the top is the same all-band best-server map as the SINR sheet, with bad spots marked."
+        "Poor is SINR at or below 0 dB (orange and red), and every poor run is covered by a circle. "
+        "Nearby runs join one circle, up to 10 km across. Where the poor road is spread out, "
+        "several circles sit inside the same 10 km neighbourhood instead of one circle covering the good road between them. "
+        "The combined view at the top is the all-band best-server map on satellite imagery."
     ),
 }
 
 
 def _bad_spot_table_rows(spots: pd.DataFrame, *, include_kpi: bool = True) -> list[list]:
     rows = []
-    for _, s in spots.iterrows():
+    for n, (_, s) in enumerate(spots.iterrows(), start=1):
         top_cell = "" if pd.isna(s.get("top_cell", pd.NA)) else int(s["top_cell"])
         length_m = s.get("length_m", np.nan)
         area_km2 = s.get("area_km2", np.nan)
         row = [
+            f"Circle {n}",
             _kind_label(s.get("kind"), s.get("kpi")),
         ]
         if include_kpi:
@@ -837,8 +977,8 @@ def _detection_summary(kpi: str, spots: pd.DataFrame) -> str:
     minimum = min_consecutive_m(kpi)
     if minimum <= 0:
         text = (
-            f"The rules find {total_consec:,} poor {kpi} run(s) on the drive, all of them circled, "
-            f"and {total_discrete:,} discrete area(s) of at least 1 km\u00b2."
+            f"The rules find {total_consec:,} poor {kpi} circle(s), each drawn up to 10 km and together "
+            f"covering every poor run, and {total_discrete:,} discrete area(s) of at least 1 km\u00b2."
         )
     else:
         text = (
@@ -900,17 +1040,18 @@ def build_kpi_bad_spot_sheet(
         + " Maps and rules read the same 50 m road bins: a bin is coloured by the median of the "
         "samples measured in it and counts as poor only when that median is at or below the "
         "threshold, and poor bins are drawn on top of good ones. A circle can therefore only sit on "
-        "colour you can see. A poor run is a thin black dashed oval, and a discrete patch of at "
-        "least 1 km\u00b2 is a thin black dotted circle. "
+        "colour you can see. Each circle is a separate orange shape on the satellite map, named "
+        "Circle 1, Circle 2, and so on, in the same order as the table, so a circle can be dragged "
+        "without moving the others. Several circles can sit inside one 10 km neighbourhood when the "
+        "poor road is not one stretch. A discrete patch of at least 1 km\u00b2 is a dotted circle. "
         + _detection_summary(kpi, spots)
-        + " Numbers are not drawn on the maps. The maps on this sheet are vector SVG drawings "
-        "(no street basemap) that stay sharp at any zoom in Excel 365; older viewers show a PNG copy.",
+        + " Numbers are not drawn on the maps.",
         size=11,
         wrap=True,
     )
-    ws.row_dimensions[4].height = 26
-    ws.row_dimensions[5].height = 26
-    ws.row_dimensions[6].height = 26
+    ws.row_dimensions[4].height = 32
+    ws.row_dimensions[5].height = 32
+    ws.row_dimensions[6].height = 32
 
     section_bar(ws, 8, f"Combined view {em} all-band {mode}  |  {kpi} bad spots", 1, last_col)
     map_h = 0
@@ -935,6 +1076,7 @@ def build_kpi_bad_spot_sheet(
         table_title = f"{table_title}  \u2014  {BAD_SPOT_TABLE_MAX:,} longest of {len(spots):,}"
     write_cell(ws, table_row, 1, table_title, size=14, bold=True)
     headers = [
+        "Circle",
         "Type",
         "Latitude",
         "Longitude",
@@ -958,17 +1100,17 @@ def build_kpi_bad_spot_sheet(
         headers,
         rows,
         num_formats={
-            1: "0.00000",
             2: "0.00000",
-            3: "#,##0",
+            3: "0.00000",
             4: "#,##0",
-            5: "0.0%",
-            6: "0.00",
+            5: "#,##0",
+            6: "0.0%",
             7: "0.00",
             8: "0.00",
             9: "0.00",
-            10: "#,##0",
-            11: "0.00",
+            10: "0.00",
+            11: "#,##0",
+            12: "0.00",
         },
     )
     note_row = table_row + 2 + len(rows)
@@ -977,10 +1119,11 @@ def build_kpi_bad_spot_sheet(
         ws,
         note_row,
         1,
-        "Combined view is the first all-band coverage map with thin black outlines on poor stretches. "
+        "The combined view is the all-band coverage map on satellite imagery. Each orange circle is a "
+        "separate shape with the same name as the Circle column, so it can be dragged on its own. "
         "Poor share is the share of raw samples inside the spot box that are at or below the "
-        "threshold: a low value means the road is poor on some passes only. Length is the distance "
-        "of road the run covers, and a single 50 m bin is reported as 50 m. Map numbers are omitted.",
+        "threshold. Length is the poor road inside the circle, and a single 50 m bin is reported as 50 m. "
+        "Map numbers are omitted.",
         size=9,
         wrap=True,
     )
@@ -1291,20 +1434,16 @@ def verify_report(path: Path) -> dict:
             info["problems"].append(f"{sheet}: bad-spot count {got}, locked {(runs, areas)}")
     wb.close()
     with zipfile.ZipFile(path) as zf:
-        svg_parts = [n for n in zf.namelist() if n.startswith("xl/media/") and n.endswith(".svg")]
-        svg_blips = sum(
-            zf.read(n).decode("utf-8").count("<asvg:svgBlip")
+        ellipses = sum(
+            zf.read(n).decode("utf-8").count('prst="ellipse"')
             for n in zf.namelist()
             if re.fullmatch(r"xl/drawings/drawing\d+\.xml", n)
         )
-        info["svg_maps"] = svg_blips
-        bad_sheets = sum(1 for name in info["sheets"] if name.startswith("Bad Spot "))
-        if svg_blips < bad_sheets:
-            info["problems"].append(f"only {svg_blips} SVG map layers for {bad_sheets} bad-spot sheets")
-        for item in svg_parts:
-            body = zf.read(item)
-            if b"<image" in body or b"base64," in body:
-                info["problems"].append(f"{item}: SVG embeds a raster image")
+        info["circle_shapes"] = ellipses
+        # Each combined map is placed twice: on the KPI sheet and on its Bad Spot sheet.
+        expected_shapes = 2 * sum(runs + areas for runs, areas in LOGIC_LOCK["counts"].values())
+        if ellipses != expected_shapes:
+            info["problems"].append(f"{ellipses} circle shapes, expected {expected_shapes}")
         for item in zf.namelist():
             if not item.startswith("xl/charts/chart"):
                 continue
@@ -1419,8 +1558,6 @@ def _render_mode(df: pd.DataFrame, picker, tag: str, extent, mode_label: str | N
     sinr_spots = find_bad_spots(map_df, "SINR")
     title_bit = f" — {mode_label}" if mode_label else ""
     zoom_bit = mode_label or "first all-band map"
-    mode_name = "active" if tag else "idle"
-    SVG_DIR.mkdir(parents=True, exist_ok=True)
     bad_maps = {}
     zoom_maps = {}
     for kpi, plot_map, classify, labels, colors in (
@@ -1430,17 +1567,15 @@ def _render_mode(df: pd.DataFrame, picker, tag: str, extent, mode_label: str | N
     ):
         key = kpi.lower()
         spots = {"RSRP": rsrp_spots, "RSRQ": rsrq_spots, "SINR": sinr_spots}[kpi]
-        combined_svg = plot_map(
-            map_df, spots, SVG_DIR / f"bad_spots_{key}_combined_{mode_name}.svg",
-            extent=extent, title=f"Combined view — {kpi}{title_bit}",
+        bad_maps[kpi] = plot_map(
+            map_df, spots, PLOTS_DIR / f"excel_bad_spots_{key}{suffix}.png",
+            extent=extent, title=f"Combined view — {kpi}{title_bit}", shapes=True,
         )
-        bad_maps[kpi] = svg_with_fallback(combined_svg, PLOTS_DIR / f"excel_bad_spots_{key}{suffix}.png")
-        zoom_svg = plot_bad_spot_zoom_grid(
-            map_df, spots, SVG_DIR / f"bad_spots_{key}_zooms_{mode_name}.svg",
+        zoom_maps[kpi] = plot_bad_spot_zoom_grid(
+            map_df, spots, PLOTS_DIR / f"excel_bad_spots_{key}_zooms{suffix}.png",
             kpi, classify(map_df[kpi]), labels, colors,
             f"{kpi} zoomed locations ({zoom_bit})",
         )
-        zoom_maps[kpi] = svg_with_fallback(zoom_svg, PLOTS_DIR / f"excel_bad_spots_{key}_zooms{suffix}.png")
     rsrp_bad, rsrq_bad, sinr_bad = bad_maps["RSRP"], bad_maps["RSRQ"], bad_maps["SINR"]
     rsrp_zooms, rsrq_zooms, sinr_zooms = zoom_maps["RSRP"], zoom_maps["RSRQ"], zoom_maps["SINR"]
     return {
@@ -1571,7 +1706,9 @@ def build_report(df: pd.DataFrame, active: pd.DataFrame | None = None, out_path:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(out_path)
     n_svg = embed_svg_layers(out_path)
-    print(f"Embedded {n_svg} bad-spot maps as SVG")
+    n_circles = embed_circle_shapes(out_path)
+    n_jpg = compress_workbook_images(out_path)
+    print(f"Embedded {n_svg} SVG layers and {n_circles} separate bad-spot circles; compressed {n_jpg} maps")
     shutil.copy2(out_path, VERSIONED_XLSX)
     print(f"Wrote Excel report: {out_path}")
     print(f"Wrote versioned copy: {VERSIONED_XLSX}")

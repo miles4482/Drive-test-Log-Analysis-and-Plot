@@ -416,8 +416,11 @@ def _bin_route_values(
 # scatter turns the two greens into one blurry line.
 MAP_DPI = 200
 MAP_ROUTE_LW = 3.2
-_TILE_CACHE = Path("/tmp/bogura_tiles")
+_TILE_CACHE = Path("/tmp/bogura_sat_tiles")
 _BASEMAP_CACHE: dict[tuple, object] = {}
+# Circle geometries for the report, in pixels of the saved PNG (origin top-left).
+# Each circle becomes its own Excel shape so it can be dragged on its own.
+MAP_CIRCLE_PIXELS: dict[str, dict] = {}
 
 
 def _merc_lat(y: float, n: float) -> float:
@@ -436,11 +439,11 @@ def _tile_bounds(x: int, y: int, z: int) -> tuple[float, float, float, float]:
 
 
 def _choose_zoom(span_deg: float) -> int:
-    """Zoom where the view is about six tiles across, so streets stay readable."""
+    """Zoom where the satellite view stays within about twenty tiles on a side."""
     best = 10
-    for z in range(9, 16):
+    for z in range(9, 17):
         tiles = span_deg / (360.0 / 2**z)
-        if tiles <= 11:
+        if tiles <= 20:
             best = z
         else:
             break
@@ -450,11 +453,15 @@ def _choose_zoom(span_deg: float) -> int:
 def _fetch_tile(z: int, x: int, y: int):
     from PIL import Image
 
-    path = _TILE_CACHE / f"{z}_{x}_{y}.png"
+    path = _TILE_CACHE / f"{z}_{x}_{y}.jpg"
     if path.exists() and path.stat().st_size > 200:
         return Image.open(path).convert("RGB")
-    url = f"https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-    req = urllib.request.Request(url, headers={"User-Agent": "BoguraDriveTestReport/1.33 (coverage map export)"})
+    # Esri World Imagery is z/y/x. x is the column, y is the row.
+    url = (
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/"
+        f"{z}/{y}/{x}"
+    )
+    req = urllib.request.Request(url, headers={"User-Agent": "BoguraDriveTestReport/1.35 (coverage map export)"})
     _TILE_CACHE.mkdir(parents=True, exist_ok=True)
     import time
     last_error: Exception | None = None
@@ -470,7 +477,7 @@ def _fetch_tile(z: int, x: int, y: int):
 
 
 def _add_basemap(ax) -> None:
-    """Light street map under the route, the way a log export is drawn on a map."""
+    """Satellite image under the route."""
     try:
         _add_basemap_image(ax)
     except Exception as exc:
@@ -498,15 +505,26 @@ def _add_basemap_image(ax) -> None:
     key = (z, x0, x1, y0, y1)
     image = _BASEMAP_CACHE.get(key)
     if image is None:
+        from concurrent.futures import ThreadPoolExecutor
+
         width = (x1 - x0 + 1) * 256
         height = (y1 - y0 + 1) * 256
-        canvas = Image.new("RGB", (width, height), (244, 244, 244))
-        for iy, y in enumerate(range(y0, y1 + 1)):
-            for ix, x in enumerate(range(x0, x1 + 1)):
-                try:
-                    canvas.paste(_fetch_tile(z, x, y), (ix * 256, iy * 256))
-                except Exception:
-                    continue
+        canvas = Image.new("RGB", (width, height), (40, 48, 36))
+        coords = [(x, y) for y in range(y0, y1 + 1) for x in range(x0, x1 + 1)]
+
+        def _load(xy: tuple[int, int]):
+            x, y = xy
+            try:
+                return xy, _fetch_tile(z, x, y)
+            except Exception:
+                return xy, None
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            fetched = list(pool.map(_load, coords))
+        for (x, y), tile in fetched:
+            if tile is None:
+                continue
+            canvas.paste(tile, ((x - x0) * 256, (y - y0) * 256))
         image = np.asarray(canvas)
         _BASEMAP_CACHE[key] = image
     west_m, _, _, north_m = _tile_bounds(x0, y0, z)
@@ -519,8 +537,8 @@ def _add_basemap_image(ax) -> None:
     ax.set_ylim(south, north)
     ax.set_aspect("equal", adjustable="box")
     ax.text(
-        0.01, 0.01, "© OpenStreetMap",
-        transform=ax.transAxes, fontsize=6, color="#5D6D7E", ha="left", va="bottom", zorder=6,
+        0.01, 0.01, "Satellite © Esri",
+        transform=ax.transAxes, fontsize=6, color="#FFFFFF", ha="left", va="bottom", zorder=6,
     )
 
 
@@ -619,10 +637,10 @@ def _draw_coverage_points(
                     segments[lab].append(pts[i:j + 2])
                 i = j + 1
         run_start = end
-    # Casing, then each legend colour. Poor bins are last so they stay visible.
+    # A white casing keeps the route readable on satellite imagery.
     if casing:
         ax.add_collection(LineCollection(
-            casing, colors="#2C3E50", linewidths=MAP_ROUTE_LW + 1.3,
+            casing, colors="#FFFFFF", linewidths=MAP_ROUTE_LW + 2.4,
             capstyle="round", joinstyle="round", zorder=2,
         ))
     for z, lab in enumerate(order):
@@ -807,23 +825,20 @@ def plot_sinr_coverage_map(
     )
 
 
-# Bad-spot contract, kept as it stands through report v1.34.
+# Bad-spot contract from report v1.35.
 # 1) Poor is inclusive: RSRP <= -115 dBm (magenta and red; yellow is not poor),
 #    RSRQ <= -20 dB (red), SINR <= 0 dB (orange and red).
 # 2) A bin of road is 50 m. Its colour and its poor/good call both use the median
-#    of the samples in it, and poor bins are drawn on top of good ones, so a ring
-#    can only sit on colour the map shows.
-# 3) Every poor run is a bad spot, however short. A single bin is reported as 50 m.
-#    A run stays one run across a gap of at most 150 m and 60 s on the same pass,
-#    and is split once its span passes 2 km. BAD_SPOT_MIN_CONSEC_M is only the
-#    fallback for a KPI that does not set its own minimum; the three KPIs set 0.
-# 4) Poor bins left over from rule 3 that cover >= 1 km², span at least 0.45 km
-#    each way, contain >= 20 poor bins and are at least half poor are a discrete
-#    area (dotted ring, at most 15). Rule 3 already takes every run on this drive,
-#    so the discrete count is 0; the rule stays.
-# 5) Overview rings sit above the route and shrink with the count: 2.6 km with a
-#    white halo up to 40 spots, 1.4 km up to 250, 0.8 km after that. The sheet
-#    zooms the 16 longest and tables the 300 longest.
+#    of the samples in it, and poor bins are drawn on top of good ones.
+# 3) Every poor run is covered. A run stays one run across a gap of at most 150 m
+#    and 60 s on the same pass. Runs within 2 km of each other join one circle
+#    when the poor road inside that circle still spans at most 7 km, so the drawn
+#    circle stays within 10 km and covers the road. A longer poor road is split
+#    into several circles. Pockets more than 2 km apart stay separate circles
+#    even when both sit inside the same 10 km neighbourhood, and each circle is
+#    its own shape so it can be moved on its own.
+# 4) Leftover poor bins that cover >= 1 km² stay a discrete (dotted) circle.
+#    With rule 3 taking every run, that count is 0 on this drive; the rule stays.
 # Idle best server is the strongest band in each scanner sweep (4 s or 40 m).
 # Active best server is the strongest Robi carrier sharing one timestamp.
 BAD_SPOT_MIN_CONSEC_M = 200.0
@@ -840,7 +855,12 @@ BAD_SPOT_DISCRETE_MAX_SPAN_KM = 3.2
 # Calling a whole km² bad means the roads inside it are bad, not that a few
 # scattered samples in it are.
 BAD_SPOT_DISCRETE_MIN_SHARE = 0.50
-BAD_SPOT_CONSEC_MAX_SPAN_KM = 2.0  # do not wrap a winding city route in one oval
+# Poor-road span that still fits inside a drawn circle of BAD_SPOT_CIRCLE_MAX_KM.
+BAD_SPOT_GROUP_SPAN_KM = 7.0
+BAD_SPOT_CIRCLE_MAX_KM = 10.0
+BAD_SPOT_CIRCLE_MIN_KM = 2.5
+BAD_SPOT_MERGE_GAP_KM = 2.0
+BAD_SPOT_CONSEC_MAX_SPAN_KM = BAD_SPOT_GROUP_SPAN_KM
 BAD_SPOT_ZOOM_PAD_KM = 0.70
 BAD_SPOT_ZOOM_MIN_KM = 1.2
 BAD_SPOT_OUTLINE_PAD = 1.45  # with sqrt(2), oval covers bbox corners / red tails
@@ -871,7 +891,7 @@ def min_consecutive_m(column: str) -> float:
 
 # Expected values for the contract above. Kept separate from the live constants so
 # a later edit that retunes a rule fails the report check instead of passing quietly.
-# Spot counts are the published v1.34 result (consecutive, discrete) per sheet.
+# Spot counts are the published v1.35 result (circles, discrete areas) per sheet.
 LOGIC_LOCK = {
     "active_operator": "Robi",
     "sweep_s": 4.0,
@@ -879,7 +899,10 @@ LOGIC_LOCK = {
     "bin_m": 50.0,
     "gap_m": 150.0,
     "gap_s": 60.0,
-    "span_km": 2.0,
+    "span_km": 7.0,
+    "circle_max_km": 10.0,
+    "circle_min_km": 2.5,
+    "merge_gap_km": 2.0,
     "discrete_km2": 1.0,
     "discrete_share": 0.50,
     "poor": {"RSRP": -115.0, "RSRQ": -20.0, "SINR": 0.0},
@@ -887,12 +910,12 @@ LOGIC_LOCK = {
     "rsrp_greens": ("#00B050", "#92D050"),
     "ring_tiers": ((40, 2.6, 2.15, True), (250, 1.4, 0.70, False), (10**9, 0.8, 0.50, False)),
     "counts": {
-        "Bad Spot RSRP": (98, 0),
-        "Bad Spot RSRQ": (216, 0),
-        "Bad Spot SINR": (1237, 0),
-        "Bad Spot RSRP_Active": (641, 0),
-        "Bad Spot RSRQ_Active": (79, 0),
-        "Bad Spot SINR_Active": (1413, 0),
+        "Bad Spot RSRP": (41, 0),
+        "Bad Spot RSRQ": (45, 0),
+        "Bad Spot SINR": (204, 0),
+        "Bad Spot RSRP_Active": (163, 0),
+        "Bad Spot RSRQ_Active": (52, 0),
+        "Bad Spot SINR_Active": (190, 0),
     },
 }
 
@@ -902,8 +925,18 @@ def logic_drift() -> list[str]:
     problems = []
     if ACTIVE_OPERATOR != LOGIC_LOCK["active_operator"]:
         problems.append(f"active operator is {ACTIVE_OPERATOR}")
-    live_windows = (BEST_SERVER_SWEEP_S, BEST_SERVER_SWEEP_M, MAP_BIN_M, BAD_SPOT_MAX_SAMPLE_GAP_M, BAD_SPOT_MAX_SAMPLE_GAP_S, BAD_SPOT_CONSEC_MAX_SPAN_KM, BAD_SPOT_DISCRETE_AREA_KM2, BAD_SPOT_DISCRETE_MIN_SHARE)
-    locked_windows = (LOGIC_LOCK["sweep_s"], LOGIC_LOCK["sweep_m"], LOGIC_LOCK["bin_m"], LOGIC_LOCK["gap_m"], LOGIC_LOCK["gap_s"], LOGIC_LOCK["span_km"], LOGIC_LOCK["discrete_km2"], LOGIC_LOCK["discrete_share"])
+    live_windows = (
+        BEST_SERVER_SWEEP_S, BEST_SERVER_SWEEP_M, MAP_BIN_M,
+        BAD_SPOT_MAX_SAMPLE_GAP_M, BAD_SPOT_MAX_SAMPLE_GAP_S, BAD_SPOT_CONSEC_MAX_SPAN_KM,
+        BAD_SPOT_CIRCLE_MAX_KM, BAD_SPOT_CIRCLE_MIN_KM, BAD_SPOT_MERGE_GAP_KM,
+        BAD_SPOT_DISCRETE_AREA_KM2, BAD_SPOT_DISCRETE_MIN_SHARE,
+    )
+    locked_windows = (
+        LOGIC_LOCK["sweep_s"], LOGIC_LOCK["sweep_m"], LOGIC_LOCK["bin_m"],
+        LOGIC_LOCK["gap_m"], LOGIC_LOCK["gap_s"], LOGIC_LOCK["span_km"],
+        LOGIC_LOCK["circle_max_km"], LOGIC_LOCK["circle_min_km"], LOGIC_LOCK["merge_gap_km"],
+        LOGIC_LOCK["discrete_km2"], LOGIC_LOCK["discrete_share"],
+    )
     if live_windows != locked_windows:
         problems.append(f"distance/time windows {live_windows} != {locked_windows}")
     for kpi, threshold in LOGIC_LOCK["poor"].items():
@@ -1022,8 +1055,10 @@ def _covering_ellipse(
 
 def _outline_fields(lons: np.ndarray, lats: np.ndarray, kind: str) -> dict:
     lon0, lat0, width_km, height_km, angle = _covering_ellipse(lons, lats)
+    width_km = min(BAD_SPOT_CIRCLE_MAX_KM, max(width_km, BAD_SPOT_CIRCLE_MIN_KM))
+    height_km = min(BAD_SPOT_CIRCLE_MAX_KM, max(height_km, BAD_SPOT_CIRCLE_MIN_KM))
     if kind == "discrete":
-        diameter_km = float(np.clip(max(width_km, height_km, 1.15), 1.15, 4.5))
+        diameter_km = min(BAD_SPOT_CIRCLE_MAX_KM, max(width_km, height_km))
         width_km = height_km = diameter_km
         angle = 0.0
     return {
@@ -1145,6 +1180,74 @@ def _split_by_span(run: list[int], lat: np.ndarray, lon: np.ndarray) -> list[lis
     return pieces
 
 
+def _bbox_of(idx: list[int], lat: np.ndarray, lon: np.ndarray) -> tuple[float, float, float, float]:
+    sl = lat[idx]
+    so = lon[idx]
+    return float(sl.min()), float(sl.max()), float(so.min()), float(so.max())
+
+
+def _bbox_gap_km(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> float:
+    """Distance between two lat/lon boxes. Zero when they touch or overlap."""
+    lat_gap = max(0.0, b[0] - a[1], a[0] - b[1])
+    lon_gap = max(0.0, b[2] - a[3], a[2] - b[3])
+    lat0 = (a[0] + a[1] + b[0] + b[1]) / 4.0
+    return float(math.hypot(lat_gap * 111.32, lon_gap * _km_per_deg_lon(lat0)))
+
+
+def _union_span_km(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> float:
+    lat_min, lat_max = min(a[0], b[0]), max(a[1], b[1])
+    lon_min, lon_max = min(a[2], b[2]), max(a[3], b[3])
+    lat0 = (lat_min + lat_max) / 2.0
+    return max((lat_max - lat_min) * 111.32, (lon_max - lon_min) * _km_per_deg_lon(lat0))
+
+
+def _merge_circle_groups(
+    pieces: list[list[int]],
+    lengths: list[float],
+    lat: np.ndarray,
+    lon: np.ndarray,
+) -> list[dict]:
+    """Join poor runs that sit within BAD_SPOT_MERGE_GAP_KM when the union still fits one circle.
+
+    Runs farther apart stay as their own circles, including several circles inside
+    one 10 km neighbourhood.
+    """
+    groups = [
+        {"idx": list(idx), "length": length, "bbox": _bbox_of(idx, lat, lon)}
+        for idx, length in zip(pieces, lengths)
+        if idx
+    ]
+    changed = True
+    while changed and len(groups) > 1:
+        changed = False
+        best: tuple[tuple[float, float], int, int] | None = None
+        for i in range(len(groups)):
+            for j in range(i + 1, len(groups)):
+                gap = _bbox_gap_km(groups[i]["bbox"], groups[j]["bbox"])
+                if gap > BAD_SPOT_MERGE_GAP_KM:
+                    continue
+                span = _union_span_km(groups[i]["bbox"], groups[j]["bbox"])
+                if span > BAD_SPOT_GROUP_SPAN_KM:
+                    continue
+                key = (gap, span)
+                if best is None or key < best[0]:
+                    best = (key, i, j)
+        if best is None:
+            break
+        _, i, j = best
+        groups[i]["idx"].extend(groups[j]["idx"])
+        groups[i]["length"] += groups[j]["length"]
+        groups[i]["bbox"] = (
+            min(groups[i]["bbox"][0], groups[j]["bbox"][0]),
+            max(groups[i]["bbox"][1], groups[j]["bbox"][1]),
+            min(groups[i]["bbox"][2], groups[j]["bbox"][2]),
+            max(groups[i]["bbox"][3], groups[j]["bbox"][3]),
+        )
+        groups.pop(j)
+        changed = True
+    return groups
+
+
 def _consecutive_bad_spots(
     track: pd.DataFrame,
     column: str,
@@ -1176,6 +1279,8 @@ def _consecutive_bad_spots(
 
     rows: list[dict] = []
     longest_short_m = 0.0
+    pieces: list[list[int]] = []
+    piece_lengths: list[float] = []
     for run in _poor_runs(np.flatnonzero(poor), same_pass, cum_m, time_s):
         for piece in _split_by_span(run, lat, lon):
             if not piece:
@@ -1185,20 +1290,21 @@ def _consecutive_bad_spots(
             if length_m < min_length_m:
                 longest_short_m = max(longest_short_m, length_m)
                 continue
-            chunk = track.iloc[piece]
-            rows.append(
-                _spot_from_points(
-                    chunk,
-                    column,
-                    threshold,
-                    kind="consecutive",
-                    length_m=length_m,
-                    area_km2=_hull_area_km2(
-                        chunk["Longitude"].to_numpy(), chunk["Latitude"].to_numpy()
-                    ),
-                )
-            )
+            pieces.append(piece)
+            piece_lengths.append(length_m)
             used[piece] = True
+    for group in _merge_circle_groups(pieces, piece_lengths, lat, lon):
+        chunk = track.iloc[sorted(group["idx"])]
+        rows.append(
+            _spot_from_points(
+                chunk,
+                column,
+                threshold,
+                kind="consecutive",
+                length_m=float(group["length"]),
+                area_km2=_hull_area_km2(chunk["Longitude"].to_numpy(), chunk["Latitude"].to_numpy()),
+            )
+        )
     spots = pd.DataFrame(rows)
     if not spots.empty:
         spots = spots.sort_values("length_m", ascending=False).reset_index(drop=True)
@@ -1489,6 +1595,7 @@ def _add_spot_outline(
             )
     else:
         lw = 1.0
+    # Black under the orange stroke so the circle shows on both dark water and pale roofs.
     ax.add_patch(
         Ellipse(
             (cx, cy),
@@ -1496,10 +1603,22 @@ def _add_spot_outline(
             height=h,
             angle=angle,
             fill=False,
-            edgecolor="#000000",
+            edgecolor="#1B1B1B",
+            linestyle=style,
+            linewidth=lw + 1.6,
+            zorder=19,
+        )
+    )
+    ax.add_patch(
+        Ellipse(
+            (cx, cy),
+            width=w,
+            height=h,
+            angle=angle,
+            fill=False,
+            edgecolor="#FF6600",
             linestyle=style,
             linewidth=lw,
-            # Above every route colour (zorder 3..8), or the wide trace hides the ring.
             zorder=20,
         )
     )
@@ -1536,11 +1655,14 @@ def plot_bad_spot_map(
     max_points: int = MAP_MAX_POINTS,
     extent: tuple[float, float, float, float] | None = None,
     basemap: bool = True,
+    shapes: bool = False,
 ) -> Path:
-    """First all-band coverage map with tight, unnumbered black outlines on poor stretches.
+    """First all-band coverage map with a circle on every bad spot.
 
     A .svg path writes a pure vector file: no basemap, transparent background,
-    and text kept as text.
+    and text kept as text. shapes=True leaves the circles out of the picture and
+    records one geometry per circle so the workbook can place a separate shape
+    for each of them.
     """
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
     vector = path.suffix.lower() == ".svg"
@@ -1564,8 +1686,8 @@ def plot_bad_spot_map(
     handles = _coverage_legend_handles(labels, colors)
     handles.extend(
         [
-            Line2D([0], [0], color="#000000", lw=2.0, linestyle=(0, (3, 2)), label=consecutive_label(column)),
-            Line2D([0], [0], color="#000000", lw=2.0, linestyle=(0, (1, 1.4)), label="Discrete area ≥ 1 km²"),
+            Line2D([0], [0], color="#FF6600", lw=2.2, linestyle=(0, (3, 2)), label=consecutive_label(column)),
+            Line2D([0], [0], color="#FF6600", lw=2.2, linestyle=(0, (1, 1.4)), label="Discrete area ≥ 1 km²"),
         ]
     )
     legend = ax.legend(
@@ -1577,29 +1699,72 @@ def plot_bad_spot_map(
         fontsize=8,
         title_fontsize=10,
     )
-    if spots is not None and not spots.empty:
-        tier = overview_ring_style(len(spots))
+    if spots is not None and not spots.empty and not shapes:
         for _, spot in spots.iterrows():
-            _add_spot_outline(ax, spot, overview=True, style_tier=tier)
+            _add_spot_outline(ax, spot, overview=False)
     ax.set_title(title)
     hide_map_axes(ax)
     fig.tight_layout()
-    _save_map(fig, path, legends=[legend])
+    _save_map(fig, path, legends=[legend], ax=ax if shapes else None, spots=spots if shapes else None)
     return path
 
 
-def _save_map(fig, path: Path, legends=()) -> None:
-    """PNG at MAP_DPI on white, or for .svg a transparent vector file with text kept as text."""
+def _record_circle_pixels(fig, ax, path: Path, spots: pd.DataFrame, tight) -> None:
+    """Store each circle's box in pixels of the PNG that savefig is about to write."""
+    dpi = float(fig.dpi)
+    save_dpi = float(MAP_DPI)
+    circles = []
+    for n, (_, spot) in enumerate(spots.iterrows(), start=1):
+        cx, cy, w, h, _angle, _style = _spot_outline(spot)
+        x0, y_lo = ax.transData.transform((cx - w / 2.0, cy - h / 2.0))
+        x1, y_hi = ax.transData.transform((cx + w / 2.0, cy + h / 2.0))
+
+        def to_saved_x(px: float) -> float:
+            return (px / dpi - tight.x0) * save_dpi
+
+        def to_saved_y_top(py: float) -> float:
+            return (tight.y1 - py / dpi) * save_dpi
+
+        left, right = to_saved_x(x0), to_saved_x(x1)
+        top, bottom = to_saved_y_top(y_hi), to_saved_y_top(y_lo)
+        circles.append({
+            "name": f"Circle {n}",
+            "x": float(min(left, right)),
+            "y": float(min(top, bottom)),
+            "w": float(abs(right - left)),
+            "h": float(abs(bottom - top)),
+            "dotted": str(spot.get("kind", "consecutive")) == "discrete",
+        })
+    MAP_CIRCLE_PIXELS[str(path.resolve())] = {
+        "size": (tight.width * save_dpi, tight.height * save_dpi),
+        "circles": circles,
+    }
+
+
+def _save_map(fig, path: Path, legends=(), ax=None, spots: pd.DataFrame | None = None) -> None:
+    """PNG at MAP_DPI on white, or for .svg a transparent vector file with text kept as text.
+
+    When spots is set, each circle is recorded against the PNG and is not drawn
+    into it. The workbook turns those records into separate shapes.
+    """
+    pad = 0.15
     if path.suffix.lower() == ".svg":
         fig.patch.set_alpha(0.0)
-        for ax in fig.axes:
-            ax.patch.set_alpha(0.0)
+        for axis in fig.axes:
+            axis.patch.set_alpha(0.0)
         for legend in legends:
             legend.get_frame().set_facecolor("none")
         with plt.rc_context({"svg.fonttype": "none", "svg.hashsalt": "bogura"}):
-            fig.savefig(path, format="svg", transparent=True, bbox_inches="tight", pad_inches=0.15)
+            fig.savefig(path, format="svg", transparent=True, bbox_inches="tight", pad_inches=pad)
     else:
-        fig.savefig(path, dpi=MAP_DPI, facecolor="white", bbox_inches="tight")
+        bbox_arg: object = "tight"
+        if ax is not None and spots is not None and not spots.empty:
+            fig.canvas.draw()
+            tight = fig.get_tightbbox(fig.canvas.get_renderer()).padded(pad)
+            _record_circle_pixels(fig, ax, path, spots, tight)
+            bbox_arg = tight
+            pad = 0.0
+        fig.savefig(path, dpi=MAP_DPI, facecolor="white", bbox_inches=bbox_arg, pad_inches=pad)
     plt.close(fig)
 
 
@@ -1676,6 +1841,7 @@ def plot_rsrp_bad_spot_map(
     *,
     extent: tuple[float, float, float, float] | None = None,
     title: str = "Combined view — RSRP",
+    shapes: bool = False,
 ) -> Path:
     return plot_bad_spot_map(
         df,
@@ -1688,6 +1854,7 @@ def plot_rsrp_bad_spot_map(
         title=title,
         legend_title="RSRP (dBm)",
         extent=extent,
+        shapes=shapes,
     )
 
 
@@ -1707,6 +1874,7 @@ def plot_rsrq_bad_spot_map(
     *,
     extent: tuple[float, float, float, float] | None = None,
     title: str = "Combined view — RSRQ",
+    shapes: bool = False,
 ) -> Path:
     return plot_bad_spot_map(
         df,
@@ -1719,6 +1887,7 @@ def plot_rsrq_bad_spot_map(
         title=title,
         legend_title="RSRQ (dB)",
         extent=extent,
+        shapes=shapes,
     )
 
 
@@ -1729,6 +1898,7 @@ def plot_sinr_bad_spot_map(
     *,
     extent: tuple[float, float, float, float] | None = None,
     title: str = "Combined view — SINR",
+    shapes: bool = False,
 ) -> Path:
     return plot_bad_spot_map(
         df,
@@ -1741,6 +1911,7 @@ def plot_sinr_bad_spot_map(
         title=title,
         legend_title="SINR (dB)",
         extent=extent,
+        shapes=shapes,
     )
 
 
