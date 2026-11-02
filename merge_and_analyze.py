@@ -411,14 +411,18 @@ def _sector_wedges(part: pd.DataFrame) -> list[tuple[str, float, float, float]]:
 
 # Bad-spot site mark: the same unfilled Y as a planning widget. Cyan stroke only.
 BAD_SPOT_PIE_EDGE = "#00E5EE"
+# A distance line is drawn only when a sector azimuth points at the bad spot.
+# Half of a 65° sector beam. A three-sector site is always within 60° of some
+# arm, so a wider gate would put a line on every nearby site.
+BAD_SPOT_AIM_DEG = 32.0
 
 
 def draw_bad_spot_sector_pies(ax, spot: pd.Series) -> None:
     """Transparent sector marks for every site that touches this bad-spot view.
 
     One cyan line per sector, with no fill. If any sector of a site falls inside
-    the view, every sector of that site is drawn. The yellow line is only the
-    sector that shoots toward the bad spot, labelled with the distance.
+    the view, every sector of that site is drawn. A yellow distance line is
+    drawn only from a sector whose azimuth points at the bad spot.
     """
     sectors = load_site_sectors()
     if sectors.empty:
@@ -443,11 +447,13 @@ def draw_bad_spot_sector_pies(ax, spot: pd.Series) -> None:
             continue
         lat = float(here["lat"].median())
         lon = float(here["lon"].median())
-        azimuths = []
+        bearing = _bearing_deg(lat, lon, spot_lat, spot_lon)
+        facing: list[float] = []
         for _, sec in part.iterrows():
             az = float(sec["azimuth"]) % 360.0
-            azimuths.append(az)
             rad = np.radians(az)
+            if _ang_diff(az, bearing) <= BAD_SPOT_AIM_DEG:
+                facing.append(az)
             ax.plot(
                 [lon, lon + r_deg * np.sin(rad)],
                 [lat, lat + r_deg * np.cos(rad)],
@@ -481,31 +487,31 @@ def draw_bad_spot_sector_pies(ax, spot: pd.Series) -> None:
                 clip_on=True,
                 bbox={"boxstyle": "round,pad=0.08", "fc": "white", "ec": "none", "alpha": 0.84},
             )
-        bearing = _bearing_deg(lat, lon, spot_lat, spot_lon)
-        aimed = min(azimuths, key=lambda az: _ang_diff(az, bearing))
-        if _ang_diff(aimed, bearing) > 70.0:
+        if not facing:
             continue
         dist_km = float(_equirect_km(lat, lon, spot_lat, spot_lon))
         if dist_km < radius_km * 1.8:
             continue
-        x0 = lon + r_deg * np.sin(np.radians(bearing))
-        y0 = lat + r_deg * np.cos(np.radians(bearing))
-        ax.annotate(
-            "",
-            xy=(spot_lon, spot_lat),
-            xytext=(x0, y0),
-            arrowprops={"arrowstyle": "-|>", "color": "#F5C400", "lw": 1.4, "mutation_scale": 7},
-            zorder=26,
-            clip_on=True,
-        )
-        mx = (x0 + spot_lon) / 2.0
-        my = (y0 + spot_lat) / 2.0
         text = f"{dist_km:.1f} kM" if dist_km < 10 else f"{dist_km:.0f} kM"
-        ax.text(
-            mx, my, text, ha="center", va="center", fontsize=6, color="#111111",
-            fontweight="bold", zorder=28, clip_on=True,
-            bbox={"boxstyle": "round,pad=0.12", "fc": "#FFE14A", "ec": "none", "alpha": 0.92},
-        )
+        for az in facing:
+            rad = np.radians(az)
+            x0 = lon + r_deg * np.sin(rad)
+            y0 = lat + r_deg * np.cos(rad)
+            ax.annotate(
+                "",
+                xy=(spot_lon, spot_lat),
+                xytext=(x0, y0),
+                arrowprops={"arrowstyle": "-|>", "color": "#F5C400", "lw": 1.4, "mutation_scale": 7},
+                zorder=26,
+                clip_on=True,
+            )
+            mx = (x0 + spot_lon) / 2.0
+            my = (y0 + spot_lat) / 2.0
+            ax.text(
+                mx, my, text, ha="center", va="center", fontsize=6, color="#111111",
+                fontweight="bold", zorder=28, clip_on=True,
+                bbox={"boxstyle": "round,pad=0.12", "fc": "#FFE14A", "ec": "none", "alpha": 0.92},
+            )
 
 
 def _coverage_extent_from_geo(geo: pd.DataFrame) -> tuple[float, float, float, float]:

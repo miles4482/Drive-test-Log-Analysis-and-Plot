@@ -80,7 +80,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.41"
+REPORT_VERSION = "1.42"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -1478,7 +1478,8 @@ def build_kpi_bad_spot_sheet(
         "SINR sheets do not repeat these circles. Each bad-spot map draws a transparent cyan outline "
         "for every sector of a site that falls in that view, from System DUMP.xlsb. No sector of "
         "that site is left out, and the outline is not filled. The label on each arm is the Sector "
-        "name. Where a sector shoots toward that bad spot, a yellow line shows the distance. "
+        "name. A yellow line shows the distance only from a sector whose azimuth points at that "
+        "bad spot. A sector that faces another way has no line. "
         "The columns to the right of each "
         "map are left empty. Several circles can sit inside one 10 km neighbourhood when the poor "
         "road is not one stretch. A discrete patch of at least 1 km\u00b2 is a dotted circle. "
@@ -2192,6 +2193,13 @@ def build_report(df: pd.DataFrame, active: pd.DataFrame | None = None, out_path:
     return out_path
 
 
+_AIM_SENTENCE_OLD = (
+    "The label on each arm is the Sector name. Where a sector shoots toward that bad spot, a yellow line shows the distance."
+)
+_AIM_SENTENCE_NEW = (
+    "The label on each arm is the Sector name. A yellow line shows the distance only from a sector whose azimuth "
+    "points at that bad spot. A sector that faces another way has no line."
+)
 _PIE_SENTENCE_OLD = (
     "Each bad-spot map draws a sector pie for every nearby site from System DUMP.xlsb. "
     "The label is the sector name. Where a sector shoots toward that bad spot, a yellow line shows the distance."
@@ -2307,10 +2315,16 @@ def refresh_bad_spot_pies(src: Path | None = None) -> Path:
         if not name.endswith(".xml"):
             continue
         text = body.decode("utf-8")
-        if _PIE_SENTENCE_OLD not in text:
+        replaced = text
+        if _PIE_SENTENCE_OLD in replaced:
+            note_hits += replaced.count(_PIE_SENTENCE_OLD)
+            replaced = replaced.replace(_PIE_SENTENCE_OLD, _PIE_SENTENCE_NEW)
+        if _AIM_SENTENCE_OLD in replaced:
+            note_hits += replaced.count(_AIM_SENTENCE_OLD)
+            replaced = replaced.replace(_AIM_SENTENCE_OLD, _AIM_SENTENCE_NEW)
+        if replaced == text:
             continue
-        parts[name] = text.replace(_PIE_SENTENCE_OLD, _PIE_SENTENCE_NEW).encode("utf-8")
-        note_hits += text.count(_PIE_SENTENCE_OLD)
+        parts[name] = replaced.encode("utf-8")
     print(f"Updated the pie note in {note_hits} place(s)", flush=True)
 
     tmp = src.with_suffix(".tmp.xlsx")
