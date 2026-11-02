@@ -38,6 +38,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from merge_and_analyze import (
     ACTIVE_OPERATOR,
+    ACTIVE_PARTS,
     OUTPUT_DIR,
     PLOTS_DIR,
     SITE_DB_PATH,
@@ -69,6 +70,7 @@ from merge_and_analyze import (
     plot_rsrq_coverage_map,
     plot_sinr_bad_spot_map,
     plot_sinr_coverage_map,
+    plot_bad_spot_serial_maps,
     plot_bad_spot_zoom_grid,
     plot_stacked_map_hist,
     rsrp_map_class,
@@ -77,7 +79,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.38"
+REPORT_VERSION = "1.39"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -425,7 +427,7 @@ def _spread_drawing_anchors(drawing: str, sheet_xml: bytes) -> str:
         return total
 
     col_at = prefix(50, col_emu)
-    row_at = prefix(500, row_emu)
+    row_at = prefix(2500, row_emu)
 
     def locate(at: list[int], absolute: int) -> tuple[int, int]:
         absolute = max(0, absolute)
@@ -494,7 +496,7 @@ def _emu_prefix(sheet_xml: bytes):
             total.append(total[-1] + size_of(i))
         return total
 
-    return prefix(60, col_emu), prefix(600, row_emu)
+    return prefix(60, col_emu), prefix(2500, row_emu)
 
 
 def _drop_ellipses_on_picture(drawing: str, sheet_xml: bytes, picture_block: str, keep_last: int = 0) -> str:
@@ -1144,6 +1146,20 @@ def write_vs_block(ws: Worksheet, df: pd.DataFrame, cat_col: int, sinr_col: int,
     return len(rsrp_vs_bins)
 
 
+def _campaign_label(series: pd.Series) -> str:
+    """Collapse SYS suffixes so AUTO VOICE_SYS01 and AUTO VOICE_SYS02 read as AUTO VOICE."""
+    values = series.dropna().astype(str).str.strip()
+    values = values[values.ne("") & values.str.lower().ne("nan")]
+    if values.empty:
+        return ""
+    upper = values.str.upper()
+    if upper.str.contains("AUTO VOICE").all():
+        return "AUTO VOICE"
+    if upper.str.contains("AUTO DATA").all():
+        return "AUTO DATA"
+    return str(values.mode().iloc[0])
+
+
 def build_cover(ws: Worksheet, df: pd.DataFrame, active: pd.DataFrame | None = None, active_raw_n: int = 0) -> None:
     last_col = 20
     banner(
@@ -1197,7 +1213,7 @@ def build_cover(ws: Worksheet, df: pd.DataFrame, active: pd.DataFrame | None = N
     notes = [
         "Cover \u2014 Idle dataset and KPI tables on the left, Idle plots on the right, Active Mode dataset at the bottom.",
         "RSRP / RSRQ / SINR \u2014 Idle scanner on the left (combined all-band map with bad spots, then L900 / L1800 / L2100 / L2600). Active Mode Robi UE on the right, same layers. No site pies.",
-        "Bad Spot RSRP / RSRQ / SINR are Idle. Bad Spot RSRP_Active / RSRQ_Active / SINR_Active apply the same poor-run rules to the Active Robi track.",
+        "Bad Spot RSRP / RSRQ / SINR are Idle. Bad Spot RSRP_Active / RSRQ_Active / SINR_Active apply the same poor-run rules to the Active Robi track. Each bad spot is its own large map, in order. The combined view has no circles.",
         "Poor is RSRP at or below -115 dBm (magenta/red), RSRQ at or below -20 dB (red), SINR at or below 0 dB (orange/red); every poor run is circled, however short.",
         "RSRP vs KPIs is Idle. RSRP vs KPIs_Active is the same chart set for the Active Robi UE.",
         "Sample Log \u2014 evenly spaced subset of the Idle samples (full logs: output/Bogura_merged.csv.gz and output/Bogura_active_merged.csv.gz).",
@@ -1238,10 +1254,12 @@ def build_cover(ws: Worksheet, df: pd.DataFrame, active: pd.DataFrame | None = N
         return
     write_cell(ws, 44, 1, "Dataset", size=14, bold=True)
     other_n = max(0, int(active_raw_n) - int(len(active)))
+    campaign = _campaign_label(active["Campaign"]) if "Campaign" in active.columns else ""
+    voice = "VOICE" in campaign.upper()
     info_rows = [
-        ["Mode", "Active (UE data)"],
-        ["Archive", "Borga_Idle_V2.7z"],
-        ["Campaign", "AUTO DATA"],
+        ["Mode", "Active (UE voice)" if voice else "Active (UE)"],
+        ["Archive", " + ".join(p.name for p in ACTIVE_PARTS)],
+        ["Campaign", campaign or "—"],
         ["Plotted operator", ACTIVE_OPERATOR],
         ["Plotted samples", int(len(active))],
         ["Other operator samples", other_n],
@@ -1322,19 +1340,19 @@ BAD_SPOT_KPI_NOTES = {
         "Poor is RSRP at or below -115 dBm (magenta and red only; yellow is not a bad-spot colour). "
         "Every poor run is covered by a circle. Nearby runs join one circle, up to 10 km across, "
         "and a longer poor road is split into several circles. "
-        "The combined view at the top is the all-band best-server map on satellite imagery. "
+        "The combined view at the top is the all-band best-server map on satellite imagery, with no circles. "
         "Best server is the strongest band per scanner sweep, so a weak band is never mapped as the coverage of a road."
     ),
     "RSRQ": (
         "Poor is RSRQ at or below -20 dB (red), and every poor run is covered by a circle. "
         "Nearby runs join one circle, up to 10 km across, and separate pockets stay separate circles. "
-        "The combined view at the top is the all-band best-server map on satellite imagery."
+        "The combined view at the top is the all-band best-server map on satellite imagery, with no circles."
     ),
     "SINR": (
         "Poor is SINR at or below 0 dB (orange and red), and every poor run is covered by a circle. "
         "Nearby runs join one circle, up to 10 km across. Where the poor road is spread out, "
         "several circles sit inside the same 10 km neighbourhood instead of one circle covering the good road between them. "
-        "The combined view at the top is the all-band best-server map on satellite imagery."
+        "The combined view at the top is the all-band best-server map on satellite imagery, with no circles."
     ),
 }
 
@@ -1411,24 +1429,25 @@ def build_kpi_bad_spot_sheet(
     kpi: str,
     spots: pd.DataFrame,
     combined_map: Path,
-    zooms: Path | None,
+    serial_maps: list[Path] | None,
     *,
     mode: str = "IDLE Mode",
 ) -> None:
-    """One Bad Spot sheet per KPI: combined all-band view on top, then zooms and table."""
+    """Combined route with no circles, then one large map per bad spot down the left side."""
     last_col = 16
+    map_span = 8
     em = "\u2014"
     banner(
         ws,
         f"  Bad Spot Analysis  {em}  {kpi}",
-        f"  {mode}  |  Combined all-band view on top  |  Zoomed spots  |  No numbering",
+        f"  {mode}  |  Combined view has no circles  |  Bad spots in order  |  No numbering",
         last_col=last_col,
     )
     set_widths(ws, {get_column_letter(i): 13 for i in range(1, last_col + 1)})
     ws.column_dimensions["A"].width = 16
     ws.column_dimensions["C"].width = 24
     section_bar(ws, 3, mode, 1, last_col)
-    ws.merge_cells(start_row=4, start_column=1, end_row=6, end_column=last_col)
+    ws.merge_cells(start_row=4, start_column=1, end_row=7, end_column=last_col)
     active_rule = ""
     if mode.startswith("Active"):
         active_rule = (
@@ -1444,39 +1463,34 @@ def build_kpi_bad_spot_sheet(
         + " Maps and rules read the same 50 m road bins: a bin is coloured by the median of the "
         "samples measured in it and counts as poor only when that median is at or below the "
         "threshold, and poor bins are drawn on top of good ones. A circle can therefore only sit on "
-        "colour you can see. Each circle is a separate orange shape on the combined map, named "
-        "Circle 1, Circle 2, and so on, in the same order as the table. Each zoom panel has that "
-        "same circle as its own shape, not painted into the picture, so you can drag it. The RSRP, "
-        "RSRQ and SINR sheets do not repeat these circles. Each zoom panel draws a sector pie for "
-        "every nearby site from System DUMP.xlsb. The label is the sector name. Where a sector "
-        "shoots toward that bad spot, a yellow line shows the distance. Several circles can sit inside one 10 km neighbourhood when the "
-        "poor road is not one stretch. A discrete patch of at least 1 km\u00b2 is a dotted circle. "
+        "colour you can see. The combined view has no circles. Each bad spot below is one large map, "
+        "Bad Spot 1 then Bad Spot 2, and its orange circle is a separate shape named Circle 1, "
+        "Circle 2, and so on, in the same order as the table, so you can drag it. The RSRP, RSRQ and "
+        "SINR sheets do not repeat these circles. Each bad-spot map draws a sector pie for every "
+        "nearby site from System DUMP.xlsb. The label is the sector name. Where a sector shoots "
+        "toward that bad spot, a yellow line shows the distance. The columns to the right of each "
+        "map are left empty. Several circles can sit inside one 10 km neighbourhood when the poor "
+        "road is not one stretch. A discrete patch of at least 1 km\u00b2 is a dotted circle. "
         + _detection_summary(kpi, spots)
         + " Numbers are not drawn on the maps.",
         size=11,
         wrap=True,
     )
-    ws.row_dimensions[4].height = 32
-    ws.row_dimensions[5].height = 32
-    ws.row_dimensions[6].height = 32
+    for row in range(4, 8):
+        ws.row_dimensions[row].height = 36
 
-    section_bar(ws, 8, f"Combined view {em} all-band {mode}  |  {kpi} bad spots", 1, last_col)
+    section_bar(ws, 9, f"Combined view {em} all-band {mode}  |  {kpi}  |  no circles", 1, last_col)
     map_h = 0
     if combined_map.exists():
-        _, map_h = add_image(ws, combined_map, "A10", width=760, height=900)
+        _, map_h = add_image(ws, combined_map, "A11", width=760, height=900)
 
-    zoom_row = 10 + max(map_h, 660) // 20 + 3
-    zoom_title = f"{kpi} zoomed locations"
-    shown_zooms = 0 if spots is None or spots.empty else min(len(spots), BAD_SPOT_MAX_ZOOMS)
-    if spots is not None and len(spots) > shown_zooms:
-        zoom_title = f"{zoom_title}  |  {shown_zooms} longest of {len(spots)}"
-    section_bar(ws, zoom_row, zoom_title, 1, last_col)
-    zoom_h = _zoom_display_height(zooms, spots)
-    if zooms is not None and zooms.exists():
-        _, zoom_h = add_image(ws, zooms, f"A{zoom_row + 2}", width=860, height=zoom_h)
-        table_row = zoom_row + 2 + zoom_h // 20 + 4
-    else:
-        table_row = zoom_row + 3
+    cursor = 11 + max(map_h, 660) // 20 + 3
+    maps = [p for p in (serial_maps or []) if p is not None and p.exists()]
+    for i, path in enumerate(maps, start=1):
+        section_bar(ws, cursor, f"Bad Spot {i}", 1, map_span)
+        _, spot_h = add_image(ws, path, f"A{cursor + 2}", width=780, height=720)
+        cursor = cursor + 2 + max(spot_h, 360) // 20 + 3
+    table_row = cursor if maps else cursor + 1
 
     table_title = f"Identified {kpi} bad spots"
     if spots is not None and len(spots) > BAD_SPOT_TABLE_MAX:
@@ -1526,11 +1540,12 @@ def build_kpi_bad_spot_sheet(
         ws,
         note_row,
         1,
-        "The combined view is the all-band coverage map on satellite imagery. Each orange circle is a "
-        "separate shape with the same name as the Circle column, so it can be dragged on its own. "
-        "Poor share is the share of raw samples inside the spot box that are at or below the "
-        "threshold. Length is the poor road inside the circle, and a single 50 m bin is reported as 50 m. "
-        "Map numbers are omitted.",
+        "The combined view is the all-band coverage map on satellite imagery and has no circles. "
+        "Each bad spot above is one large map. Its orange circle is a separate shape with the same "
+        "name as the Circle column, so it can be dragged on its own. The space to the right of each "
+        "map is left empty. Poor share is the share of raw samples inside the spot box that are at or "
+        "below the threshold. Length is the poor road inside the circle, and a single 50 m bin is "
+        "reported as 50 m. Map numbers are omitted.",
         size=9,
         wrap=True,
     )
@@ -1847,12 +1862,15 @@ def verify_report(path: Path) -> dict:
             if re.fullmatch(r"xl/drawings/drawing\d+\.xml", n)
         )
         info["circle_shapes"] = ellipses
-        # Bad Spot sheets only. The combined map has one shape per circle, and each
-        # of the longest zoom panels has one more shape for that same circle.
+        # One movable circle on each serial bad-spot map. The combined view has none.
         expected_shapes = 0
-        for runs, areas in LOGIC_LOCK["counts"].values():
+        for sheet, (runs, areas) in LOGIC_LOCK["counts"].items():
             n = runs + areas
-            expected_shapes += n + min(BAD_SPOT_MAX_ZOOMS, n)
+            shown = min(BAD_SPOT_MAX_ZOOMS, n)
+            expected_shapes += shown
+            images = info["sheets"].get(sheet, {}).get("images", 0)
+            if sheet in info["sheets"] and images != 1 + shown:
+                info["problems"].append(f"{sheet}: {images} images, expected {1 + shown}")
         if ellipses != expected_shapes:
             info["problems"].append(f"{ellipses} circle shapes, expected {expected_shapes}")
         for item in zf.namelist():
@@ -1968,7 +1986,6 @@ def _render_mode(df: pd.DataFrame, picker, tag: str, extent, mode_label: str | N
     rsrq_spots = find_bad_spots(map_df, "RSRQ")
     sinr_spots = find_bad_spots(map_df, "SINR")
     title_bit = f" — {mode_label}" if mode_label else ""
-    zoom_bit = mode_label or "first all-band map"
     bad_maps = {}
     zoom_maps = {}
     for kpi, plot_map, classify, labels, colors in (
@@ -1978,15 +1995,16 @@ def _render_mode(df: pd.DataFrame, picker, tag: str, extent, mode_label: str | N
     ):
         key = kpi.lower()
         spots = {"RSRP": rsrp_spots, "RSRQ": rsrq_spots, "SINR": sinr_spots}[kpi]
+        total = int(spots.attrs.get("total_consecutive", len(spots))) if spots is not None else 0
+        discrete = int(spots.attrs.get("total_discrete", 0)) if spots is not None else 0
+        print(f"{kpi} {tag or 'idle'}: {total} poor runs, {discrete} discrete", flush=True)
         bad_maps[kpi] = plot_map(
             map_df, spots, PLOTS_DIR / f"excel_bad_spots_{key}{suffix}.png",
-            extent=extent, title=f"Combined view — {kpi}{title_bit}", shapes=True,
+            extent=extent, title=f"Combined view — {kpi}{title_bit}", shapes=False, outlines=False,
         )
-        zoom_maps[kpi] = plot_bad_spot_zoom_grid(
-            map_df, spots, PLOTS_DIR / f"excel_bad_spots_{key}_zooms{suffix}.png",
+        zoom_maps[kpi] = plot_bad_spot_serial_maps(
+            map_df, spots, PLOTS_DIR, f"excel_bad_spots_{key}_spot{suffix}",
             kpi, classify(map_df[kpi]), labels, colors,
-            f"{kpi} zoomed locations ({zoom_bit})",
-            shapes=True,
         )
     rsrp_bad, rsrq_bad, sinr_bad = bad_maps["RSRP"], bad_maps["RSRQ"], bad_maps["SINR"]
     rsrp_zooms, rsrq_zooms, sinr_zooms = zoom_maps["RSRP"], zoom_maps["RSRQ"], zoom_maps["SINR"]
@@ -2009,17 +2027,21 @@ def build_report(df: pd.DataFrame, active: pd.DataFrame | None = None, out_path:
         active = _with_layers(active)
         active_raw_n = len(active)
         if "Operator" in active.columns:
-            active_robi = active.loc[active["Operator"] == ACTIVE_OPERATOR].copy()
+            operator = active["Operator"].astype("string").str.strip()
+            active_robi = active.loc[operator.eq(ACTIVE_OPERATOR)].copy()
         else:
             active_robi = active
         print(f"Active Mode plotted: {len(active_robi):,} {ACTIVE_OPERATOR} rows of {active_raw_n:,}")
 
     idle_track = best_server(df)
     extent = coverage_extent(idle_track)
+    print(f"Idle extent {tuple(round(v, 5) for v in extent)}", flush=True)
     idle = _render_mode(df, best_server, "", extent, None)
     active_view = None
     if active_robi is not None and not active_robi.empty:
-        active_view = _render_mode(active_robi, best_carrier, "active", extent, "Active")
+        active_extent = coverage_extent(best_carrier(active_robi))
+        print(f"Active extent {tuple(round(v, 5) for v in active_extent)}", flush=True)
+        active_view = _render_mode(active_robi, best_carrier, "active", active_extent, "Active")
 
     scatter_sinr = save_rsrp_scatter(df, "SINR", PLOTS_DIR / "excel_scatter_rsrp_sinr.png", "SINR (dB)", "RSRP vs SINR", ylim=(-10, 32))
     scatter_rsrq = save_rsrp_scatter(df, "RSRQ", PLOTS_DIR / "excel_scatter_rsrp_rsrq.png", "RSRQ (dB)", "RSRP vs RSRQ", ylim=(-24, 0))
@@ -2131,16 +2153,13 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) > 1 and sys.argv[1] == "refresh-circles":
-        path = refresh_zoom_circles()
-        result = verify_report(path)
-        print(result)
-        if result["problems"]:
-            raise SystemExit("Excel view checks failed: " + "; ".join(result["problems"]))
-        print("Verified: zoom circles are separate shapes, and the KPI sheets have none.")
-        raise SystemExit(0)
+        raise SystemExit(
+            "The bad-spot sheets are a vertical series of maps. Run this script with no arguments "
+            "so the workbook is rebuilt."
+        )
     from merge_and_analyze import (
-        ACTIVE_ARCHIVE,
         ACTIVE_MERGED,
+        ACTIVE_PARTS,
         MERGED_CSV,
         extract_active_archive,
         extract_archives,
@@ -2157,7 +2176,7 @@ if __name__ == "__main__":
         frame = merge_parts()
     if ACTIVE_MERGED.exists():
         active_frame = load_active_merged()
-    elif ACTIVE_ARCHIVE.exists():
+    elif all(part.exists() for part in ACTIVE_PARTS):
         extract_active_archive()
         active_frame = merge_active()
     else:

@@ -1,23 +1,23 @@
 # Drive-test Log Analysis and Plot
 
-LTE **IDLE Mode scanner** and **Active Mode UE** logs from **Bogura** (Robi). Idle source is `Borga_Idle_V2.0.7z`. Active source is `Borga_Idle_V2.7z` (campaign AUTO DATA).
+LTE **IDLE Mode scanner** and **Active Mode UE** logs from **Bogura** (Robi). Idle source is `Borga_Idle_V2.0.7z`. Active source is `Borga_Active_V2.1.zip.001` + `Borga_Active_V2.1.zip.002` (campaign AUTO VOICE). The report draws **Robi** only.
 
 ## What these files are
 
 | File(s) | Role | After extract |
 | --- | --- | --- |
 | `Borga_Idle_V2.0.7z` | IDLE Mode scanner export | `extracted/Borga_Idle_V2.0/1.csv` … `15.csv` |
-| `Borga_Idle_V2.7z` | Active Mode UE export (Robi and Grameenphone) | `extracted/data/1.csv` … `15.csv` |
-| `System DUMP.xlsb` | Cell-level site dump. Cells are rolled up by the Sector column | Sector pies and distance lines on bad-spot zoom panels only |
+| `Borga_Active_V2.1.zip.001` + `.002` | Active Mode UE export (Robi and Grameenphone). Join the two parts before unzip | `extracted/Borga_Active_V2.1/1.csv` … `15.csv` |
+| `System DUMP.xlsb` | Cell-level site dump. Cells are rolled up by the Sector column | Sector pies and distance lines on the individual bad-spot maps only |
 | `Physical_Site_Database_V2.0.xlsx` | Earlier physical site database | Not used on the current maps |
 
 Idle scanner columns include `Time`, `Longitude`, `Latitude`, `Cell Id`, `DL EARFCN`, `NB RSRP`, `NB RSRQ`, `NB RS SINR` (mapped to RSRP / RSRQ / SINR). Campaign is **Scanner**. Files 1–15 cover 11–21 May 2026.
 
-Active columns are already named `RSRP`, `RSRQ`, `SINR`, plus `Operator`, `Data Technology`, `DL EARFCN` and `Cell Id`. Campaign is **AUTO DATA**. The report draws the **Robi** UE only, so Active maps sit beside the Robi Idle scanner. Grameenphone rows stay in the merged CSV.
+Active columns are already named `RSRP`, `RSRQ`, `SINR`, plus `Operator`, `Technology`, `DL EARFCN` and `Cell Id`. Campaign is **AUTO VOICE**. The Operator column also contains Grameenphone. The report keeps rows whose Operator is exactly **Robi** (surrounding spaces are stripped) and does not draw Grameenphone. Those rows stay in the merged CSV.
 
 ```
-Borga_Idle_V2.0.7z  -->  1.csv … 15.csv  -->  output/Bogura_merged.csv.gz
-Borga_Idle_V2.7z    -->  data/1.csv … 15.csv  -->  output/Bogura_active_merged.csv.gz
+Borga_Idle_V2.0.7z              -->  1.csv … 15.csv                         -->  output/Bogura_merged.csv.gz
+Borga_Active_V2.1.zip.001+.002  -->  Borga_Active_V2.1/1.csv … 15.csv       -->  output/Bogura_active_merged.csv.gz
 ```
 
 ## How to rebuild the final file and plots
@@ -94,34 +94,34 @@ Throughput (PDCP DL) and CQI are on the same legend sheet but are not in these I
 
 **RSRP / RSRQ / SINR sheets** show the **combined all-band IDLE map on the left**, then band-wise IDLE maps for L900, L1800, L2100 and L2600. The right side is the same view for **Active Mode (Robi UE)**. These sheets have no bad-spot circles. Every map sits on satellite imagery. Those maps do not overlay site pies.
 
-**Bad Spot RSRP / RSRQ / SINR** are the Idle sheets. **Bad Spot RSRP_Active / RSRQ_Active / SINR_Active** apply the same rules to the Active Robi track. Each sheet puts the **combined all-band view with marks on top**, then zoomed local inspection. Map numbers are omitted.
+**Bad Spot RSRP / RSRQ / SINR** are the Idle sheets. **Bad Spot RSRP_Active / RSRQ_Active / SINR_Active** apply the same rules to the Active Robi track. Each sheet puts the **combined all-band view on top with no circles**, then the bad spots one under another: Bad Spot 1, Bad Spot 2, and so on. Each of those maps is large, sits on the left, and leaves the columns to its right empty. Map numbers are omitted.
 
 Active best server is the **strongest carrier at each timestamp** (the UE logs every carrier together). Idle best server stays the strongest band per scanner sweep.
 
 - Poor is **RSRP ≤ −115 dBm** (magenta and red only; yellow is not a bad-spot colour), **RSRQ ≤ −20 dB** (red), **SINR ≤ 0 dB** (orange and red)
 - Maps and rules read the same **50 m road bins**: a bin is coloured by the median of the samples measured in it and counts as poor only when that median is at or below the threshold, and poor bins are drawn on top of good ones — so a circle can only sit on colour the map actually shows
 - **Every poor run is covered by a circle.** Runs within 2 km join one circle when the poor road inside it spans at most 7 km, so the drawn circle stays within 10 km and covers that road. A longer poor road is split into several circles. Pockets more than 2 km apart stay separate circles even inside the same 10 km neighbourhood
-- **Each circle is its own Excel shape** on the Bad Spot combined map (orange, named Circle 1, Circle 2, … in the same order as the table) and can be dragged without moving the map or the other circles. The RSRP, RSRQ and SINR sheets do not repeat those circles. Each zoom panel has the same circle as another separate shape, so it can be dragged on the close-up too
-- **Sector pies are only on the bad-spot zoom panels.** Cells in `System DUMP.xlsb` are rolled up by the Sector column. Every site inside the zoom is drawn. The pie labels are the sector names. A yellow line, with the distance, is drawn when a sector shoots toward that bad spot
+- **The combined view has no circles**, on the Bad Spot sheet and on the RSRP, RSRQ and SINR sheets. Each of the 16 longest bad spots has its own large map, in that same order, and **one orange Excel shape** on that map (named Circle 1, Circle 2, …). The shape is not painted into the picture, so it can be dragged. The columns to the right of each map are left empty
+- **Sector pies are only on those individual bad-spot maps.** Cells in `System DUMP.xlsb` are rolled up by the Sector column. Every site inside the map is drawn. The pie labels are the sector names. A yellow line, with the distance, is drawn when a sector shoots toward that bad spot
 - **Discrete area:** leftover poor bins covering at least 1 km² where that area is at least half poor (dotted circle). With every run already covered, this drive has none
-- Each sheet lists the 16 longest circles as zoom panels and up to 300 in the table, longest first, and states the full count
-- Published circle counts, with 0 discrete areas: Idle RSRP 41, RSRQ 45, SINR 204; Active RSRP 163, RSRQ 52, SINR 190. These rules are locked in `LOGIC_LOCK`. `verify_report` fails if a rebuild moves a threshold, a colour, the circle size, or a count
+- Each sheet draws the 16 longest circles as separate maps and lists up to 300 in the table, longest first, and states the full count
+- Published circle counts, with 0 discrete areas: Idle RSRP 41, RSRQ 45, SINR 204; Active Robi RSRP 124, RSRQ 35, SINR 191. These rules are locked in `LOGIC_LOCK`. `verify_report` fails if a rebuild moves a threshold, a colour, the circle size, or a count
 
-### Maps are satellite, and each bad-spot circle is its own shape (v1.38)
+### Maps are satellite, and each bad-spot circle is its own shape (v1.39)
 
-Every coverage map and bad-spot map is drawn on Esri World Imagery. On the combined bad-spot view the orange circles are not painted into the picture: each one is a separate Excel shape named Circle 1, Circle 2, … in the same order as the table, so it can be dragged on its own. The same circle on a zoom panel is also its own shape, not painted into that picture. The RSRP, RSRQ and SINR sheets show the route only. A circle is at most 10 km across. Where the poor road is in separate pockets, several circles sit inside that 10 km neighbourhood.
+Every coverage map and bad-spot map is drawn on Esri World Imagery. The combined view is the satellite route only: no circle is painted into it and no circle shape is placed on it. Bad Spot 1, Bad Spot 2, and the rest follow down the left side of the sheet, each a larger map with one movable circle and the sector pies. A circle is at most 10 km across. Where the poor road is in separate pockets, several circles sit inside that 10 km neighbourhood.
 
-## Download Excel report (v1.38)
+## Download Excel report (v1.39)
 
-**v1.38 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.38.xlsx
+**v1.39 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.39.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.38.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.39.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.38.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.39.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
 Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 

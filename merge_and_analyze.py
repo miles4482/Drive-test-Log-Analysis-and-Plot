@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import math
+import shutil
 import subprocess
 import sys
 import urllib.request
+import zipfile
 from collections import deque
 from pathlib import Path
 
@@ -33,9 +35,13 @@ SUMMARY_MD = OUTPUT_DIR / "analysis_summary.md"
 # Cell-level system dump. One site pie is built from its Sector column, not from the
 # old node-level Physical_Site_Database_V1.0.xlsb.
 SITE_DB_PATH = ROOT / "System DUMP.xlsb"
-# Active Mode UE log. The archive name still says Idle; the rows are campaign AUTO DATA.
-ACTIVE_ARCHIVE = ROOT / "Borga_Idle_V2.7z"
-ACTIVE_DIR = EXTRACT_DIR / "data"
+# Active Mode UE log, uploaded as a split zip. Both operators are in the file;
+# the report draws Robi only.
+ACTIVE_PARTS = (
+    ROOT / "Borga_Active_V2.1.zip.001",
+    ROOT / "Borga_Active_V2.1.zip.002",
+)
+ACTIVE_DIR = EXTRACT_DIR / "Borga_Active_V2.1"
 ACTIVE_MERGED = OUTPUT_DIR / "Bogura_active_merged.csv.gz"
 # Idle maps are the Robi scanner. The active file also carries a Grameenphone UE on the
 # same drive; only Robi is drawn so Active sits beside Idle for the same network.
@@ -1022,7 +1028,8 @@ def min_consecutive_m(column: str) -> float:
 
 # Expected values for the contract above. Kept separate from the live constants so
 # a later edit that retunes a rule fails the report check instead of passing quietly.
-# Spot counts are the published v1.35 result (circles, discrete areas) per sheet.
+# Spot counts are the published v1.39 result (circles, discrete areas) per sheet.
+# Idle is unchanged. Active is the Robi rows of Borga_Active_V2.1.
 LOGIC_LOCK = {
     "active_operator": "Robi",
     "sweep_s": 4.0,
@@ -1044,9 +1051,9 @@ LOGIC_LOCK = {
         "Bad Spot RSRP": (41, 0),
         "Bad Spot RSRQ": (45, 0),
         "Bad Spot SINR": (204, 0),
-        "Bad Spot RSRP_Active": (163, 0),
-        "Bad Spot RSRQ_Active": (52, 0),
-        "Bad Spot SINR_Active": (190, 0),
+        "Bad Spot RSRP_Active": (124, 0),
+        "Bad Spot RSRQ_Active": (35, 0),
+        "Bad Spot SINR_Active": (191, 0),
     },
 }
 
@@ -1787,13 +1794,15 @@ def plot_bad_spot_map(
     extent: tuple[float, float, float, float] | None = None,
     basemap: bool = True,
     shapes: bool = False,
+    outlines: bool = False,
 ) -> Path:
-    """First all-band coverage map with a circle on every bad spot.
+    """First all-band coverage map.
 
     A .svg path writes a pure vector file: no basemap, transparent background,
     and text kept as text. shapes=True leaves the circles out of the picture and
     records one geometry per circle so the workbook can place a separate shape
-    for each of them.
+    for each of them. outlines=True paints the circles into the picture. The
+    combined view uses neither: its circles live only on the individual bad-spot maps.
     """
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
     vector = path.suffix.lower() == ".svg"
@@ -1830,7 +1839,7 @@ def plot_bad_spot_map(
         fontsize=8,
         title_fontsize=10,
     )
-    if spots is not None and not spots.empty and not shapes:
+    if spots is not None and not spots.empty and outlines and not shapes:
         for _, spot in spots.iterrows():
             _add_spot_outline(ax, spot, overview=False)
     ax.set_title(title)
@@ -1840,17 +1849,20 @@ def plot_bad_spot_map(
     return path
 
 
-def _record_circle_pixels(fig, ax, path: Path, spots: pd.DataFrame, tight, axes=None) -> None:
+def _record_circle_pixels(
+    fig, ax, path: Path, spots: pd.DataFrame, tight, axes=None, name_start: int = 1,
+) -> None:
     """Store each circle's box in pixels of the PNG that savefig is about to write.
 
-    axes, when set, is one axes per spot, in the same order. A zoom grid uses that
-    so each panel records its own circle.
+    axes, when set, is one axes per spot, in the same order. name_start keeps a
+    single-spot map named Circle 7 when it is bad spot 7.
     """
     dpi = float(fig.dpi)
     save_dpi = float(MAP_DPI)
     circles = []
-    for n, (_, spot) in enumerate(spots.iterrows(), start=1):
-        use_ax = axes[n - 1] if axes is not None else ax
+    for i, (_, spot) in enumerate(spots.iterrows()):
+        n = name_start + i
+        use_ax = axes[i] if axes is not None else ax
         cx, cy, w, h, _angle, _style = _spot_outline(spot)
         x0, y_lo = use_ax.transData.transform((cx - w / 2.0, cy - h / 2.0))
         x1, y_hi = use_ax.transData.transform((cx + w / 2.0, cy + h / 2.0))
@@ -1877,7 +1889,9 @@ def _record_circle_pixels(fig, ax, path: Path, spots: pd.DataFrame, tight, axes=
     }
 
 
-def _save_map(fig, path: Path, legends=(), ax=None, spots: pd.DataFrame | None = None, axes=None) -> None:
+def _save_map(
+    fig, path: Path, legends=(), ax=None, spots: pd.DataFrame | None = None, axes=None, name_start: int = 1,
+) -> None:
     """PNG at MAP_DPI on white, or for .svg a transparent vector file with text kept as text.
 
     When spots is set, each circle is recorded against the PNG and is not drawn
@@ -1898,7 +1912,7 @@ def _save_map(fig, path: Path, legends=(), ax=None, spots: pd.DataFrame | None =
         if spots is not None and not spots.empty and (ax is not None or axes is not None):
             fig.canvas.draw()
             tight = fig.get_tightbbox(fig.canvas.get_renderer()).padded(pad)
-            _record_circle_pixels(fig, ax, path, spots, tight, axes=axes)
+            _record_circle_pixels(fig, ax, path, spots, tight, axes=axes, name_start=name_start)
             bbox_arg = tight
             pad = 0.0
         fig.savefig(path, dpi=MAP_DPI, facecolor="white", bbox_inches=bbox_arg, pad_inches=pad)
@@ -1983,6 +1997,69 @@ def plot_bad_spot_zoom_grid(
     return path
 
 
+def plot_bad_spot_serial_maps(
+    df: pd.DataFrame,
+    spots: pd.DataFrame,
+    directory: Path,
+    stem: str,
+    column: str,
+    class_series: pd.Series,
+    labels: list[str],
+    colors: list[str],
+) -> list[Path]:
+    """One large satellite map per bad spot, longest first.
+
+    The circle is recorded and not painted, so the workbook can place one movable
+    shape on that map. Sector pies and distance lines stay in the picture. The
+    combined view does not use this function.
+    """
+    if spots is None or spots.empty:
+        return []
+    directory.mkdir(parents=True, exist_ok=True)
+    work = spots.head(BAD_SPOT_MAX_ZOOMS)
+    geo = df.dropna(subset=["Longitude", "Latitude", column]).copy()
+    paths: list[Path] = []
+    total = len(work)
+    for i, (_, spot) in enumerate(work.iterrows(), start=1):
+        path = directory / f"{stem}_{i:02d}.png"
+        print(f"  {stem} bad spot {i}/{total}", flush=True)
+        fig, ax = plt.subplots(figsize=(9.4, 8.6))
+        zext = _zoom_extent(spot)
+        local = geo[
+            geo["Longitude"].between(zext[0], zext[1])
+            & geo["Latitude"].between(zext[2], zext[3])
+        ]
+        _draw_coverage_points(
+            ax,
+            local,
+            class_series.reindex(local.index),
+            labels,
+            colors,
+            max_points=8000,
+            poor_on_top=True,
+            bin_m=MAP_BIN_M,
+            column=column,
+        )
+        ax.set_xlim(zext[0], zext[1])
+        ax.set_ylim(zext[2], zext[3])
+        ax.set_aspect("equal", adjustable="box")
+        _add_basemap(ax)
+        draw_bad_spot_sector_pies(ax, spot)
+        hide_map_axes(ax)
+        kind = str(spot.get("kind", "consecutive"))
+        if kind == "discrete":
+            caption = f"Discrete {float(spot['area_km2']):.1f} km²"
+        else:
+            word = "Poor run" if min_consecutive_m(column) <= 0 else "Consecutive"
+            caption = f"{word} {float(spot['length_m']):.0f} m"
+        ax.set_title(caption, fontsize=14, fontweight="bold")
+        fig.tight_layout()
+        one = work.iloc[[i - 1]].reset_index(drop=True)
+        _save_map(fig, path, ax=ax, spots=one, name_start=i)
+        paths.append(path)
+    return paths
+
+
 def plot_rsrp_bad_spot_map(
     df: pd.DataFrame,
     spots: pd.DataFrame,
@@ -1991,6 +2068,7 @@ def plot_rsrp_bad_spot_map(
     extent: tuple[float, float, float, float] | None = None,
     title: str = "Combined view — RSRP",
     shapes: bool = False,
+    outlines: bool = False,
 ) -> Path:
     return plot_bad_spot_map(
         df,
@@ -2004,6 +2082,7 @@ def plot_rsrp_bad_spot_map(
         legend_title="RSRP (dBm)",
         extent=extent,
         shapes=shapes,
+        outlines=outlines,
     )
 
 
@@ -2024,6 +2103,7 @@ def plot_rsrq_bad_spot_map(
     extent: tuple[float, float, float, float] | None = None,
     title: str = "Combined view — RSRQ",
     shapes: bool = False,
+    outlines: bool = False,
 ) -> Path:
     return plot_bad_spot_map(
         df,
@@ -2037,6 +2117,7 @@ def plot_rsrq_bad_spot_map(
         legend_title="RSRQ (dB)",
         extent=extent,
         shapes=shapes,
+        outlines=outlines,
     )
 
 
@@ -2048,6 +2129,7 @@ def plot_sinr_bad_spot_map(
     extent: tuple[float, float, float, float] | None = None,
     title: str = "Combined view — SINR",
     shapes: bool = False,
+    outlines: bool = False,
 ) -> Path:
     return plot_bad_spot_map(
         df,
@@ -2061,6 +2143,7 @@ def plot_sinr_bad_spot_map(
         legend_title="SINR (dB)",
         extent=extent,
         shapes=shapes,
+        outlines=outlines,
     )
 
 
@@ -2104,15 +2187,25 @@ def extract_archives() -> None:
 
 
 def extract_active_archive() -> None:
+    """Join the split zip and unpack Borga_Active_V2.1/1.csv … 15.csv."""
     EXTRACT_DIR.mkdir(parents=True, exist_ok=True)
-    if not ACTIVE_ARCHIVE.exists():
-        sys.exit(f"Missing active archive: {ACTIVE_ARCHIVE.name}")
-    print(f"Extracting {ACTIVE_ARCHIVE.name} -> {ACTIVE_DIR}")
-    extract_7z(ACTIVE_ARCHIVE, EXTRACT_DIR)
+    missing = [p.name for p in ACTIVE_PARTS if not p.exists()]
+    if missing:
+        sys.exit("Missing active archive parts: " + ", ".join(missing))
+    joined = EXTRACT_DIR / "Borga_Active_V2.1.zip"
+    print("Joining " + " + ".join(p.name for p in ACTIVE_PARTS), flush=True)
+    with joined.open("wb") as out:
+        for part in ACTIVE_PARTS:
+            with part.open("rb") as src:
+                shutil.copyfileobj(src, out)
+    print(f"Extracting {joined.name} -> {EXTRACT_DIR}", flush=True)
+    with zipfile.ZipFile(joined) as zf:
+        zf.extractall(EXTRACT_DIR)
+    joined.unlink(missing_ok=True)
     files = active_csv_files()
     if not files:
         sys.exit(f"Extraction finished but no CSV files were found in {ACTIVE_DIR}")
-    print(f"  {len(files)} CSV files")
+    print(f"  {len(files)} CSV files", flush=True)
 
 
 def earfcn_to_layer(earfcn: object) -> str:
@@ -2297,6 +2390,8 @@ def load_active_csv(path: Path) -> pd.DataFrame:
         "Operator", "Data Technology", "Technology Band", "Collection", "Campaign",
     }]
     df = df[keep].copy()
+    if "Operator" in df.columns:
+        df["Operator"] = df["Operator"].astype("string").str.strip()
     df["Time"] = pd.to_datetime(df["Time"], errors="coerce")
     for col in ("RSRP", "RSRQ", "SINR", "Longitude", "Latitude", "DL EARFCN"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
