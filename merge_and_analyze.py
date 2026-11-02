@@ -16,7 +16,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
-from matplotlib.patches import Ellipse, PathPatch
+from matplotlib.patches import Ellipse, PathPatch, Wedge, Circle
 from matplotlib.path import Path as MPath
 import numpy as np
 import pandas as pd
@@ -30,7 +30,9 @@ IDLE_ARCHIVE = ROOT / "Borga_Idle_V2.0.7z"
 IDLE_DIR = EXTRACT_DIR / "Borga_Idle_V2.0"
 MERGED_CSV = OUTPUT_DIR / "Bogura_merged.csv.gz"
 SUMMARY_MD = OUTPUT_DIR / "analysis_summary.md"
-SITE_DB_PATH = ROOT / "Physical_Site_Database_V2.0.xlsx"
+# Cell-level system dump. One site pie is built from its Sector column, not from the
+# old node-level Physical_Site_Database_V1.0.xlsb.
+SITE_DB_PATH = ROOT / "System DUMP.xlsb"
 # Active Mode UE log. The archive name still says Idle; the rows are campaign AUTO DATA.
 ACTIVE_ARCHIVE = ROOT / "Borga_Idle_V2.7z"
 ACTIVE_DIR = EXTRACT_DIR / "data"
@@ -244,6 +246,8 @@ def load_site_sectors(path: Path | None = None, layer: str | None = None) -> pd.
         else:
             cells = pd.read_excel(db_path, sheet_name=0, engine="openpyxl")
         cells = cells.rename(columns={c: c.strip() for c in cells.columns})
+        if "Site" in cells.columns and "SiteName" not in cells.columns:
+            cells = cells.rename(columns={"Site": "SiteName"})
         for col in ("Lat", "Lon", "Azimuth", "EARFCN"):
             if col in cells.columns:
                 cells[col] = pd.to_numeric(cells[col], errors="coerce")
@@ -359,6 +363,133 @@ def draw_site_pies(
                 )
             )
     return []
+
+
+def _azimuth_to_mpl(azimuth: float) -> float:
+    """Compass azimuth (0 = north, clockwise) as a matplotlib angle (0 = east, CCW)."""
+    return (90.0 - float(azimuth)) % 360.0
+
+
+def _bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Compass bearing from point 1 to point 2, degrees clockwise from north."""
+    dlon = np.radians(lon2 - lon1)
+    lat1r, lat2r = np.radians(lat1), np.radians(lat2)
+    y = np.sin(dlon) * np.cos(lat2r)
+    x = np.cos(lat1r) * np.sin(lat2r) - np.sin(lat1r) * np.cos(lat2r) * np.cos(dlon)
+    return float((np.degrees(np.arctan2(y, x)) + 360.0) % 360.0)
+
+
+def _ang_diff(a: float, b: float) -> float:
+    return abs((float(a) - float(b) + 180.0) % 360.0 - 180.0)
+
+
+def _sector_wedges(part: pd.DataFrame) -> list[tuple[str, float, float, float]]:
+    """One clockwise slice per sector: name, azimuth, clockwise start, clockwise end."""
+    rows = part.dropna(subset=["azimuth"]).drop_duplicates(subset=["Sector"])
+    if rows.empty:
+        return []
+    azs = sorted((float(a) % 360.0, str(name)) for name, a in zip(rows["Sector"], rows["azimuth"]))
+    n = len(azs)
+    if n == 1:
+        az, name = azs[0]
+        return [(name, az, (az - 180.0) % 360.0, (az + 180.0) % 360.0)]
+    wedges = []
+    for i, (az, name) in enumerate(azs):
+        prev_az = azs[(i - 1) % n][0]
+        next_az = azs[(i + 1) % n][0]
+        incoming = (prev_az + ((az - prev_az) % 360.0) / 2.0) % 360.0
+        outgoing = (az + ((next_az - az) % 360.0) / 2.0) % 360.0
+        wedges.append((name, az, incoming, outgoing))
+    return wedges
+
+
+def draw_bad_spot_sector_pies(ax, spot: pd.Series) -> None:
+    """Sector pies for sites inside this bad-spot zoom, plus a distance line.
+
+    Every nearby site is kept. The line is drawn only for the sector whose
+    azimuth shoots toward the bad spot, and it is labelled with that distance.
+    """
+    sectors = load_site_sectors()
+    if sectors.empty:
+        return
+    xlim, ylim = ax.get_xlim(), ax.get_ylim()
+    spot_lat = float(spot["lat"])
+    spot_lon = float(spot["lon"])
+    vis = sectors[
+        sectors["lat"].between(ylim[0], ylim[1]) & sectors["lon"].between(xlim[0], xlim[1])
+    ]
+    if vis.empty:
+        return
+    span_km = min((xlim[1] - xlim[0]) * _km_per_deg_lon(spot_lat), (ylim[1] - ylim[0]) * 111.32)
+    radius_km = float(np.clip(span_km * 0.075, 0.18, 0.85))
+    r_deg = radius_km / 111.32
+    for site_name, part in vis.groupby("SiteName", sort=False):
+        part = part.drop_duplicates(subset=["Sector"])
+        lat = float(part["lat"].median())
+        lon = float(part["lon"].median())
+        wedges = _sector_wedges(part)
+        if not wedges:
+            continue
+        ax.add_patch(
+            Circle(
+                (lon, lat),
+                radius=r_deg * 1.55,
+                facecolor="white",
+                edgecolor="#222222",
+                linewidth=0.6,
+                zorder=24,
+                clip_on=True,
+            )
+        )
+        for name, az, start_az, end_az in wedges:
+            theta1 = _azimuth_to_mpl(end_az)
+            theta2 = _azimuth_to_mpl(start_az)
+            ax.add_patch(
+                Wedge(
+                    (lon, lat),
+                    r_deg,
+                    theta1,
+                    theta2,
+                    facecolor="white",
+                    edgecolor="#222222",
+                    linewidth=0.7,
+                    zorder=25,
+                    clip_on=True,
+                )
+            )
+            label_az = np.radians(float(az) % 360.0)
+            lx = lon + (r_deg * 1.18) * np.sin(label_az)
+            ly = lat + (r_deg * 1.18) * np.cos(label_az)
+            ax.text(
+                lx, ly, name, ha="center", va="center", fontsize=4.2, color="#111111",
+                zorder=27, clip_on=True,
+            )
+        bearing = _bearing_deg(lat, lon, spot_lat, spot_lon)
+        aimed = min(wedges, key=lambda w: _ang_diff(w[1], bearing))
+        if _ang_diff(aimed[1], bearing) > 70.0:
+            continue
+        dist_km = float(_equirect_km(lat, lon, spot_lat, spot_lon))
+        if dist_km < radius_km * 1.8:
+            continue
+        rim = r_deg * 1.55
+        x0 = lon + rim * np.sin(np.radians(bearing))
+        y0 = lat + rim * np.cos(np.radians(bearing))
+        ax.annotate(
+            "",
+            xy=(spot_lon, spot_lat),
+            xytext=(x0, y0),
+            arrowprops={"arrowstyle": "-|>", "color": "#F5C400", "lw": 1.4, "mutation_scale": 7},
+            zorder=26,
+            clip_on=True,
+        )
+        mx = (x0 + spot_lon) / 2.0
+        my = (y0 + spot_lat) / 2.0
+        text = f"{dist_km:.1f} kM" if dist_km < 10 else f"{dist_km:.0f} kM"
+        ax.text(
+            mx, my, text, ha="center", va="center", fontsize=6, color="#111111",
+            fontweight="bold", zorder=28, clip_on=True,
+            bbox={"boxstyle": "round,pad=0.12", "fc": "#FFE14A", "ec": "none", "alpha": 0.92},
+        )
 
 
 def _coverage_extent_from_geo(geo: pd.DataFrame) -> tuple[float, float, float, float]:
@@ -1829,6 +1960,8 @@ def plot_bad_spot_zoom_grid(
         ax.set_aspect("equal", adjustable="box")
         if not vector:
             _add_basemap(ax)
+        if not vector:
+            draw_bad_spot_sector_pies(ax, spot)
         if shapes:
             panel_axes.append(ax)
         else:

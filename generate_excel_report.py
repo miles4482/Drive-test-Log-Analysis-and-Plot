@@ -77,7 +77,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.37"
+REPORT_VERSION = "1.38"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -466,6 +466,83 @@ def _spread_drawing_anchors(drawing: str, sheet_xml: bytes) -> str:
     return re.sub(r"<oneCellAnchor>.*?</oneCellAnchor>", place, drawing, flags=re.S)
 
 
+def _worksheet_xml(parts: dict[str, bytes]) -> dict[str, bytes]:
+    """Map a worksheet name to its worksheet XML."""
+    main = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    rel_ns = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+    wb = ET.fromstring(parts["xl/workbook.xml"])
+    book_rels = ET.fromstring(parts["xl/_rels/workbook.xml.rels"])
+    rid_target = {rel.attrib["Id"]: rel.attrib["Target"].lstrip("/") for rel in book_rels}
+    found = {}
+    for node in wb.find(f"{main}sheets"):
+        found[node.attrib["name"]] = parts[rid_target[node.attrib[f"{rel_ns}id"]]]
+    return found
+
+
+def _emu_prefix(sheet_xml: bytes):
+    col_px, default_width, row_pt, default_pt = _sheet_metric(sheet_xml)
+
+    def col_emu(index0: int) -> int:
+        return col_px.get(index0 + 1, _column_width_px(default_width)) * 9525
+
+    def row_emu(index0: int) -> int:
+        return int(round(row_pt.get(index0 + 1, default_pt) * 12700))
+
+    def prefix(count: int, size_of) -> list[int]:
+        total = [0]
+        for i in range(count):
+            total.append(total[-1] + size_of(i))
+        return total
+
+    return prefix(60, col_emu), prefix(600, row_emu)
+
+
+def _drop_ellipses_on_picture(drawing: str, sheet_xml: bytes, picture_block: str, keep_last: int = 0) -> str:
+    """Remove circle shapes that sit on this picture, optionally keeping the newest ones."""
+    origin = re.search(
+        r"<from><col>(\d+)</col><colOff>(\d+)</colOff><row>(\d+)</row><rowOff>(\d+)</rowOff></from><ext cx=\"(\d+)\" cy=\"(\d+)\"",
+        picture_block,
+    )
+    if origin is None:
+        return drawing
+    col_at, row_at = _emu_prefix(sheet_xml)
+    pcol, pcoff, prow, proff, pcx, pcy = (int(v) for v in origin.groups())
+    if pcol >= len(col_at) - 1 or prow >= len(row_at) - 1:
+        return drawing
+    left, top = col_at[pcol] + pcoff, row_at[prow] + proff
+    right, bottom = left + pcx, top + pcy
+    blocks = list(re.finditer(r"<oneCellAnchor>.*?</oneCellAnchor>", drawing, flags=re.S))
+    on_picture = []
+    for match in blocks:
+        block = match.group(0)
+        if 'prst="ellipse"' not in block:
+            continue
+        found = re.search(
+            r"<from><col>(\d+)</col><colOff>(\d+)</colOff><row>(\d+)</row><rowOff>(\d+)</rowOff></from><ext cx=\"(\d+)\" cy=\"(\d+)\"",
+            block,
+        )
+        if found is None:
+            continue
+        col, coff, row, roff, cx, cy = (int(v) for v in found.groups())
+        if col >= len(col_at) - 1 or row >= len(row_at) - 1:
+            continue
+        cx0 = col_at[col] + coff + cx / 2.0
+        cy0 = row_at[row] + roff + cy / 2.0
+        if left - 20000 <= cx0 <= right + 20000 and top - 20000 <= cy0 <= bottom + 20000:
+            on_picture.append(match)
+    drop = set(id(m) for m in on_picture[: max(0, len(on_picture) - keep_last)])
+    if not drop:
+        return drawing
+    pieces = []
+    cursor = 0
+    for match in blocks:
+        if id(match) in drop:
+            pieces.append(drawing[cursor:match.start()])
+            cursor = match.end()
+    pieces.append(drawing[cursor:])
+    return "".join(pieces)
+
+
 def spread_circle_anchors(path: Path) -> int:
     """Re-anchor every bad-spot circle so Excel draws it on its own bad spot."""
     with zipfile.ZipFile(path) as zf:
@@ -510,6 +587,12 @@ _CIRCLE_NOTE_NEW = (
     "Circle 1, Circle 2, and so on, in the same order as the table. Each zoom panel has that "
     "same circle as its own shape, not painted into the picture, so you can drag it. The RSRP, "
     "RSRQ and SINR sheets do not repeat these circles."
+)
+_PIE_NOTE_OLD = "The RSRP, RSRQ and SINR sheets do not repeat these circles."
+_PIE_NOTE_NEW = (
+    "The RSRP, RSRQ and SINR sheets do not repeat these circles. "
+    "Each zoom panel draws a sector pie for every nearby site from System DUMP.xlsb. "
+    "The label is the sector name. Where a sector shoots toward that bad spot, a yellow line shows the distance."
 )
 
 
@@ -563,6 +646,7 @@ def refresh_zoom_circles(src: Path | None = None) -> Path:
         names = zf.namelist()
         parts = {name: zf.read(name) for name in names}
     drawings = _sheet_drawings(parts)
+    sheet_xml = _worksheet_xml(parts)
     for sheet, drawing_name in drawings.items():
         if sheet.startswith("Bad Spot"):
             continue
@@ -606,6 +690,7 @@ def refresh_zoom_circles(src: Path | None = None) -> Path:
             zoom_block,
         )
         col, col_off, row, row_off, pic_cx, pic_cy = (int(v) for v in origin.groups())
+        drawing = _drop_ellipses_on_picture(drawing, sheet_xml[sheet], zoom_block, keep_last=0)
         next_shape = max(int(i) for i in re.findall(r'<cNvPr id="(\d+)"', drawing)) + 1
         extras = []
         for circle in geom["circles"]:
@@ -623,7 +708,23 @@ def refresh_zoom_circles(src: Path | None = None) -> Path:
             continue
         parts[name] = text.replace(_CIRCLE_NOTE_OLD, _CIRCLE_NOTE_NEW).encode("utf-8")
         note_hits += text.count(_CIRCLE_NOTE_OLD)
-    print(f"Updated circle note in {note_hits} place(s)", flush=True)
+    pie_hits = 0
+    for name, body in list(parts.items()):
+        if not name.endswith(".xml"):
+            continue
+        text = body.decode("utf-8")
+        changed = False
+        if _PIE_NOTE_OLD in text and "sector pie" not in text:
+            text = text.replace(_PIE_NOTE_OLD, _PIE_NOTE_NEW)
+            pie_hits += 1
+            changed = True
+        if "Physical_Site_Database_V2.0.xlsx" in text or "Physical_Site_Database_V1.0.xlsb" in text:
+            text = text.replace("Physical_Site_Database_V2.0.xlsx", "System DUMP.xlsb")
+            text = text.replace("Physical_Site_Database_V1.0.xlsb", "System DUMP.xlsb")
+            changed = True
+        if changed:
+            parts[name] = text.encode("utf-8")
+    print(f"Updated circle note in {note_hits} place(s) and sector-pie note in {pie_hits}", flush=True)
 
     order = [n for n in names if n in parts]
     tmp = src.with_suffix(".tmp.xlsx")
@@ -1346,7 +1447,9 @@ def build_kpi_bad_spot_sheet(
         "colour you can see. Each circle is a separate orange shape on the combined map, named "
         "Circle 1, Circle 2, and so on, in the same order as the table. Each zoom panel has that "
         "same circle as its own shape, not painted into the picture, so you can drag it. The RSRP, "
-        "RSRQ and SINR sheets do not repeat these circles. Several circles can sit inside one 10 km neighbourhood when the "
+        "RSRQ and SINR sheets do not repeat these circles. Each zoom panel draws a sector pie for "
+        "every nearby site from System DUMP.xlsb. The label is the sector name. Where a sector "
+        "shoots toward that bad spot, a yellow line shows the distance. Several circles can sit inside one 10 km neighbourhood when the "
         "poor road is not one stretch. A discrete patch of at least 1 km\u00b2 is a dotted circle. "
         + _detection_summary(kpi, spots)
         + " Numbers are not drawn on the maps.",

@@ -8,8 +8,8 @@ LTE **IDLE Mode scanner** and **Active Mode UE** logs from **Bogura** (Robi). Id
 | --- | --- | --- |
 | `Borga_Idle_V2.0.7z` | IDLE Mode scanner export | `extracted/Borga_Idle_V2.0/1.csv` … `15.csv` |
 | `Borga_Idle_V2.7z` | Active Mode UE export (Robi and Grameenphone) | `extracted/data/1.csv` … `15.csv` |
-| `Physical_Site_Database_V2.0.xlsx` | Physical site / sector database, reconciled against the V2.0 scanner cells (see its `Change_Log` sheet) | Referenced on the Cover; not overlaid on current maps |
-| `Physical_Site_Database_V1.0.xlsb` | Previous site database | Kept for reference |
+| `System DUMP.xlsb` | Cell-level site dump. Cells are rolled up by the Sector column | Sector pies and distance lines on bad-spot zoom panels only |
+| `Physical_Site_Database_V2.0.xlsx` | Earlier physical site database | Not used on the current maps |
 
 Idle scanner columns include `Time`, `Longitude`, `Latitude`, `Cell Id`, `DL EARFCN`, `NB RSRP`, `NB RSRQ`, `NB RS SINR` (mapped to RSRP / RSRQ / SINR). Campaign is **Scanner**. Files 1–15 cover 11–21 May 2026.
 
@@ -102,25 +102,26 @@ Active best server is the **strongest carrier at each timestamp** (the UE logs e
 - Maps and rules read the same **50 m road bins**: a bin is coloured by the median of the samples measured in it and counts as poor only when that median is at or below the threshold, and poor bins are drawn on top of good ones — so a circle can only sit on colour the map actually shows
 - **Every poor run is covered by a circle.** Runs within 2 km join one circle when the poor road inside it spans at most 7 km, so the drawn circle stays within 10 km and covers that road. A longer poor road is split into several circles. Pockets more than 2 km apart stay separate circles even inside the same 10 km neighbourhood
 - **Each circle is its own Excel shape** on the Bad Spot combined map (orange, named Circle 1, Circle 2, … in the same order as the table) and can be dragged without moving the map or the other circles. The RSRP, RSRQ and SINR sheets do not repeat those circles. Each zoom panel has the same circle as another separate shape, so it can be dragged on the close-up too
+- **Sector pies are only on the bad-spot zoom panels.** Cells in `System DUMP.xlsb` are rolled up by the Sector column. Every site inside the zoom is drawn. The pie labels are the sector names. A yellow line, with the distance, is drawn when a sector shoots toward that bad spot
 - **Discrete area:** leftover poor bins covering at least 1 km² where that area is at least half poor (dotted circle). With every run already covered, this drive has none
 - Each sheet lists the 16 longest circles as zoom panels and up to 300 in the table, longest first, and states the full count
 - Published circle counts, with 0 discrete areas: Idle RSRP 41, RSRQ 45, SINR 204; Active RSRP 163, RSRQ 52, SINR 190. These rules are locked in `LOGIC_LOCK`. `verify_report` fails if a rebuild moves a threshold, a colour, the circle size, or a count
 
-### Maps are satellite, and each bad-spot circle is its own shape (v1.37)
+### Maps are satellite, and each bad-spot circle is its own shape (v1.38)
 
 Every coverage map and bad-spot map is drawn on Esri World Imagery. On the combined bad-spot view the orange circles are not painted into the picture: each one is a separate Excel shape named Circle 1, Circle 2, … in the same order as the table, so it can be dragged on its own. The same circle on a zoom panel is also its own shape, not painted into that picture. The RSRP, RSRQ and SINR sheets show the route only. A circle is at most 10 km across. Where the poor road is in separate pockets, several circles sit inside that 10 km neighbourhood.
 
-## Download Excel report (v1.37)
+## Download Excel report (v1.38)
 
-**v1.37 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.37.xlsx
+**v1.38 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.38.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.37.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.38.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.37.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.38.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
 Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 
