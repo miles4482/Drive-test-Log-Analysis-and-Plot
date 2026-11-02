@@ -79,7 +79,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.39"
+REPORT_VERSION = "1.40"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -1466,9 +1466,10 @@ def build_kpi_bad_spot_sheet(
         "colour you can see. The combined view has no circles. Each bad spot below is one large map, "
         "Bad Spot 1 then Bad Spot 2, and its orange circle is a separate shape named Circle 1, "
         "Circle 2, and so on, in the same order as the table, so you can drag it. The RSRP, RSRQ and "
-        "SINR sheets do not repeat these circles. Each bad-spot map draws a sector pie for every "
-        "nearby site from System DUMP.xlsb. The label is the sector name. Where a sector shoots "
-        "toward that bad spot, a yellow line shows the distance. The columns to the right of each "
+        "SINR sheets do not repeat these circles. Each bad-spot map draws a transparent cyan outline "
+        "for every sector of a site that falls in that view, from System DUMP.xlsb. No sector of "
+        "that site is left out, and the outline is not filled. Where a sector shoots toward that "
+        "bad spot, a yellow line shows the distance. The columns to the right of each "
         "map are left empty. Several circles can sit inside one 10 km neighbourhood when the poor "
         "road is not one stretch. A discrete patch of at least 1 km\u00b2 is a dotted circle. "
         + _detection_summary(kpi, spots)
@@ -2149,6 +2150,142 @@ def build_report(df: pd.DataFrame, active: pd.DataFrame | None = None, out_path:
     return out_path
 
 
+_PIE_SENTENCE_OLD = (
+    "Each bad-spot map draws a sector pie for every nearby site from System DUMP.xlsb. "
+    "The label is the sector name. Where a sector shoots toward that bad spot, a yellow line shows the distance."
+)
+_PIE_SENTENCE_NEW = (
+    "Each bad-spot map draws a transparent cyan outline for every sector of a site that falls in that view, "
+    "from System DUMP.xlsb. No sector of that site is left out, and the outline is not filled. "
+    "Where a sector shoots toward that bad spot, a yellow line shows the distance."
+)
+
+
+def refresh_bad_spot_pies(src: Path | None = None) -> Path:
+    """Redraw the serial bad-spot maps and swap them into the current workbook.
+
+    Combined views, KPI sheets, and the circle count stay as they are. Each serial
+    map keeps one movable circle, placed again from the new picture.
+    """
+    import io
+    from PIL import Image
+
+    from merge_and_analyze import ACTIVE_MERGED, MERGED_CSV, load_active_merged, load_merged_csv
+
+    src = src or REPORT_XLSX
+    if not src.exists():
+        raise SystemExit(f"Missing workbook: {src}")
+    print("Loading drive logs", flush=True)
+    idle = load_merged_csv() if MERGED_CSV.exists() else None
+    active = load_active_merged() if ACTIVE_MERGED.exists() else None
+    if idle is None or active is None:
+        raise SystemExit("Merged drive logs are missing; a full report build is required.")
+    if "Operator" in active.columns:
+        operator = active["Operator"].astype("string").str.strip()
+        active = active.loc[operator.eq(ACTIVE_OPERATOR)].copy()
+    print(f"Idle rows {len(idle):,}  Active {ACTIVE_OPERATOR} rows {len(active):,}", flush=True)
+    idle_track = best_server(idle)
+    active_track = best_carrier(active)
+    MAP_CIRCLE_PIXELS.clear()
+    zoom_for_sheet: dict[str, list[Path]] = {}
+    for tag, frame in (("", idle_track), ("active", active_track)):
+        suffix = f"_{tag}" if tag else ""
+        for kpi, classify, labels, colors in (
+            ("RSRP", rsrp_map_class, MAP_RSRP_LABELS, MAP_RSRP_COLORS),
+            ("RSRQ", rsrq_map_class, MAP_RSRQ_LABELS, MAP_RSRQ_COLORS),
+            ("SINR", sinr_map_class, MAP_SINR_LABELS, MAP_SINR_COLORS),
+        ):
+            print(f"Drawing {kpi} bad spots ({tag or 'idle'})", flush=True)
+            spots = find_bad_spots(frame, kpi)
+            paths = plot_bad_spot_serial_maps(
+                frame, spots, PLOTS_DIR, f"excel_bad_spots_{kpi.lower()}_spot{suffix}",
+                kpi, classify(frame[kpi]), labels, colors,
+            )
+            sheet = f"Bad Spot {kpi}" + ("_Active" if tag else "")
+            zoom_for_sheet[sheet] = paths
+            print(f"  {sheet}: {len(paths)} maps", flush=True)
+
+    print("Updating the workbook", flush=True)
+    with zipfile.ZipFile(src) as zf:
+        names = zf.namelist()
+        parts = {name: zf.read(name) for name in names}
+    drawings = _sheet_drawings(parts)
+    sheet_xml = _worksheet_xml(parts)
+    for sheet, paths in zoom_for_sheet.items():
+        drawing_name = drawings[sheet]
+        rels_name = drawing_name.replace("drawings/", "drawings/_rels/") + ".rels"
+        rels = parts[rels_name].decode("utf-8")
+        drawing = parts[drawing_name].decode("utf-8")
+        rid_media = {}
+        for rel in re.findall(r"<Relationship\b[^>]*/>", rels):
+            rid = re.search(r'Id="([^"]+)"', rel).group(1)
+            target = re.search(r'Target="([^"]+)"', rel).group(1)
+            media = target.lstrip("/") if target.startswith("/") else "xl/media/" + target.rsplit("/", 1)[1]
+            rid_media[rid] = media
+        pictures = []
+        for block in re.findall(r"<oneCellAnchor>.*?</oneCellAnchor>", drawing, flags=re.S):
+            if "<pic>" not in block:
+                continue
+            row = int(re.search(r"<row>(\d+)</row>", block).group(1))
+            pictures.append((row, block))
+        pictures.sort()
+        serial = pictures[1:]
+        if len(serial) != len(paths):
+            raise SystemExit(f"{sheet}: {len(serial)} pictures, {len(paths)} new maps")
+        drawing = re.sub(
+            r'<oneCellAnchor>(?:(?!</oneCellAnchor>).)*prst="ellipse".*?</oneCellAnchor>',
+            "",
+            drawing,
+            flags=re.S,
+        )
+        next_shape = max((int(i) for i in re.findall(r'<cNvPr id="(\d+)"', drawing)), default=0) + 1
+        extras = []
+        for (_row, block), png in zip(serial, paths):
+            embed = re.search(r'r:embed="([^"]+)"', block).group(1)
+            media = rid_media[embed]
+            image = Image.open(png).convert("RGB")
+            buf = io.BytesIO()
+            image.save(buf, "JPEG", quality=74, optimize=True)
+            parts[media] = buf.getvalue()
+            geom = MAP_CIRCLE_PIXELS[str(Path(png).resolve())]
+            img_w, img_h = geom["size"]
+            origin = re.search(
+                r"<from><col>(\d+)</col><colOff>(\d+)</colOff><row>(\d+)</row><rowOff>(\d+)</rowOff></from><ext cx=\"(\d+)\" cy=\"(\d+)\"",
+                block,
+            )
+            col, col_off, row, row_off, pic_cx, pic_cy = (int(v) for v in origin.groups())
+            for circle in geom["circles"]:
+                extras.append(_circle_anchor(circle, next_shape, col, col_off, row, row_off, pic_cx, pic_cy, img_w, img_h))
+                next_shape += 1
+        parts[drawing_name] = drawing.replace("</wsDr>", "".join(extras) + "</wsDr>").encode("utf-8")
+        print(f"  {sheet}: replaced {len(paths)} maps, {len(extras)} circles", flush=True)
+
+    note_hits = 0
+    for name, body in list(parts.items()):
+        if not name.endswith(".xml"):
+            continue
+        text = body.decode("utf-8")
+        if _PIE_SENTENCE_OLD not in text:
+            continue
+        parts[name] = text.replace(_PIE_SENTENCE_OLD, _PIE_SENTENCE_NEW).encode("utf-8")
+        note_hits += text.count(_PIE_SENTENCE_OLD)
+    print(f"Updated the pie note in {note_hits} place(s)", flush=True)
+
+    tmp = src.with_suffix(".tmp.xlsx")
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name in names:
+            zf.writestr(name, parts[name])
+        for name, body in parts.items():
+            if name not in names:
+                zf.writestr(name, body)
+    tmp.replace(VERSIONED_XLSX)
+    spread_circle_anchors(VERSIONED_XLSX)
+    if VERSIONED_XLSX.resolve() != REPORT_XLSX.resolve():
+        shutil.copy2(VERSIONED_XLSX, REPORT_XLSX)
+    print(f"Wrote {VERSIONED_XLSX}", flush=True)
+    return VERSIONED_XLSX
+
+
 if __name__ == "__main__":
     import sys
 
@@ -2157,6 +2294,14 @@ if __name__ == "__main__":
             "The bad-spot sheets are a vertical series of maps. Run this script with no arguments "
             "so the workbook is rebuilt."
         )
+    if len(sys.argv) > 1 and sys.argv[1] == "refresh-pies":
+        path = refresh_bad_spot_pies()
+        result = verify_report(path)
+        print(result["problems"], result.get("circle_shapes"))
+        if result["problems"]:
+            raise SystemExit("Excel view checks failed: " + "; ".join(result["problems"]))
+        print("Verified: transparent sector outlines on the bad-spot maps.")
+        raise SystemExit(0)
     from merge_and_analyze import (
         ACTIVE_MERGED,
         ACTIVE_PARTS,

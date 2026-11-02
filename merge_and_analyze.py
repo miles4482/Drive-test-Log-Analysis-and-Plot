@@ -409,11 +409,16 @@ def _sector_wedges(part: pd.DataFrame) -> list[tuple[str, float, float, float]]:
     return wedges
 
 
-def draw_bad_spot_sector_pies(ax, spot: pd.Series) -> None:
-    """Sector pies for sites inside this bad-spot zoom, plus a distance line.
+# Bad-spot site mark: the same unfilled Y as a planning widget. Cyan stroke only.
+BAD_SPOT_PIE_EDGE = "#00E5EE"
 
-    Every nearby site is kept. The line is drawn only for the sector whose
-    azimuth shoots toward the bad spot, and it is labelled with that distance.
+
+def draw_bad_spot_sector_pies(ax, spot: pd.Series) -> None:
+    """Transparent sector marks for every site that touches this bad-spot view.
+
+    One cyan line per sector, with no fill. If any sector of a site falls inside
+    the view, every sector of that site is drawn. The yellow line is only the
+    sector that shoots toward the bad spot, labelled with the distance.
     """
     sectors = load_site_sectors()
     if sectors.empty:
@@ -421,65 +426,53 @@ def draw_bad_spot_sector_pies(ax, spot: pd.Series) -> None:
     xlim, ylim = ax.get_xlim(), ax.get_ylim()
     spot_lat = float(spot["lat"])
     spot_lon = float(spot["lon"])
-    vis = sectors[
-        sectors["lat"].between(ylim[0], ylim[1]) & sectors["lon"].between(xlim[0], xlim[1])
-    ]
-    if vis.empty:
+    inside = sectors["lat"].between(ylim[0], ylim[1]) & sectors["lon"].between(xlim[0], xlim[1])
+    if not inside.any():
         return
+    present = sectors.loc[inside, "SiteName"].unique()
+    chosen = sectors[sectors["SiteName"].isin(present)]
     span_km = min((xlim[1] - xlim[0]) * _km_per_deg_lon(spot_lat), (ylim[1] - ylim[0]) * 111.32)
-    radius_km = float(np.clip(span_km * 0.075, 0.18, 0.85))
+    radius_km = float(np.clip(span_km * 0.07, 0.30, 0.85))
     r_deg = radius_km / 111.32
-    for site_name, part in vis.groupby("SiteName", sort=False):
-        part = part.drop_duplicates(subset=["Sector"])
-        lat = float(part["lat"].median())
-        lon = float(part["lon"].median())
-        wedges = _sector_wedges(part)
-        if not wedges:
+    for site_name, part in chosen.groupby("SiteName", sort=False):
+        part = part.drop_duplicates(subset=["Sector"]).dropna(subset=["azimuth"])
+        if part.empty:
             continue
-        ax.add_patch(
-            Circle(
-                (lon, lat),
-                radius=r_deg * 1.55,
-                facecolor="white",
-                edgecolor="#222222",
-                linewidth=0.6,
+        here = part[inside.reindex(part.index).fillna(False).to_numpy()]
+        if here.empty:
+            continue
+        lat = float(here["lat"].median())
+        lon = float(here["lon"].median())
+        azimuths = [float(a) % 360.0 for a in part["azimuth"].tolist()]
+        for az in azimuths:
+            rad = np.radians(az)
+            ax.plot(
+                [lon, lon + r_deg * np.sin(rad)],
+                [lat, lat + r_deg * np.cos(rad)],
+                color="#08343A",
+                linewidth=4.2,
+                solid_capstyle="round",
                 zorder=24,
                 clip_on=True,
             )
-        )
-        for name, az, start_az, end_az in wedges:
-            theta1 = _azimuth_to_mpl(end_az)
-            theta2 = _azimuth_to_mpl(start_az)
-            ax.add_patch(
-                Wedge(
-                    (lon, lat),
-                    r_deg,
-                    theta1,
-                    theta2,
-                    facecolor="white",
-                    edgecolor="#222222",
-                    linewidth=0.7,
-                    zorder=25,
-                    clip_on=True,
-                )
-            )
-            label_az = np.radians(float(az) % 360.0)
-            lx = lon + (r_deg * 1.18) * np.sin(label_az)
-            ly = lat + (r_deg * 1.18) * np.cos(label_az)
-            ax.text(
-                lx, ly, name, ha="center", va="center", fontsize=4.2, color="#111111",
-                zorder=27, clip_on=True,
+            ax.plot(
+                [lon, lon + r_deg * np.sin(rad)],
+                [lat, lat + r_deg * np.cos(rad)],
+                color=BAD_SPOT_PIE_EDGE,
+                linewidth=2.4,
+                solid_capstyle="round",
+                zorder=25,
+                clip_on=True,
             )
         bearing = _bearing_deg(lat, lon, spot_lat, spot_lon)
-        aimed = min(wedges, key=lambda w: _ang_diff(w[1], bearing))
-        if _ang_diff(aimed[1], bearing) > 70.0:
+        aimed = min(azimuths, key=lambda az: _ang_diff(az, bearing))
+        if _ang_diff(aimed, bearing) > 70.0:
             continue
         dist_km = float(_equirect_km(lat, lon, spot_lat, spot_lon))
         if dist_km < radius_km * 1.8:
             continue
-        rim = r_deg * 1.55
-        x0 = lon + rim * np.sin(np.radians(bearing))
-        y0 = lat + rim * np.cos(np.radians(bearing))
+        x0 = lon + r_deg * np.sin(np.radians(bearing))
+        y0 = lat + r_deg * np.cos(np.radians(bearing))
         ax.annotate(
             "",
             xy=(spot_lon, spot_lat),
@@ -2025,6 +2018,12 @@ def plot_bad_spot_serial_maps(
         print(f"  {stem} bad spot {i}/{total}", flush=True)
         fig, ax = plt.subplots(figsize=(9.4, 8.6))
         zext = _zoom_extent(spot)
+        # Room for every sector arm when the site sits near the edge of the spot.
+        arm_km = 0.9
+        mid_lat = (zext[2] + zext[3]) / 2.0
+        arm_lon = arm_km / _km_per_deg_lon(mid_lat)
+        arm_lat = arm_km / 111.32
+        zext = (zext[0] - arm_lon, zext[1] + arm_lon, zext[2] - arm_lat, zext[3] + arm_lat)
         local = geo[
             geo["Longitude"].between(zext[0], zext[1])
             & geo["Latitude"].between(zext[2], zext[3])
