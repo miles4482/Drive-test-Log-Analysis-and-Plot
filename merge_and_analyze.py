@@ -1044,9 +1044,9 @@ def min_consecutive_m(column: str) -> float:
 
 # Expected values for the contract above. Kept separate from the live constants so
 # a later edit that retunes a rule fails the report check instead of passing quietly.
-# Spot counts are the published v1.41 result (circles, discrete areas) per sheet.
-# Idle is unchanged. Active is the Robi rows of the replacement Borga_Active_V2.1
-# AUTO DATA log, one strongest-RSRP row per latitude, longitude and timestamp.
+# Spot counts are the published v1.43 result (circles, discrete areas) per sheet.
+# Idle is unchanged. Active is Robi only, one Cell Id and one band per latitude
+# and longitude: the strongest RSRP on the AUTO DATA log.
 LOGIC_LOCK = {
     "active_operator": "Robi",
     "sweep_s": 4.0,
@@ -1069,7 +1069,7 @@ LOGIC_LOCK = {
         "Bad Spot RSRQ": (45, 0),
         "Bad Spot SINR": (204, 0),
         "Bad Spot RSRP_Active": (163, 0),
-        "Bad Spot RSRQ_Active": (52, 0),
+        "Bad Spot RSRQ_Active": (50, 0),
         "Bad Spot SINR_Active": (190, 0),
     },
 }
@@ -2332,13 +2332,38 @@ def best_server(df: pd.DataFrame) -> pd.DataFrame:
     return work.loc[idx].drop(columns=["_sweep"]).reset_index(drop=True)
 
 
-def best_carrier(df: pd.DataFrame) -> pd.DataFrame:
-    """Active Mode: one row per latitude, longitude and timestamp.
+def strongest_location(df: pd.DataFrame) -> pd.DataFrame:
+    """Active auto mode: one band at each latitude and longitude.
 
-    Several carriers are often logged at that same fix. The strongest RSRP is
-    kept, and its RSRQ and SINR are the values that are plotted.
+    Rows that share a latitude, longitude and Cell Id collapse to the strongest
+    RSRP, so one cell keeps one band. Then the strongest of those cells is kept
+    at that location. RSRQ and SINR stay on that row. Every other Cell Id at
+    the location is dropped, and a row with no Cell Id is not plotted.
     """
-    return strongest_fix(df)
+    work = df.dropna(subset=["RSRP", "Latitude", "Longitude", "Cell Id"]).copy()
+    if work.empty:
+        return work
+    work = work.reset_index(drop=True)
+    work["RSRP"] = pd.to_numeric(work["RSRP"], errors="coerce")
+    work["Latitude"] = pd.to_numeric(work["Latitude"], errors="coerce")
+    work["Longitude"] = pd.to_numeric(work["Longitude"], errors="coerce")
+    work["Cell Id"] = pd.to_numeric(work["Cell Id"], errors="coerce")
+    work = work.dropna(subset=["RSRP", "Latitude", "Longitude", "Cell Id"])
+    if work.empty:
+        return work
+    per_cell = work.groupby(["Latitude", "Longitude", "Cell Id"], sort=False)["RSRP"].idxmax()
+    work = work.loc[per_cell]
+    per_loc = work.groupby(["Latitude", "Longitude"], sort=False)["RSRP"].idxmax()
+    return work.loc[per_loc].reset_index(drop=True)
+
+
+def best_carrier(df: pd.DataFrame) -> pd.DataFrame:
+    """Active Mode: one Robi row per latitude and longitude.
+
+    The UE is in auto mode, so one band is plotted at a location. That band is
+    the strongest RSRP, and its RSRQ and SINR are the values that are plotted.
+    """
+    return strongest_location(df)
 
 
 def coverage_extent(df: pd.DataFrame) -> tuple[float, float, float, float]:

@@ -65,6 +65,7 @@ from merge_and_analyze import (
     best_carrier,
     best_server,
     strongest_fix,
+    strongest_location,
     plot_rsrp_bad_spot_map,
     plot_rsrp_coverage_map,
     plot_rsrq_bad_spot_map,
@@ -80,7 +81,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.42"
+REPORT_VERSION = "1.43"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -1297,8 +1298,8 @@ def build_cover(
     write_cell(
         ws, 50, 4,
         f"Maps and bad spots use {ACTIVE_OPERATOR} only, so Active sits beside the Idle scanner of the same network. "
-        f"Where several {ACTIVE_OPERATOR} rows share a latitude, longitude and timestamp, the strongest RSRP row is kept "
-        "and its RSRQ and SINR are the values drawn. A band that lost that comparison is left blank. "
+        f"Where several {ACTIVE_OPERATOR} rows share a latitude and longitude, one Cell Id is kept: the strongest RSRP. "
+        "That row is one band, and its RSRQ and SINR are the values drawn. Any other Cell Id at that location is not drawn. "
         f"The other operator ({other_n:,} samples) stays in output/Bogura_active_merged.csv.gz and is not drawn.",
         size=9, wrap=True,
     )
@@ -1462,9 +1463,10 @@ def build_kpi_bad_spot_sheet(
     active_rule = ""
     if mode.startswith("Active"):
         active_rule = (
-            f"Active Mode is the {ACTIVE_OPERATOR} UE. Where several rows share a latitude, longitude and "
-            "timestamp, only the strongest RSRP row is kept, and the RSRQ and SINR maps use that same row. "
-            "A band that lost that comparison is left blank at that spot. "
+            f"Active Mode is the {ACTIVE_OPERATOR} UE in auto mode, so one band is plotted at a location. "
+            "Rows that share a latitude, longitude and Cell Id keep the strongest RSRP. Then one Cell Id "
+            "remains at that location, again the strongest RSRP, and the RSRQ and SINR maps use that row. "
+            "Any other Cell Id at that location is left blank. "
         )
     note = (
         active_rule
@@ -1489,7 +1491,7 @@ def build_kpi_bad_spot_sheet(
     if mode.startswith("Active"):
         note = note.replace(
             "Best server is the strongest band per scanner sweep, so a weak band is never mapped as the coverage of a road.",
-            "That map keeps the strongest RSRP at each latitude, longitude and timestamp, so a weaker carrier at the same fix is not drawn.",
+            "That map keeps the strongest RSRP at each latitude and longitude, so only one Cell Id and one band are drawn there.",
         )
     write_cell(
         ws,
@@ -1982,13 +1984,18 @@ def _render_mode(df: pd.DataFrame, tag: str, extent, mode_label: str | None) -> 
     """Coverage maps, bad-spot maps and spot tables for one mode.
 
     tag is "" for Idle (existing file names) and "active" for the Active Mode copies.
-    Rows that share a latitude, longitude and timestamp collapse to the strongest
-    RSRP, and RSRQ and SINR stay on that row. Idle then keeps the strongest band
-    in each scanner sweep. Active band maps are that winning row's band only.
+    Idle rows that share a latitude, longitude and timestamp collapse to the
+    strongest RSRP, then the strongest band in each scanner sweep is kept.
+    Active auto mode keeps one Cell Id and one band per latitude and longitude,
+    the strongest RSRP, and RSRQ and SINR stay on that row.
     """
     suffix = f"_{tag}" if tag else ""
-    base = strongest_fix(df)
-    map_df = base if tag == "active" else best_server(base)
+    if tag == "active":
+        base = strongest_location(df)
+        map_df = base
+    else:
+        base = strongest_fix(df)
+        map_df = best_server(base)
     plot_rsrp_coverage_map(map_df, PLOTS_DIR / f"excel_route_rsrp{suffix}.png", extent=extent, mode_label=mode_label)
     plot_rsrq_coverage_map(map_df, PLOTS_DIR / f"excel_route_rsrq{suffix}.png", extent=extent, mode_label=mode_label)
     plot_sinr_coverage_map(map_df, PLOTS_DIR / f"excel_route_sinr{suffix}.png", extent=extent, mode_label=mode_label)
@@ -2071,9 +2078,9 @@ def build_report(df: pd.DataFrame, active: pd.DataFrame | None = None, out_path:
     active_view = None
     active_plotted = None
     if active_robi is not None and not active_robi.empty:
-        active_plotted = strongest_fix(active_robi)
+        active_plotted = strongest_location(active_robi)
         print(
-            f"Active plotted: {len(active_plotted):,} rows, strongest RSRP per lat/lon/time",
+            f"Active plotted: {len(active_plotted):,} rows, one band per lat/lon",
             flush=True,
         )
         active_extent = coverage_extent(active_plotted)

@@ -15,7 +15,7 @@ Idle scanner columns include `Time`, `Longitude`, `Latitude`, `Cell Id`, `DL EAR
 
 Active columns are already named `RSRP`, `RSRQ`, `SINR`, plus `Operator`, `Data Technology`, `DL EARFCN` and `Cell Id`. Campaign is **AUTO DATA**. The Operator column also contains Grameenphone. The report keeps rows whose Operator is exactly **Robi** (surrounding spaces are stripped) and does not draw Grameenphone. LTE and LTE CA both stay in when the operator is Robi. Those other-operator rows stay in the merged CSV.
 
-Where several rows share a latitude, longitude and timestamp, both modes keep **one row**: the strongest RSRP. RSRQ and SINR on the maps and on the RSRP vs KPIs charts are the values from that same row. On an Active band map, a carrier that lost that comparison is left blank at that spot. Idle still groups the remaining rows into scanner sweeps (at most 4 s and 40 m) and keeps the strongest band in the sweep.
+Active auto mode keeps **one band at each latitude and longitude**. Robi rows that share a latitude, longitude and Cell Id collapse to the strongest RSRP, so that cell keeps one band. Then one Cell Id remains at that location, again the strongest RSRP. RSRQ and SINR come from that row. Any other Cell Id at that location is not plotted, and a row with no Cell Id is not plotted. Idle still collapses rows that share a latitude, longitude and timestamp, then keeps the strongest band in each scanner sweep (at most 4 s and 40 m).
 
 ```
 Borga_Idle_V2.0.7z              -->  1.csv … 15.csv                         -->  output/Bogura_merged.csv.gz
@@ -77,7 +77,7 @@ python merge_and_analyze.py --from-merged
 | Dominant bands | B8 900 (28.4%), B1 2100 (25.4%), B3 1800 (23.5%), B41 2500 (22.7%) |
 | Unique Cell Ids | 5,132 |
 
-Active log (replacement `Borga_Active_V2.1`, campaign AUTO DATA): 2,185,081 rows, of which 1,075,048 are Robi and 1,110,033 are the other operator. After keeping the strongest RSRP at each latitude, longitude and timestamp, 561,553 Robi rows are plotted. That winning row has one layer, so an Active L1800 map is blank wherever L2100 (or another layer) was stronger at the same fix. RSRQ and SINR come from that same row.
+Active log (replacement `Borga_Active_V2.1`, campaign AUTO DATA): 2,185,081 rows, of which 1,075,048 are Robi and 1,110,033 are the other operator. Robi rows with no Cell Id are not plotted. At each latitude and longitude one Cell Id and one band remain, the strongest RSRP: 280,640 plotted rows. An Active L1800 map is blank wherever L2100 (or another layer) was stronger at that same coordinate. RSRQ and SINR come from that same row.
 
 The Idle all-band coverage maps show the **best server per scanner sweep**. Rows that already share a latitude, longitude and timestamp are reduced to the strongest RSRP first (395,121 of 1,178,276). The scanner still writes the bands at their own millisecond timestamps and revisits each band about every 3 s, so the remaining rows are grouped into sweep windows (at most 4 s and 40 m of the same pass) before the strongest band is taken. Idle band maps are built from those surviving rows, then the same sweep.
 
@@ -95,7 +95,7 @@ Throughput (PDCP DL) and CQI are on the same legend sheet but are not in these I
 
 **Bad Spot RSRP / RSRQ / SINR** are the Idle sheets. **Bad Spot RSRP_Active / RSRQ_Active / SINR_Active** apply the same rules to the Active Robi track. Each sheet puts the **combined all-band view on top with no circles**, then the bad spots one under another: Bad Spot 1, Bad Spot 2, and so on. Each of those maps is large, sits on the left, and leaves the columns to its right empty. Map numbers are omitted.
 
-Active Mode plots the **strongest RSRP at each latitude, longitude and timestamp** (Robi only). RSRQ and SINR follow that row, so two bands are not drawn on top of each other at the same fix. Idle does the same exact-key collapse, then keeps the strongest band per scanner sweep.
+Active Mode plots **one band per latitude and longitude** (Robi only): the strongest RSRP, and the Cell Id that carried it. RSRQ and SINR follow that row, so L1800 and L2100 are not drawn on top of each other at the same coordinate. Idle collapses the same timestamp first, then keeps the strongest band per scanner sweep.
 
 - Poor is **RSRP ≤ −115 dBm** (magenta and red only; yellow is not a bad-spot colour), **RSRQ ≤ −20 dB** (red), **SINR ≤ 0 dB** (orange and red)
 - Maps and rules read the same **50 m road bins**: a bin is coloured by the median of the samples measured in it and counts as poor only when that median is at or below the threshold, and poor bins are drawn on top of good ones — so a circle can only sit on colour the map actually shows
@@ -104,23 +104,23 @@ Active Mode plots the **strongest RSRP at each latitude, longitude and timestamp
 - **Sector marks are only on those individual bad-spot maps.** Cells in `System DUMP.xlsb` are rolled up by the Sector column: one sector name covers many EUtranCellId values. If any sector of a site falls in the view, every sector of that site is drawn. The mark is a transparent cyan outline with no fill, and the Sector name is written at the end of each arm. A yellow distance line is drawn only from a sector whose azimuth points at that bad spot (within 32°). A sector that faces another way has no line
 - **Discrete area:** leftover poor bins covering at least 1 km² where that area is at least half poor (dotted circle). With every run already covered, this drive has none
 - Each sheet draws the 16 longest circles as separate maps and lists up to 300 in the table, longest first, and states the full count
-- Published circle counts, with 0 discrete areas: Idle RSRP 41, RSRQ 45, SINR 204; Active Robi RSRP 163, RSRQ 52, SINR 190. These rules are locked in `LOGIC_LOCK`. `verify_report` fails if a rebuild moves a threshold, a colour, the circle size, or a count
+- Published circle counts, with 0 discrete areas: Idle RSRP 41, RSRQ 45, SINR 204; Active Robi RSRP 163, RSRQ 50, SINR 190. These rules are locked in `LOGIC_LOCK`. `verify_report` fails if a rebuild moves a threshold, a colour, the circle size, or a count
 
-### Maps are satellite, and each bad-spot circle is its own shape (v1.42)
+### Maps are satellite, and each bad-spot circle is its own shape (v1.43)
 
 Every coverage map and bad-spot map is drawn on Esri World Imagery. The combined view is the satellite route only: no circle is painted into it and no circle shape is placed on it. Bad Spot 1, Bad Spot 2, and the rest follow down the left side of the sheet, each a larger map with one movable circle. A site that falls in that view is drawn as a transparent cyan outline, one arm per sector, with the Sector name at the end of the arm and no fill. A circle is at most 10 km across. Where the poor road is in separate pockets, several circles sit inside that 10 km neighbourhood.
 
-## Download Excel report (v1.42)
+## Download Excel report (v1.43)
 
-**v1.42 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.42.xlsx
+**v1.43 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.43.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.42.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.43.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.42.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.43.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
 Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 
