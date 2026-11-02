@@ -64,6 +64,7 @@ from merge_and_analyze import (
     min_consecutive_m,
     best_carrier,
     best_server,
+    strongest_fix,
     plot_rsrp_bad_spot_map,
     plot_rsrp_coverage_map,
     plot_rsrq_bad_spot_map,
@@ -79,7 +80,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.40"
+REPORT_VERSION = "1.41"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -1160,7 +1161,13 @@ def _campaign_label(series: pd.Series) -> str:
     return str(values.mode().iloc[0])
 
 
-def build_cover(ws: Worksheet, df: pd.DataFrame, active: pd.DataFrame | None = None, active_raw_n: int = 0) -> None:
+def build_cover(
+    ws: Worksheet,
+    df: pd.DataFrame,
+    active: pd.DataFrame | None = None,
+    active_raw_n: int = 0,
+    active_operator_n: int = 0,
+) -> None:
     last_col = 20
     banner(
         ws,
@@ -1253,7 +1260,9 @@ def build_cover(ws: Worksheet, df: pd.DataFrame, active: pd.DataFrame | None = N
         write_cell(ws, 44, 1, "Active Mode log was not provided.", size=12, color="7F8C8D")
         return
     write_cell(ws, 44, 1, "Dataset", size=14, bold=True)
-    other_n = max(0, int(active_raw_n) - int(len(active)))
+    plotted_n = int(len(active))
+    operator_n = int(active_operator_n) if active_operator_n else plotted_n
+    other_n = max(0, int(active_raw_n) - operator_n)
     campaign = _campaign_label(active["Campaign"]) if "Campaign" in active.columns else ""
     voice = "VOICE" in campaign.upper()
     info_rows = [
@@ -1261,7 +1270,8 @@ def build_cover(ws: Worksheet, df: pd.DataFrame, active: pd.DataFrame | None = N
         ["Archive", " + ".join(p.name for p in ACTIVE_PARTS)],
         ["Campaign", campaign or "—"],
         ["Plotted operator", ACTIVE_OPERATOR],
-        ["Plotted samples", int(len(active))],
+        [f"{ACTIVE_OPERATOR} rows in the log", operator_n],
+        ["Plotted samples", plotted_n],
         ["Other operator samples", other_n],
         ["CSV files", int(active["Source"].nunique())],
         ["Start time", active["Time"].min()],
@@ -1269,9 +1279,9 @@ def build_cover(ws: Worksheet, df: pd.DataFrame, active: pd.DataFrame | None = N
         ["Unique Cell Ids", int(active["Cell Id"].nunique())],
     ]
     write_table(ws, 45, 1, ["Item", "Value"], info_rows, num_formats={1: "#,##0"})
-    ws.cell(53, 2).number_format = "yyyy-mm-dd hh:mm:ss"
     ws.cell(54, 2).number_format = "yyyy-mm-dd hh:mm:ss"
-    write_cell(ws, 44, 4, f"Radio KPIs ({ACTIVE_OPERATOR}, all samples)", size=14, bold=True)
+    ws.cell(55, 2).number_format = "yyyy-mm-dd hh:mm:ss"
+    write_cell(ws, 44, 4, f"Radio KPIs ({ACTIVE_OPERATOR}, plotted rows)", size=14, bold=True)
     stats_headers = ["KPI", "Count", "Min", "P5", "Median", "Mean", "P95", "Max"]
     stats_rows = []
     for name in ("RSRP", "RSRQ", "SINR"):
@@ -1287,8 +1297,9 @@ def build_cover(ws: Worksheet, df: pd.DataFrame, active: pd.DataFrame | None = N
     write_cell(
         ws, 50, 4,
         f"Maps and bad spots use {ACTIVE_OPERATOR} only, so Active sits beside the Idle scanner of the same network. "
-        f"The other operator ({other_n:,} samples) stays in output/Bogura_active_merged.csv.gz and is not drawn. "
-        "Active best server is the strongest carrier at each timestamp.",
+        f"Where several {ACTIVE_OPERATOR} rows share a latitude, longitude and timestamp, the strongest RSRP row is kept "
+        "and its RSRQ and SINR are the values drawn. A band that lost that comparison is left blank. "
+        f"The other operator ({other_n:,} samples) stays in output/Bogura_active_merged.csv.gz and is not drawn.",
         size=9, wrap=True,
     )
 
@@ -1451,13 +1462,11 @@ def build_kpi_bad_spot_sheet(
     active_rule = ""
     if mode.startswith("Active"):
         active_rule = (
-            f"Active Mode is the {ACTIVE_OPERATOR} UE. Best server is the strongest carrier logged "
-            "at that timestamp, because the UE reports every carrier together. "
+            f"Active Mode is the {ACTIVE_OPERATOR} UE. Where several rows share a latitude, longitude and "
+            "timestamp, only the strongest RSRP row is kept, and the RSRQ and SINR maps use that same row. "
+            "A band that lost that comparison is left blank at that spot. "
         )
-    write_cell(
-        ws,
-        4,
-        1,
+    note = (
         active_rule
         + BAD_SPOT_KPI_NOTES[kpi]
         + " Maps and rules read the same 50 m road bins: a bin is coloured by the median of the "
@@ -1468,12 +1477,24 @@ def build_kpi_bad_spot_sheet(
         "Circle 2, and so on, in the same order as the table, so you can drag it. The RSRP, RSRQ and "
         "SINR sheets do not repeat these circles. Each bad-spot map draws a transparent cyan outline "
         "for every sector of a site that falls in that view, from System DUMP.xlsb. No sector of "
-        "that site is left out, and the outline is not filled. Where a sector shoots toward that "
-        "bad spot, a yellow line shows the distance. The columns to the right of each "
+        "that site is left out, and the outline is not filled. The label on each arm is the Sector "
+        "name. Where a sector shoots toward that bad spot, a yellow line shows the distance. "
+        "The columns to the right of each "
         "map are left empty. Several circles can sit inside one 10 km neighbourhood when the poor "
         "road is not one stretch. A discrete patch of at least 1 km\u00b2 is a dotted circle. "
         + _detection_summary(kpi, spots)
-        + " Numbers are not drawn on the maps.",
+        + " Numbers are not drawn on the maps."
+    )
+    if mode.startswith("Active"):
+        note = note.replace(
+            "Best server is the strongest band per scanner sweep, so a weak band is never mapped as the coverage of a road.",
+            "That map keeps the strongest RSRP at each latitude, longitude and timestamp, so a weaker carrier at the same fix is not drawn.",
+        )
+    write_cell(
+        ws,
+        4,
+        1,
+        note,
         size=11,
         wrap=True,
     )
@@ -1956,13 +1977,17 @@ def _with_layers(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _render_mode(df: pd.DataFrame, picker, tag: str, extent, mode_label: str | None) -> dict:
+def _render_mode(df: pd.DataFrame, tag: str, extent, mode_label: str | None) -> dict:
     """Coverage maps, bad-spot maps and spot tables for one mode.
 
     tag is "" for Idle (existing file names) and "active" for the Active Mode copies.
+    Rows that share a latitude, longitude and timestamp collapse to the strongest
+    RSRP, and RSRQ and SINR stay on that row. Idle then keeps the strongest band
+    in each scanner sweep. Active band maps are that winning row's band only.
     """
     suffix = f"_{tag}" if tag else ""
-    map_df = picker(df)
+    base = strongest_fix(df)
+    map_df = base if tag == "active" else best_server(base)
     plot_rsrp_coverage_map(map_df, PLOTS_DIR / f"excel_route_rsrp{suffix}.png", extent=extent, mode_label=mode_label)
     plot_rsrq_coverage_map(map_df, PLOTS_DIR / f"excel_route_rsrq{suffix}.png", extent=extent, mode_label=mode_label)
     plot_sinr_coverage_map(map_df, PLOTS_DIR / f"excel_route_sinr{suffix}.png", extent=extent, mode_label=mode_label)
@@ -1970,7 +1995,9 @@ def _render_mode(df: pd.DataFrame, picker, tag: str, extent, mode_label: str | N
     rsrq_band: dict[str, Path] = {}
     sinr_band: dict[str, Path] = {}
     for layer in REPORT_LAYERS:
-        part = picker(filter_by_layer(df, layer))
+        part = filter_by_layer(base, layer)
+        if tag != "active":
+            part = best_server(part)
         rsrp_band[layer] = plot_rsrp_coverage_map(
             part, PLOTS_DIR / f"excel_route_rsrp_{layer}{suffix}.png",
             layer=layer, extent=extent, mode_label=mode_label,
@@ -2032,32 +2059,40 @@ def build_report(df: pd.DataFrame, active: pd.DataFrame | None = None, out_path:
             active_robi = active.loc[operator.eq(ACTIVE_OPERATOR)].copy()
         else:
             active_robi = active
-        print(f"Active Mode plotted: {len(active_robi):,} {ACTIVE_OPERATOR} rows of {active_raw_n:,}")
+        print(f"Active Mode {ACTIVE_OPERATOR}: {len(active_robi):,} rows of {active_raw_n:,}")
 
-    idle_track = best_server(df)
+    idle_fixed = strongest_fix(df)
+    print(f"Idle strongest row per lat/lon/time: {len(idle_fixed):,} of {len(df):,}", flush=True)
+    idle_track = best_server(idle_fixed)
     extent = coverage_extent(idle_track)
     print(f"Idle extent {tuple(round(v, 5) for v in extent)}", flush=True)
-    idle = _render_mode(df, best_server, "", extent, None)
+    idle = _render_mode(df, "", extent, None)
     active_view = None
+    active_plotted = None
     if active_robi is not None and not active_robi.empty:
-        active_extent = coverage_extent(best_carrier(active_robi))
+        active_plotted = strongest_fix(active_robi)
+        print(
+            f"Active plotted: {len(active_plotted):,} rows, strongest RSRP per lat/lon/time",
+            flush=True,
+        )
+        active_extent = coverage_extent(active_plotted)
         print(f"Active extent {tuple(round(v, 5) for v in active_extent)}", flush=True)
-        active_view = _render_mode(active_robi, best_carrier, "active", active_extent, "Active")
+        active_view = _render_mode(active_robi, "active", active_extent, "Active")
 
-    scatter_sinr = save_rsrp_scatter(df, "SINR", PLOTS_DIR / "excel_scatter_rsrp_sinr.png", "SINR (dB)", "RSRP vs SINR", ylim=(-10, 32))
-    scatter_rsrq = save_rsrp_scatter(df, "RSRQ", PLOTS_DIR / "excel_scatter_rsrp_rsrq.png", "RSRQ (dB)", "RSRP vs RSRQ", ylim=(-24, 0))
+    scatter_sinr = save_rsrp_scatter(idle_fixed, "SINR", PLOTS_DIR / "excel_scatter_rsrp_sinr.png", "SINR (dB)", "RSRP vs SINR", ylim=(-10, 32))
+    scatter_rsrq = save_rsrp_scatter(idle_fixed, "RSRQ", PLOTS_DIR / "excel_scatter_rsrp_rsrq.png", "RSRQ (dB)", "RSRP vs RSRQ", ylim=(-24, 0))
     shutil.copy2(idle["rsrp_bad"], PLOTS_DIR / "08_bad_spots_rsrp.png")
     shutil.copy2(idle["rsrq_bad"], PLOTS_DIR / "08_bad_spots_rsrq.png")
     shutil.copy2(idle["sinr_bad"], PLOTS_DIR / "08_bad_spots_sinr.png")
-    save_binned_vs_preview(df, PLOTS_DIR / "excel_rsrp_vs_sinr_lines.png")
+    save_binned_vs_preview(idle_fixed, PLOTS_DIR / "excel_rsrp_vs_sinr_lines.png")
     save_report_preview(df, PLOTS_DIR / "excel_rsrp_rsrq_sinr_histograms.png")
     if active_view is not None:
         save_rsrp_scatter(
-            active_robi, "SINR", PLOTS_DIR / "excel_scatter_rsrp_sinr_active.png",
+            active_plotted, "SINR", PLOTS_DIR / "excel_scatter_rsrp_sinr_active.png",
             "SINR (dB)", "RSRP vs SINR — Active", ylim=(-10, 32),
         )
         save_rsrp_scatter(
-            active_robi, "RSRQ", PLOTS_DIR / "excel_scatter_rsrp_rsrq_active.png",
+            active_plotted, "RSRQ", PLOTS_DIR / "excel_scatter_rsrp_rsrq_active.png",
             "RSRQ (dB)", "RSRP vs RSRQ — Active", ylim=(-24, 0),
         )
 
@@ -2080,10 +2115,14 @@ def build_report(df: pd.DataFrame, active: pd.DataFrame | None = None, out_path:
     data_ws.sheet_state = "hidden"
 
     blocks = write_chart_data(data_ws, df)
+    blocks["vs_n"] = write_vs_block(data_ws, idle_fixed, 50, 51, 52)
     active_vs_n = blocks["vs_n"]
     if active_view is not None:
-        active_vs_n = write_vs_block(data_ws, active_robi, 54, 55, 56)
-    build_cover(cover, df, active_robi, active_raw_n)
+        active_vs_n = write_vs_block(data_ws, active_plotted, 54, 55, 56)
+    build_cover(
+        cover, df, active_plotted, active_raw_n,
+        0 if active_robi is None else len(active_robi),
+    )
     add_cover_charts(cover, data_ws, blocks)
     empty_bands: dict[str, Path] = {}
     build_kpi_sheet(
@@ -2122,10 +2161,13 @@ def build_report(df: pd.DataFrame, active: pd.DataFrame | None = None, out_path:
             PLOTS_DIR / "excel_scatter_rsrp_sinr_active.png",
             PLOTS_DIR / "excel_scatter_rsrp_rsrq_active.png",
             title="  RSRP vs KPIs Active Mode",
-            subtitle=f"  {ACTIVE_OPERATOR} UE  |  Strongest carrier per timestamp  |  Gridlines off",
+            subtitle=f"  {ACTIVE_OPERATOR} UE  |  RSRQ and SINR from the strongest RSRP row  |  Gridlines off",
             cat_col=54, sinr_col=55, rsrq_col=56,
         )
-    build_rsrp_vs_sheet(time_ws, data_ws, blocks["vs_n"], scatter_sinr, scatter_rsrq)
+    build_rsrp_vs_sheet(
+        time_ws, data_ws, blocks["vs_n"], scatter_sinr, scatter_rsrq,
+        subtitle="  Idle V2.0 scanner  |  RSRQ and SINR from the strongest RSRP row  |  Gridlines off",
+    )
     build_sample_log(sample_ws, df)
 
     for ws in wb.worksheets:

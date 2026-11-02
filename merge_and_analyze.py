@@ -443,8 +443,10 @@ def draw_bad_spot_sector_pies(ax, spot: pd.Series) -> None:
             continue
         lat = float(here["lat"].median())
         lon = float(here["lon"].median())
-        azimuths = [float(a) % 360.0 for a in part["azimuth"].tolist()]
-        for az in azimuths:
+        azimuths = []
+        for _, sec in part.iterrows():
+            az = float(sec["azimuth"]) % 360.0
+            azimuths.append(az)
             rad = np.radians(az)
             ax.plot(
                 [lon, lon + r_deg * np.sin(rad)],
@@ -463,6 +465,21 @@ def draw_bad_spot_sector_pies(ax, spot: pd.Series) -> None:
                 solid_capstyle="round",
                 zorder=25,
                 clip_on=True,
+            )
+            name = str(sec["Sector"]).strip()
+            if not name or name.lower() == "nan":
+                continue
+            ax.text(
+                lon + r_deg * 1.28 * np.sin(rad),
+                lat + r_deg * 1.28 * np.cos(rad),
+                name,
+                ha="center",
+                va="center",
+                fontsize=5.4,
+                color="#04282C",
+                zorder=29,
+                clip_on=True,
+                bbox={"boxstyle": "round,pad=0.08", "fc": "white", "ec": "none", "alpha": 0.84},
             )
         bearing = _bearing_deg(lat, lon, spot_lat, spot_lon)
         aimed = min(azimuths, key=lambda az: _ang_diff(az, bearing))
@@ -1021,8 +1038,9 @@ def min_consecutive_m(column: str) -> float:
 
 # Expected values for the contract above. Kept separate from the live constants so
 # a later edit that retunes a rule fails the report check instead of passing quietly.
-# Spot counts are the published v1.39 result (circles, discrete areas) per sheet.
-# Idle is unchanged. Active is the Robi rows of Borga_Active_V2.1.
+# Spot counts are the published v1.41 result (circles, discrete areas) per sheet.
+# Idle is unchanged. Active is the Robi rows of the replacement Borga_Active_V2.1
+# AUTO DATA log, one strongest-RSRP row per latitude, longitude and timestamp.
 LOGIC_LOCK = {
     "active_operator": "Robi",
     "sweep_s": 4.0,
@@ -1044,9 +1062,9 @@ LOGIC_LOCK = {
         "Bad Spot RSRP": (41, 0),
         "Bad Spot RSRQ": (45, 0),
         "Bad Spot SINR": (204, 0),
-        "Bad Spot RSRP_Active": (124, 0),
-        "Bad Spot RSRQ_Active": (35, 0),
-        "Bad Spot SINR_Active": (191, 0),
+        "Bad Spot RSRP_Active": (163, 0),
+        "Bad Spot RSRQ_Active": (52, 0),
+        "Bad Spot SINR_Active": (190, 0),
     },
 }
 
@@ -2259,25 +2277,35 @@ def _sweep_group_ids(
     return ids
 
 
-def best_server(df: pd.DataFrame) -> pd.DataFrame:
-    """All-band best server: strongest RSRP per scanner sweep.
+def strongest_fix(df: pd.DataFrame) -> pd.DataFrame:
+    """One row per latitude, longitude and timestamp: the strongest RSRP.
 
-    The scanner writes one row per band with its own millisecond timestamp and
-    revisits each band about every 3 s, so grouping on the exact timestamp never
-    lets the bands compete: it just keeps whichever band happened to be sampled
-    at that instant (L2600 is polled ~4x more often than L900, so it won 35 % of
-    the picks and painted weak-band levels onto the all-band map). Grouping each
-    pass into short sweep windows bounded in both time and distance lets every
-    band that was measured at a location compete for best server.
+    RSRQ and SINR stay on that same row. Any other row at that fix is dropped.
     """
     work = df.dropna(subset=["RSRP", "Time", "Latitude", "Longitude"]).copy()
     if work.empty:
         return work
+    work = work.reset_index(drop=True)
     work["RSRP"] = pd.to_numeric(work["RSRP"], errors="coerce")
     work["Latitude"] = pd.to_numeric(work["Latitude"], errors="coerce")
     work["Longitude"] = pd.to_numeric(work["Longitude"], errors="coerce")
     work["Time"] = pd.to_datetime(work["Time"], errors="coerce")
     work = work.dropna(subset=["RSRP", "Latitude", "Longitude", "Time"])
+    if work.empty:
+        return work
+    idx = work.groupby(["Time", "Latitude", "Longitude"], sort=False)["RSRP"].idxmax()
+    return work.loc[idx].reset_index(drop=True)
+
+
+def best_server(df: pd.DataFrame) -> pd.DataFrame:
+    """All-band best server: strongest RSRP per scanner sweep.
+
+    Rows that share a latitude, longitude and timestamp are reduced to the
+    strongest RSRP first. The scanner still writes one row per band with its own
+    millisecond timestamp, so the remaining rows are grouped into short sweep
+    windows and the strongest band in that window is kept.
+    """
+    work = strongest_fix(df)
     if work.empty:
         return work
     sort_cols = ["Source", "Time"] if "Source" in work.columns else ["Time"]
@@ -2299,25 +2327,12 @@ def best_server(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def best_carrier(df: pd.DataFrame) -> pd.DataFrame:
-    """Active Mode best server: strongest RSRP among carriers logged at one instant.
+    """Active Mode: one row per latitude, longitude and timestamp.
 
-    Unlike the idle scanner, the UE writes every carrier of the connection at the
-    same timestamp, so there is no sweep window to reconstruct. One row per
-    Source+Time keeps the serving connection and lets the carriers compete.
+    Several carriers are often logged at that same fix. The strongest RSRP is
+    kept, and its RSRQ and SINR are the values that are plotted.
     """
-    work = df.dropna(subset=["RSRP", "Time", "Latitude", "Longitude"]).copy()
-    if work.empty:
-        return work
-    work["RSRP"] = pd.to_numeric(work["RSRP"], errors="coerce")
-    work["Latitude"] = pd.to_numeric(work["Latitude"], errors="coerce")
-    work["Longitude"] = pd.to_numeric(work["Longitude"], errors="coerce")
-    work["Time"] = pd.to_datetime(work["Time"], errors="coerce")
-    work = work.dropna(subset=["RSRP", "Latitude", "Longitude", "Time"])
-    if work.empty:
-        return work
-    keys = ["Source", "Time"] if "Source" in work.columns else ["Time"]
-    idx = work.groupby(keys, sort=False)["RSRP"].idxmax()
-    return work.loc[idx].reset_index(drop=True)
+    return strongest_fix(df)
 
 
 def coverage_extent(df: pd.DataFrame) -> tuple[float, float, float, float]:
