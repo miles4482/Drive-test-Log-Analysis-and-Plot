@@ -20,6 +20,16 @@
   }
   header .check input { width: 15px; height: 15px; margin: 0; accent-color: #0b3a58; }
   header button { cursor: pointer; }
+  header input[type="search"] {
+    font: inherit; color: #1a1a1a; background: #fff; border: 0; border-radius: 4px;
+    padding: 4px 8px; width: 150px;
+  }
+  header button.on { background: #F5C400; }
+  .ruler-tag { background: transparent; border: 0; }
+  .ruler-tag span {
+    background: #fff; border: 1px solid #222; padding: 1px 5px;
+    font: 600 12px "Segoe UI", Calibri, sans-serif;
+  }
   #map { flex: 1; min-height: 0; background: #d5d8dc; }
   .legend {
     background: #fff; border: 1px solid #000; padding: 8px 10px 6px; line-height: 1.35;
@@ -49,18 +59,18 @@
         <option value="active">Active</option>
       </select>
     </label>
-    <label>Layer
-      <select id="layer">
-        <option value="all">All bands</option>
-        <option value="L900">L900</option>
-        <option value="L1800">L1800</option>
-        <option value="L2100">L2100</option>
-        <option value="L2600">L2600</option>
-      </select>
-    </label>
+    <span>Layer</span>
+    <label class="check"><input type="checkbox" class="band" value="L900" checked> L900</label>
+    <label class="check"><input type="checkbox" class="band" value="L1800" checked> L1800</label>
+    <label class="check"><input type="checkbox" class="band" value="L2100" checked> L2100</label>
+    <label class="check"><input type="checkbox" class="band" value="L2600" checked> L2600</label>
     <label class="check"><input type="checkbox" id="pies" checked> Pie widget</label>
     <label class="check"><input type="checkbox" id="levels" checked> Sector level</label>
+    <label class="check"><input type="checkbox" id="sitenames" checked> Site level</label>
+    <button type="button" id="ruler">Ruler</button>
     <button type="button" id="fit">Fit route</button>
+    <input id="q" type="search" placeholder="Site or sector" aria-label="Site or sector">
+    <button type="button" id="search">Search</button>
     <span id="status">Loading the drive…</span>
   </header>
   <div id="map"></div>
@@ -266,7 +276,7 @@ const SpotCanvas = L.Layer.extend({
         }
       }
     }
-    if (best < 0) return;
+    if (best < 0 || rulerOn) return;
     const cell = pack.cell[best] === null ? "—" : String(pack.cell[best]);
     const nameId = pack.name[best] || 0;
     const name = COVERAGE.names[nameId] || "";
@@ -359,19 +369,23 @@ const PieCanvas = L.Layer.extend({
     const bounds = map.getBounds().pad(0.2);
     const km = this._armKm();
     const showNames = document.getElementById("levels").checked;
+    const showSites = document.getElementById("sitenames").checked;
     ctx.lineCap = "round";
     ctx.font = "9px Segoe UI, Calibri, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     const labels = [];
+    const siteLabels = [];
     for (let s = 0; s < sites.length; s++) {
       const lat = sites[s][0];
       const lon = sites[s][1];
       if (!bounds.contains([lat, lon])) continue;
-      const arms = sites[s][2];
+      const siteName = sites[s][2] || "";
+      const arms = sites[s][3] || [];
       const centre = map.latLngToLayerPoint([lat, lon]);
       const cx = centre.x - origin.x;
       const cy = centre.y - origin.y;
+      if (showSites && siteName) siteLabels.push([cx, cy - 10, siteName]);
       for (let a = 0; a < arms.length; a++) {
         const az = arms[a][1] * Math.PI / 180;
         const tip = map.latLngToLayerPoint(offsetKm(lat, lon, arms[a][1], km));
@@ -405,6 +419,17 @@ const PieCanvas = L.Layer.extend({
       ctx.fillStyle = "#04282C";
       ctx.fillText(text, x, y);
     }
+    ctx.font = "8px Segoe UI, Calibri, sans-serif";
+    for (let i = 0; i < siteLabels.length; i++) {
+      const x = siteLabels[i][0];
+      const y = siteLabels[i][1];
+      const text = siteLabels[i][2];
+      const width = ctx.measureText(text).width + 4;
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      ctx.fillRect(x - width / 2, y - 5, width, 10);
+      ctx.fillStyle = "#7A1F6D";
+      ctx.fillText(text, x, y);
+    }
   }
 });
 
@@ -429,9 +454,63 @@ function syncPies() {
   }
 }
 
+const BANDS = ["L900", "L1800", "L2100", "L2600"];
+
+function selectedBands() {
+  return Array.prototype.map.call(
+    document.querySelectorAll(".band:checked"),
+    function (box) { return box.value; }
+  );
+}
+
+function emptyPack() {
+  return { lon: [], lat: [], rsrp: [], rsrq: [], cell: [], name: [] };
+}
+
+function combinePacks(packs) {
+  const points = [];
+  packs.forEach(function (pack) {
+    if (!pack) return;
+    for (let i = 0; i < pack.lon.length; i++) {
+      points.push({
+        lon: pack.lon[i], lat: pack.lat[i], rsrp: pack.rsrp[i], rsrq: pack.rsrq[i],
+        cell: pack.cell[i], name: pack.name[i]
+      });
+    }
+  });
+  if (!points.length) return emptyPack();
+  let latSum = 0;
+  for (let i = 0; i < points.length; i++) latSum += points[i].lat;
+  const ref = Math.round((latSum / points.length) * 10) / 10;
+  const dlat = 0.05 / 111.32;
+  const dlon = 0.05 / (111.32 * Math.cos(ref * Math.PI / 180));
+  const bins = new Map();
+  points.forEach(function (point) {
+    const key = Math.floor(point.lat / dlat) + "," + Math.floor(point.lon / dlon);
+    const prev = bins.get(key);
+    const score = point.rsrp === null ? -9999 : point.rsrp;
+    const prevScore = !prev || prev.rsrp === null ? -9999 : prev.rsrp;
+    if (!prev || score > prevScore) bins.set(key, point);
+  });
+  const out = emptyPack();
+  bins.forEach(function (point) {
+    out.lon.push(point.lon);
+    out.lat.push(point.lat);
+    out.rsrp.push(point.rsrp);
+    out.rsrq.push(point.rsrq);
+    out.cell.push(point.cell);
+    out.name.push(point.name);
+  });
+  return out;
+}
+
 function currentPack() {
-  const key = document.getElementById("mode").value + "|" + document.getElementById("layer").value;
-  return COVERAGE.sets[key];
+  const mode = document.getElementById("mode").value;
+  const bands = selectedBands();
+  if (!bands.length) return emptyPack();
+  if (bands.length === BANDS.length) return COVERAGE.sets[mode + "|all"];
+  if (bands.length === 1) return COVERAGE.sets[mode + "|" + bands[0]];
+  return combinePacks(bands.map(function (band) { return COVERAGE.sets[mode + "|" + band]; }));
 }
 
 function fitRoute() {
@@ -470,18 +549,126 @@ function draw() {
   }
   spots = new SpotCanvas(pack, kpi).addTo(map);
   if (pies) pies.bringFront();
+  const bands = selectedBands();
+  const bandText = bands.length === BANDS.length ? "all bands" : (bands.join("+") || "no band");
   document.getElementById("status").textContent =
-    shown.toLocaleString() + " spots · click a spot for CellID and CellName";
+    shown.toLocaleString() + " spots · " + bandText + " · click a spot for CellID and CellName";
 }
 
-["kpi", "mode", "layer"].forEach(function (id) {
+let rulerOn = false;
+let rulerPts = [];
+let rulerLine = null;
+let rulerLabel = null;
+
+function metresBetween(a, b) {
+  const r = 6371000;
+  const dLat = (b.lat - a.lat) * Math.PI / 180;
+  const dLon = (b.lng - a.lng) * Math.PI / 180;
+  const lat1 = a.lat * Math.PI / 180;
+  const lat2 = b.lat * Math.PI / 180;
+  const h = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return 2 * r * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+function clearRuler() {
+  rulerPts = [];
+  if (rulerLine) { map.removeLayer(rulerLine); rulerLine = null; }
+  if (rulerLabel) { map.removeLayer(rulerLabel); rulerLabel = null; }
+}
+
+function drawRuler() {
+  if (rulerLine) map.removeLayer(rulerLine);
+  if (rulerLabel) map.removeLayer(rulerLabel);
+  rulerLine = null;
+  rulerLabel = null;
+  if (!rulerPts.length) return;
+  rulerLine = L.polyline(rulerPts, { color: "#F5C400", weight: 3 }).addTo(map);
+  if (rulerPts.length < 2) return;
+  const metres = metresBetween(rulerPts[0], rulerPts[1]);
+  const mid = L.latLng(
+    (rulerPts[0].lat + rulerPts[1].lat) / 2,
+    (rulerPts[0].lng + rulerPts[1].lng) / 2
+  );
+  const text = Math.round(metres).toLocaleString() + " m";
+  rulerLabel = L.marker(mid, {
+    interactive: false,
+    icon: L.divIcon({ className: "ruler-tag", html: "<span>" + text + "</span>", iconSize: [88, 18], iconAnchor: [44, 9] })
+  }).addTo(map);
+}
+
+function onMapClick(ev) {
+  if (!rulerOn) return;
+  rulerPts.push(ev.latlng);
+  if (rulerPts.length > 2) rulerPts = [ev.latlng];
+  drawRuler();
+}
+
+const searchLayer = L.layerGroup().addTo(map);
+
+function runSearch() {
+  const query = document.getElementById("q").value.trim().toLowerCase();
+  searchLayer.clearLayers();
+  if (!query) return;
+  const exact = [];
+  const partial = [];
+  (COVERAGE.sites || []).forEach(function (site) {
+    const siteName = String(site[2] || "");
+    const arms = site[3] || [];
+    const sectors = arms.map(function (arm) { return String(arm[0] || ""); });
+    const exactHit = siteName.toLowerCase() === query || sectors.some(function (name) { return name.toLowerCase() === query; });
+    const partialHit = siteName.toLowerCase().indexOf(query) >= 0 || sectors.some(function (name) { return name.toLowerCase().indexOf(query) >= 0; });
+    if (exactHit) exact.push(site);
+    else if (partialHit) partial.push(site);
+  });
+  const hits = exact.length ? exact : partial;
+  if (!hits.length) {
+    document.getElementById("status").textContent = "No site or sector matches “" + document.getElementById("q").value.trim() + "”";
+    return;
+  }
+  const bounds = [];
+  hits.forEach(function (site) {
+    const latlng = [site[0], site[1]];
+    bounds.push(latlng);
+    const sectors = (site[3] || []).map(function (arm) { return arm[0]; }).filter(Boolean).join(", ");
+    const marker = L.circleMarker(latlng, {
+      radius: 11, color: "#F5C400", weight: 3, fillColor: "#F5C400", fillOpacity: 0.35
+    });
+    marker.bindPopup("<div><b>Site</b> " + esc(site[2] || "") + "<br><b>Sector</b> " + esc(sectors) + "</div>");
+    marker.addTo(searchLayer);
+  });
+  if (hits.length === 1) {
+    map.setView(bounds[0], 16, { animate: false });
+    searchLayer.eachLayer(function (marker) { marker.openPopup(); });
+  } else {
+    map.fitBounds(bounds, { padding: [36, 36], maxZoom: 15, animate: false });
+  }
+  document.getElementById("status").textContent = hits.length.toLocaleString() + " site match" + (hits.length === 1 ? "" : "es");
+}
+
+["kpi", "mode"].forEach(function (id) {
   document.getElementById(id).addEventListener("change", draw);
+});
+document.querySelectorAll(".band").forEach(function (box) {
+  box.addEventListener("change", draw);
 });
 document.getElementById("fit").addEventListener("click", fitRoute);
 document.getElementById("pies").addEventListener("change", syncPies);
-document.getElementById("levels").addEventListener("change", function () {
-  if (pies) pies._reset();
+["levels", "sitenames"].forEach(function (id) {
+  document.getElementById(id).addEventListener("change", function () {
+    if (pies) pies._reset();
+  });
 });
+document.getElementById("ruler").addEventListener("click", function () {
+  rulerOn = !rulerOn;
+  this.classList.toggle("on", rulerOn);
+  if (!rulerOn) clearRuler();
+});
+document.getElementById("search").addEventListener("click", runSearch);
+document.getElementById("q").addEventListener("keydown", function (ev) {
+  if (ev.key === "Enter") runSearch();
+});
+map.on("click", onMapClick);
 
 if (typeof COVERAGE === "undefined") {
   document.getElementById("status").textContent = "Coverage data was not found beside this page";

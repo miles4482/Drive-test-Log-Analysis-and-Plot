@@ -311,9 +311,13 @@ def add_site_pies(radius_km: float = 3.0) -> int:
             arms.append([name, round(float(row["azimuth"]) % 360.0, 1)])
         if not arms:
             continue
+        site_name = str(_site).strip()
+        if site_name.lower() == "nan":
+            site_name = ""
         sites.append([
             round(float(part["lat"].median()), 5),
             round(float(part["lon"].median()), 5),
+            site_name,
             arms,
         ])
     payload["sites"] = sites
