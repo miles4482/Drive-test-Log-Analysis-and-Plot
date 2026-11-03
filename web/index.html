@@ -569,7 +569,15 @@ let rulerOn = false;
 let rulerPts = [];
 let rulerCursor = null;
 const rulerGroup = L.layerGroup().addTo(map);
+let rulerChains = [];
+let rulerTimes = [];
+let rulerIgnoreDbl = false;
+let rulerInClick = false;
+let rulerSwallowClick = false;
+let rulerFinishedAt = 0;
 let rulerFrame = 0;
+map.getContainer().addEventListener("click", function () { rulerInClick = true; }, true);
+map.getContainer().addEventListener("click", function () { rulerInClick = false; }, false);
 
 function metresBetween(a, b) {
   const r = 6371000;
@@ -584,8 +592,23 @@ function metresBetween(a, b) {
 
 function clearRuler() {
   rulerPts = [];
+  rulerTimes = [];
+  rulerSwallowClick = false;
   rulerCursor = null;
   rulerGroup.clearLayers();
+  rulerChains.forEach(function (chain) { map.removeLayer(chain.group); });
+  rulerChains = [];
+}
+
+function sameSpot(a, b, pixels) {
+  return map.latLngToContainerPoint(a).distanceTo(map.latLngToContainerPoint(b)) < (pixels || 8);
+}
+
+function placeRulerPoint(latlng) {
+  rulerPts.push(latlng);
+  rulerTimes.push(Date.now());
+  rulerCursor = null;
+  drawRuler();
 }
 
 function metreLabel(metres) {
@@ -594,19 +617,20 @@ function metreLabel(metres) {
 
 function drawRuler() {
   rulerGroup.clearLayers();
-  rulerPts.forEach(function (point) {
+  const fixed = rulerPts.slice();
+  fixed.forEach(function (point) {
     L.circleMarker(point, {
       radius: 6, color: "#8C6A32", weight: 2, fillColor: "#E6C48A", fillOpacity: 1, interactive: false
     }).addTo(rulerGroup);
   });
-  const line = rulerPts.slice();
-  if (rulerCursor && rulerPts.length) line.push(rulerCursor);
+  const line = fixed.slice();
+  if (rulerCursor && fixed.length) line.push(rulerCursor);
   if (line.length < 2) return;
   L.polyline(line, { color: "#E6C48A", weight: 3, interactive: false }).addTo(rulerGroup);
   const fixedParts = [];
   let fixedTotal = 0;
-  for (let i = 1; i < rulerPts.length; i++) {
-    const metres = metresBetween(rulerPts[i - 1], rulerPts[i]);
+  for (let i = 1; i < fixed.length; i++) {
+    const metres = metresBetween(fixed[i - 1], fixed[i]);
     fixedTotal += metres;
     fixedParts.push(metreLabel(metres));
   }
@@ -632,11 +656,99 @@ function drawRuler() {
   }
 }
 
+function finishRuler() {
+  if (rulerPts.length < 2) {
+    drawRuler();
+    return;
+  }
+  const points = rulerPts.map(function (point) { return L.latLng(point.lat, point.lng); });
+  const group = L.layerGroup().addTo(map);
+  const chain = { group: group };
+  function removeChain(ev) {
+    rulerIgnoreDbl = true;
+    if (ev && ev.originalEvent) L.DomEvent.stopPropagation(ev.originalEvent);
+    map.removeLayer(group);
+    rulerChains = rulerChains.filter(function (item) { return item !== chain; });
+    setTimeout(function () { rulerIgnoreDbl = false; }, 0);
+  }
+  points.forEach(function (point) {
+    const dot = L.circleMarker(point, {
+      radius: 6, color: "#8C6A32", weight: 2, fillColor: "#E6C48A", fillOpacity: 1
+    }).addTo(group);
+    dot.on("click", function (ev) {
+      if (ev.originalEvent) L.DomEvent.stopPropagation(ev.originalEvent);
+    });
+    dot.on("dblclick", removeChain);
+  });
+  const hit = L.polyline(points, {
+    color: "#E6C48A", weight: 16, opacity: 0.01, interactive: true
+  }).addTo(group);
+  L.polyline(points, { color: "#E6C48A", weight: 3, interactive: false }).addTo(group);
+  hit.on("click", function (ev) {
+    if (ev.originalEvent) L.DomEvent.stopPropagation(ev.originalEvent);
+  });
+  hit.on("dblclick", removeChain);
+  const parts = [];
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    const metres = metresBetween(points[i - 1], points[i]);
+    total += metres;
+    parts.push(metreLabel(metres));
+    const mid = L.latLng(
+      (points[i - 1].lat + points[i].lat) / 2,
+      (points[i - 1].lng + points[i].lng) / 2
+    );
+    const label = L.marker(mid, {
+      icon: L.divIcon({
+        className: "ruler-tag",
+        html: "<span>" + metreLabel(metres) + "</span>",
+        iconSize: [88, 18],
+        iconAnchor: [44, 20]
+      })
+    }).addTo(group);
+    label.on("click", function (ev) {
+      if (ev.originalEvent) L.DomEvent.stopPropagation(ev.originalEvent);
+    });
+    label.on("dblclick", removeChain);
+  }
+  rulerChains.push(chain);
+  rulerPts = [];
+  rulerTimes = [];
+  rulerCursor = null;
+  rulerGroup.clearLayers();
+  document.getElementById("status").textContent =
+    "Ruler · " + parts.join(" + ") + " · total " + metreLabel(total);
+}
+
 function onMapClick(ev) {
   if (!rulerOn) return;
-  rulerPts.push(ev.latlng);
+  if (rulerSwallowClick) {
+    rulerSwallowClick = false;
+    return;
+  }
+  placeRulerPoint(ev.latlng);
+}
+
+function onMapDblClick(ev) {
+  if (!rulerOn) return;
+  if (ev.originalEvent) L.DomEvent.stop(ev.originalEvent);
+  if (rulerIgnoreDbl) {
+    rulerIgnoreDbl = false;
+    if (rulerInClick) rulerSwallowClick = true;
+    return;
+  }
+  if (rulerPts.length === 0 && Date.now() - rulerFinishedAt < 400) return;
+  const n = rulerPts.length;
+  if (n >= 2 && Date.now() - rulerTimes[n - 2] < 800 && sameSpot(rulerPts[n - 2], rulerPts[n - 1], 6)) {
+    rulerPts.pop();
+    rulerTimes.pop();
+  }
+  const last = rulerPts[rulerPts.length - 1];
+  if ((!last || !sameSpot(last, ev.latlng, 6)) && !rulerInClick) placeRulerPoint(ev.latlng);
+  if (rulerInClick) rulerSwallowClick = true;
   rulerCursor = null;
-  drawRuler();
+  finishRuler();
+  rulerFinishedAt = Date.now();
 }
 
 function onMapMove(ev) {
@@ -733,7 +845,9 @@ document.getElementById("pies").addEventListener("change", syncPies);
 document.getElementById("ruler").addEventListener("click", function () {
   rulerOn = !rulerOn;
   this.classList.toggle("on", rulerOn);
-  if (!rulerOn) {
+  if (rulerOn) map.doubleClickZoom.disable();
+  else {
+    map.doubleClickZoom.enable();
     clearRuler();
     draw();
   }
@@ -743,6 +857,7 @@ document.getElementById("q").addEventListener("keydown", function (ev) {
   if (ev.key === "Enter") runSearch();
 });
 map.on("click", onMapClick);
+map.on("dblclick", onMapDblClick);
 map.on("mousemove", onMapMove);
 
 if (typeof COVERAGE === "undefined") {
