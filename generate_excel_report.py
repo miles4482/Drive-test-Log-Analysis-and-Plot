@@ -83,7 +83,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.45"
+REPORT_VERSION = "1.46"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -1253,7 +1253,7 @@ def build_cover(
         ws,
         36,
         5,
-        "Ranges match the coverage-map legend: -90 <= X < Max (blue) down to RSRP < -120 (red).",
+        "Ranges match the coverage-map legend: -95 to 0 (dark green), -110 to -95 (green), -120 to -110 (yellow), -150 to -120 (red).",
         size=9,
         wrap=True,
     )

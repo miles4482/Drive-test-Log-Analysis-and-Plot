@@ -106,41 +106,28 @@ LEGEND_RED = "#FF0000"
 LEGEND_CYAN = "#00B0F0"
 LEGEND_ORANGE = "#FF6600"
 
+# Four bins from the coverage_4g_data1 RSRP legend. Best is listed first.
+# A value below -150 stays in the red bin; a value above 0 stays in the dark-green bin.
 MAP_RSRP_LABELS = [
-    "-90 <= X < Max",
-    "-100 <= X < -90",
-    "-110 <= X < -100",
-    "-115 <= X < -110",
-    "-120 <= X < -115",
-    "-Min <= X < -120",
+    "-95 to 0",
+    "-110 to -95",
+    "-120 to -110",
+    "-150 to -120",
 ]
-MAP_RSRP_THRESHOLDS = [-90, -100, -110, -115, -120]
-MAP_RSRP_COLORS = [
-    LEGEND_BLUE,
-    LEGEND_DARK_GREEN,
-    LEGEND_LIGHT_GREEN,
-    LEGEND_YELLOW,
-    LEGEND_MAGENTA,
-    LEGEND_RED,
-]
+MAP_RSRP_THRESHOLDS = [-95, -110, -120]
+MAP_RSRP_COLORS = ["#008000", "#00FF00", "#FFFF00", "#FF0000"]
 
 # Source table listed RSRQ worst-first and wrote "X < -5" for the blue bin.
 # Blue is the best colour, so that row is X >= -5; red is X < -20.
+# Three bins from the coverage_4g_data1 RSRQ legend. Best is listed first.
+# A value below -30 stays in the red bin; a value above 0 stays in the green bin.
 MAP_RSRQ_LABELS = [
-    "X >= -5",
-    "-10 <= X < -5",
-    "-15 <= X < -10",
-    "-20 <= X < -15",
-    "X < -20",
+    "-10 to 0",
+    "-17 to -10",
+    "-30 to -17",
 ]
-MAP_RSRQ_THRESHOLDS = [-5, -10, -15, -20]
-MAP_RSRQ_COLORS = [
-    LEGEND_BLUE,
-    LEGEND_DARK_GREEN,
-    LEGEND_LIGHT_GREEN,
-    LEGEND_YELLOW,
-    LEGEND_RED,
-]
+MAP_RSRQ_THRESHOLDS = [-10, -17]
+MAP_RSRQ_COLORS = ["#00FF00", "#FFFF00", "#FF0000"]
 
 MAP_SINR_LABELS = [
     "15 <= X < Max",
@@ -1110,7 +1097,7 @@ LOGIC_LOCK = {
     "discrete_share": 0.50,
     "poor": {"RSRP": -115.0, "RSRQ": -20.0, "SINR": 0.0},
     "min_consecutive_m": {"RSRP": 0.0, "RSRQ": 0.0, "SINR": 0.0},
-    "rsrp_greens": ("#00B050", "#92D050"),
+    "rsrp_greens": ("#008000", "#00FF00"),
     "ring_tiers": ((40, 2.6, 2.15, True), (250, 1.4, 0.70, False), (10**9, 0.8, 0.50, False)),
     "counts": {
         "Bad Spot RSRP": (41, 0),
@@ -1146,8 +1133,8 @@ def logic_drift() -> list[str]:
         rule = BAD_SPOT_RULES[kpi]
         if float(rule["threshold"]) != threshold or float(rule["min_consecutive_m"]) != LOGIC_LOCK["min_consecutive_m"][kpi]:
             problems.append(f"{kpi} rule {rule['threshold']}, min {rule['min_consecutive_m']}")
-    if tuple(MAP_RSRP_COLORS[1:3]) != LOGIC_LOCK["rsrp_greens"]:
-        problems.append(f"RSRP greens are {MAP_RSRP_COLORS[1:3]}")
+    if tuple(MAP_RSRP_COLORS[:2]) != LOGIC_LOCK["rsrp_greens"]:
+        problems.append(f"RSRP greens are {MAP_RSRP_COLORS[:2]}")
     if BAD_SPOT_OVERVIEW_TIERS != LOGIC_LOCK["ring_tiers"]:
         problems.append("overview ring tiers changed")
     return problems
