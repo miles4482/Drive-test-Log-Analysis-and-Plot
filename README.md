@@ -114,11 +114,13 @@ The Cover sheet keeps the Idle dataset, KPI table, and Idle histograms. Under Ac
 
 Every coverage map and bad-spot map is drawn on Esri World Imagery. The combined view is the satellite route only: no circle is painted into it and no circle shape is placed on it. Bad Spot 1, Bad Spot 2, and the rest follow down the left side of the sheet, each a larger map with one movable circle. A site that falls in that view is drawn as a transparent cyan outline, one arm per sector, with the Sector name at the end of the arm and no fill. A circle is at most 10 km across. Where the poor road is in separate pockets, several circles sit inside that 10 km neighbourhood.
 
-## Web coverage map
+## Web coverage map (v1.48)
 
-`web/index.html` is the same RSRP and RSRQ coverage as those sheets, for a quick look in a browser. It has Idle and Active, all bands, and L900 / L1800 / L2100 / L2600. SINR and the bad-spot sheets are not on this page.
+Same version as the Excel report. Download, unzip, and open `Bogura_DriveTest_Web_v1.48.html`.
 
-Keep `web/coverage_data.js` in the same folder as `web/index.html` and open `index.html`. The page needs a network connection: the satellite picture is Esri World Imagery, and the zoom buttons come from Leaflet. Zooming moves the satellite picture and the coloured drive together. Click a spot and the popup shows **CellID** and **CellName** for that spot, plus the RSRP and RSRQ of its 50 m bin.
+**v1.48 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Web_v1.48.zip
+
+The page is the same RSRP and RSRQ coverage as those sheets. It has Idle and Active, all bands, and L900 / L1800 / L2100 / L2600. SINR and the bad-spot sheets are not on this page. It needs a network connection: the satellite picture is Esri World Imagery, and the zoom buttons come from Leaflet. Zooming moves the satellite picture and the coloured drive together. Click a spot and the popup shows **CellID** and **CellName** for that spot, plus the RSRP and RSRQ of its 50 m bin.
 
 CellID and CellName come from the drive log and `System DUMP.xlsb`:
 

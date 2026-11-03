@@ -14,6 +14,8 @@ rounded down. Cell Name is the dump EUtranCellId for that pair.
 from __future__ import annotations
 
 import json
+import sys
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -216,7 +218,34 @@ def build() -> None:
     text = "const COVERAGE = " + json.dumps(payload, separators=(",", ":")) + ";\n"
     DATA_JS.write_text(text)
     print(f"Wrote {DATA_JS} ({DATA_JS.stat().st_size / 1e6:.1f} MB)", flush=True)
+    package_web()
+
+
+def package_web() -> Path:
+    """One download named with the same version as the Excel report."""
+    from generate_excel_report import OUTPUT_DIR, REPORT_VERSION
+
+    html_text = (WEB_DIR / "index.html").read_text()
+    marker = f"v{REPORT_VERSION}"
+    if marker not in html_text:
+        raise SystemExit(f"web/index.html is not labelled {marker}, which is the Excel report version")
+    if not DATA_JS.exists():
+        raise SystemExit(f"Missing {DATA_JS.name}; build the coverage data first")
+    page = html_text.replace(
+        '<script src="coverage_data.js"></script>',
+        "<script>\n" + DATA_JS.read_text() + "</script>",
+    )
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    dest = OUTPUT_DIR / f"Bogura_DriveTest_Web_v{REPORT_VERSION}.zip"
+    inner = f"Bogura_DriveTest_Web_v{REPORT_VERSION}.html"
+    with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(inner, page)
+    print(f"Wrote {dest} ({dest.stat().st_size / 1e6:.1f} MB) containing {inner}", flush=True)
+    return dest
 
 
 if __name__ == "__main__":
-    build()
+    if "--package" in sys.argv:
+        package_web()
+    else:
+        build()
