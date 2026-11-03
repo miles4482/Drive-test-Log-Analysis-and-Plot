@@ -25,6 +25,14 @@
     padding: 4px 8px; width: 150px;
   }
   header button.on { background: #F5C400; }
+  .dropdown { position: relative; display: inline-block; }
+  #layer-btn { min-width: 168px; text-align: left; cursor: pointer; }
+  .dropdown .menu {
+    position: absolute; top: calc(100% + 4px); left: 0; z-index: 2000;
+    background: #fff; color: #1a1a1a; border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.28); padding: 6px 12px 8px; min-width: 148px;
+  }
+  .dropdown .menu label { color: #1a1a1a; padding: 4px 0; }
   .ruler-tag { background: transparent; border: 0; }
   .ruler-tag span {
     background: #fff; border: 1px solid #222; padding: 1px 5px;
@@ -59,11 +67,17 @@
         <option value="active">Active</option>
       </select>
     </label>
-    <span>Layer</span>
-    <label class="check"><input type="checkbox" class="band" value="L900" checked> L900</label>
-    <label class="check"><input type="checkbox" class="band" value="L1800" checked> L1800</label>
-    <label class="check"><input type="checkbox" class="band" value="L2100" checked> L2100</label>
-    <label class="check"><input type="checkbox" class="band" value="L2600" checked> L2600</label>
+    <label>Layer
+      <span class="dropdown">
+        <button type="button" id="layer-btn" aria-haspopup="listbox" aria-expanded="false">All bands</button>
+        <div class="menu" id="layer-menu" hidden>
+          <label class="check"><input type="checkbox" class="band" value="L900" checked> L900</label>
+          <label class="check"><input type="checkbox" class="band" value="L1800" checked> L1800</label>
+          <label class="check"><input type="checkbox" class="band" value="L2100" checked> L2100</label>
+          <label class="check"><input type="checkbox" class="band" value="L2600" checked> L2600</label>
+        </div>
+      </span>
+    </label>
     <label class="check"><input type="checkbox" id="pies" checked> Pie widget</label>
     <label class="check"><input type="checkbox" id="levels" checked> Sector level</label>
     <label class="check"><input type="checkbox" id="sitenames" checked> Site level</label>
@@ -649,8 +663,34 @@ function runSearch() {
 ["kpi", "mode"].forEach(function (id) {
   document.getElementById(id).addEventListener("change", draw);
 });
+function layerSummary() {
+  const bands = selectedBands();
+  if (!bands.length) return "No band";
+  if (bands.length === BANDS.length) return "All bands";
+  return bands.join(" + ");
+}
+function syncLayerButton() {
+  document.getElementById("layer-btn").textContent = layerSummary();
+}
+document.getElementById("layer-btn").addEventListener("click", function (ev) {
+  ev.stopPropagation();
+  const menu = document.getElementById("layer-menu");
+  const open = menu.hasAttribute("hidden");
+  if (open) menu.removeAttribute("hidden");
+  else menu.setAttribute("hidden", "");
+  this.setAttribute("aria-expanded", open ? "true" : "false");
+});
+document.addEventListener("click", function (ev) {
+  const menu = document.getElementById("layer-menu");
+  if (menu.contains(ev.target)) return;
+  menu.setAttribute("hidden", "");
+  document.getElementById("layer-btn").setAttribute("aria-expanded", "false");
+});
 document.querySelectorAll(".band").forEach(function (box) {
-  box.addEventListener("change", draw);
+  box.addEventListener("change", function () {
+    syncLayerButton();
+    draw();
+  });
 });
 document.getElementById("fit").addEventListener("click", fitRoute);
 document.getElementById("pies").addEventListener("change", syncPies);
