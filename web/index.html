@@ -29,7 +29,7 @@
   .legend div { display: flex; align-items: center; gap: 8px; margin: 2px 0; }
   .swatch { width: 14px; height: 14px; border: 1px solid #333; flex: 0 0 auto; }
   .leaflet-popup-content { margin: 10px 12px; font-size: 13px; line-height: 1.45; }
-  .leaflet-popup-content b { display: inline-block; width: 78px; }
+  .leaflet-popup-content b { display: inline-block; width: 112px; }
   #status { margin-left: auto; font-size: 12px; opacity: 0.9; }
 </style>
 </head>
@@ -59,6 +59,7 @@
       </select>
     </label>
     <label class="check"><input type="checkbox" id="pies" checked> Pie widget</label>
+    <label class="check"><input type="checkbox" id="levels" checked> Sector level</label>
     <button type="button" id="fit">Fit route</button>
     <span id="status">Loading the drive…</span>
   </header>
@@ -73,6 +74,13 @@ const RSRP_THRESH = [-95, -110, -120];
 const RSRQ_COLORS = ["#00FF00", "#FFFF00", "#FF0000"];
 const RSRQ_LABELS = ["-10 to 0", "-17 to -10", "-30 to -17"];
 const RSRQ_THRESH = [-10, -17];
+
+function formatNum(value) {
+  if (value === null || value === undefined || value === "") return "";
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "";
+  return String(Math.round(n * 100) / 100);
+}
 
 function classify(value, thresholds) {
   if (value === null || value === undefined || Number.isNaN(value)) return -1;
@@ -260,11 +268,18 @@ const SpotCanvas = L.Layer.extend({
     }
     if (best < 0) return;
     const cell = pack.cell[best] === null ? "—" : String(pack.cell[best]);
-    const name = COVERAGE.names[pack.name[best] || 0] || "";
+    const nameId = pack.name[best] || 0;
+    const name = COVERAGE.names[nameId] || "";
+    const rf = (COVERAGE.cells || [])[nameId] || [null, null, null, null, null];
+    const rfLabels = ["Azimuth", "Height", "E_tilt", "M_tilt", "RS Power(dBm)"];
+    const rfHtml = rfLabels.map(function (label, i) {
+      return "<br><b>" + label + "</b> " + esc(formatNum(rf[i]));
+    }).join("");
     const rsrp = pack.rsrp[best] === null ? "—" : pack.rsrp[best].toFixed(1) + " dBm";
     const rsrq = pack.rsrq[best] === null ? "—" : pack.rsrq[best].toFixed(1) + " dB";
     const html = "<div><b>CellID</b> " + esc(cell) +
       "<br><b>CellName</b> " + esc(name) +
+      rfHtml +
       "<br><b>RSRP</b> " + esc(rsrp) +
       "<br><b>RSRQ</b> " + esc(rsrq) + "</div>";
     L.popup({ maxWidth: 360 })
@@ -343,9 +358,9 @@ const PieCanvas = L.Layer.extend({
     const origin = this._bounds.min;
     const bounds = map.getBounds().pad(0.2);
     const km = this._armKm();
-    const showNames = map.getZoom() >= 13;
+    const showNames = document.getElementById("levels").checked;
     ctx.lineCap = "round";
-    ctx.font = "600 11px Segoe UI, Calibri, sans-serif";
+    ctx.font = "9px Segoe UI, Calibri, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     const labels = [];
@@ -384,9 +399,9 @@ const PieCanvas = L.Layer.extend({
       const x = labels[i][0];
       const y = labels[i][1];
       const text = labels[i][2];
-      const width = ctx.measureText(text).width + 8;
+      const width = ctx.measureText(text).width + 6;
       ctx.fillStyle = "rgba(255,255,255,0.88)";
-      ctx.fillRect(x - width / 2, y - 8, width, 16);
+      ctx.fillRect(x - width / 2, y - 6, width, 12);
       ctx.fillStyle = "#04282C";
       ctx.fillText(text, x, y);
     }
@@ -464,6 +479,9 @@ function draw() {
 });
 document.getElementById("fit").addEventListener("click", fitRoute);
 document.getElementById("pies").addEventListener("change", syncPies);
+document.getElementById("levels").addEventListener("change", function () {
+  if (pies) pies._reset();
+});
 
 if (typeof COVERAGE === "undefined") {
   document.getElementById("status").textContent = "Coverage data was not found beside this page";

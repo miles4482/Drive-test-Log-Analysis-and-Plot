@@ -218,8 +218,68 @@ def build() -> None:
     text = "const COVERAGE = " + json.dumps(payload, separators=(",", ":")) + ";\n"
     DATA_JS.write_text(text)
     print(f"Wrote {DATA_JS} ({DATA_JS.stat().st_size / 1e6:.1f} MB)", flush=True)
+    add_cell_params()
     add_site_pies()
     package_web()
+
+
+RF_COLUMNS = ("Azimuth", "Height", "E_tilt", "M_tilt", "RS Power(dBm)")
+RF_DIGITS = (1, 1, 1, 1, 2)
+
+
+def _rf_number(value, digits: int):
+    number = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    if pd.isna(number):
+        return None
+    return round(float(number), digits)
+
+
+def add_cell_params() -> int:
+    """Azimuth, height, tilts and RS power for each CellName, from the system dump."""
+    from pyxlsb import open_workbook
+
+    lookup: dict[str, list] = {}
+    with open_workbook(str(SITE_DB_PATH)) as wb:
+        sheet_name = "4G" if "4G" in wb.sheets else wb.sheets[0]
+        sheet = wb.get_sheet(sheet_name)
+        index: dict[str, int] = {}
+        for i, row in enumerate(sheet.rows()):
+            vals = [c.v for c in row]
+            if i == 0:
+                cols = [str(v).strip() if v is not None else "" for v in vals]
+                missing = [name for name in ("EUtranCellId",) + RF_COLUMNS if name not in cols]
+                if missing:
+                    raise SystemExit(f"System dump is missing columns: {missing}")
+                index = {name: cols.index(name) for name in ("EUtranCellId",) + RF_COLUMNS}
+                continue
+            raw_name = vals[index["EUtranCellId"]]
+            if raw_name is None:
+                continue
+            name = str(raw_name).strip()
+            if not name or name in lookup:
+                continue
+            lookup[name] = [
+                _rf_number(vals[index[col]], digits)
+                for col, digits in zip(RF_COLUMNS, RF_DIGITS)
+            ]
+    text = DATA_JS.read_text().strip()
+    if not text.startswith("const COVERAGE = "):
+        raise SystemExit(f"{DATA_JS.name} is not a coverage page")
+    payload = json.loads(text[len("const COVERAGE = "):-1])
+    cells: list = []
+    filled = 0
+    for name in payload["names"]:
+        if not name:
+            cells.append(None)
+            continue
+        row = lookup.get(name)
+        cells.append(row)
+        if row is not None:
+            filled += 1
+    payload["cells"] = cells
+    DATA_JS.write_text("const COVERAGE = " + json.dumps(payload, separators=(",", ":")) + ";\n")
+    print(f"Cell parameters {filled:,} of {len(payload['names']) - 1:,} names", flush=True)
+    return filled
 
 
 def add_site_pies(radius_km: float = 3.0) -> int:
@@ -287,6 +347,7 @@ def package_web() -> Path:
 
 if __name__ == "__main__":
     if "--package" in sys.argv:
+        add_cell_params()
         add_site_pies()
         package_web()
     else:
