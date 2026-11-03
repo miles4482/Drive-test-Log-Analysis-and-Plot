@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bogura RSRP and RSRQ coverage</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  html, body { margin: 0; height: 100%; font-family: "Segoe UI", Calibri, sans-serif; color: #1a1a1a; }
+  #app { display: flex; flex-direction: column; height: 100%; }
+  header {
+    display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: center;
+    padding: 10px 16px; background: #1b4f72; color: #fff;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: 0.01em; }
+  header label { font-size: 13px; display: flex; align-items: center; gap: 6px; }
+  header select, header button {
+    font: inherit; color: #1a1a1a; background: #fff; border: 0; border-radius: 4px;
+    padding: 4px 8px;
+  }
+  header button { cursor: pointer; }
+  #map { flex: 1; min-height: 0; background: #d5d8dc; }
+  .legend {
+    background: #fff; border: 1px solid #000; padding: 8px 10px 6px; line-height: 1.35;
+    font-size: 13px; box-shadow: 0 1px 4px rgba(0,0,0,.25);
+  }
+  .legend h2 { margin: 0 0 6px; font-size: 13px; }
+  .legend div { display: flex; align-items: center; gap: 8px; margin: 2px 0; }
+  .swatch { width: 14px; height: 14px; border: 1px solid #333; flex: 0 0 auto; }
+  .leaflet-popup-content { margin: 10px 12px; font-size: 13px; line-height: 1.45; }
+  .leaflet-popup-content b { display: inline-block; width: 78px; }
+  #status { margin-left: auto; font-size: 12px; opacity: 0.9; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Bogura coverage</h1>
+    <label>KPI
+      <select id="kpi">
+        <option value="RSRP">RSRP</option>
+        <option value="RSRQ">RSRQ</option>
+      </select>
+    </label>
+    <label>Mode
+      <select id="mode">
+        <option value="idle">Idle</option>
+        <option value="active">Active</option>
+      </select>
+    </label>
+    <label>Layer
+      <select id="layer">
+        <option value="all">All bands</option>
+        <option value="L900">L900</option>
+        <option value="L1800">L1800</option>
+        <option value="L2100">L2100</option>
+        <option value="L2600">L2600</option>
+      </select>
+    </label>
+    <button type="button" id="fit">Fit route</button>
+    <span id="status">Loading the drive…</span>
+  </header>
+  <div id="map"></div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="coverage_data.js"></script>
+<script>
+const RSRP_COLORS = ["#008000", "#00FF00", "#FFFF00", "#FF0000"];
+const RSRP_LABELS = ["-95 to 0", "-110 to -95", "-120 to -110", "-150 to -120"];
+const RSRP_THRESH = [-95, -110, -120];
+const RSRQ_COLORS = ["#00FF00", "#FFFF00", "#FF0000"];
+const RSRQ_LABELS = ["-10 to 0", "-17 to -10", "-30 to -17"];
+const RSRQ_THRESH = [-10, -17];
+
+function classify(value, thresholds) {
+  if (value === null || value === undefined || Number.isNaN(value)) return -1;
+  for (let i = 0; i < thresholds.length; i++) {
+    if (value >= thresholds[i]) return i;
+  }
+  return thresholds.length;
+}
+
+function esc(value) {
+  return String(value).replace(/[&<>"']/g, function (ch) {
+    return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch];
+  });
+}
+
+const map = L.map("map", { zoomControl: true, worldCopyJump: false });
+L.tileLayer(
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+  { attribution: "Satellite © Esri", maxZoom: 19 }
+).addTo(map);
+
+const legend = L.control({ position: "topleft" });
+legend.onAdd = function () {
+  const div = L.DomUtil.create("div", "legend");
+  div.id = "legend";
+  L.DomEvent.disableClickPropagation(div);
+  return div;
+};
+legend.addTo(map);
+
+function legendHtml(kpi) {
+  const labels = kpi === "RSRP" ? RSRP_LABELS : RSRQ_LABELS;
+  const colors = kpi === "RSRP" ? RSRP_COLORS : RSRQ_COLORS;
+  const mode = document.getElementById("mode").value === "idle" ? "Idle" : "Active";
+  const rows = labels.map(function (label, i) {
+    return '<div><span class="swatch" style="background:' + colors[i] + '"></span>' + label + "</div>";
+  }).join("");
+  return "<h2>" + mode + " by " + kpi + "</h2>" + rows;
+}
+
+const SpotCanvas = L.Layer.extend({
+  options: { padding: 0.5 },
+  initialize: function (pack, kpi) {
+    this.pack = pack;
+    this.kpi = kpi;
+  },
+  onAdd: function (map) {
+    this._map = map;
+    this._canvas = L.DomUtil.create("canvas", "leaflet-zoom-animated");
+    this._canvas.style.pointerEvents = "none";
+    map.getPanes().overlayPane.appendChild(this._canvas);
+    map.on("moveend", this._reset, this);
+    map.on("zoomend", this._reset, this);
+    map.on("viewreset", this._reset, this);
+    map.on("zoomanim", this._onAnimZoom, this);
+    map.on("click", this._onClick, this);
+    this._reset();
+  },
+  onRemove: function (map) {
+    L.DomUtil.remove(this._canvas);
+    map.off("moveend", this._reset, this);
+    map.off("zoomend", this._reset, this);
+    map.off("viewreset", this._reset, this);
+    map.off("zoomanim", this._onAnimZoom, this);
+    map.off("click", this._onClick, this);
+  },
+  _radius: function () {
+    const z = this._map.getZoom();
+    if (z >= 16) return 7;
+    if (z >= 14) return 5.5;
+    if (z >= 12) return 4.5;
+    return 3.6;
+  },
+  _reset: function () {
+    const map = this._map;
+    const pad = this.options.padding;
+    const size = map.getSize();
+    const min = map.containerPointToLayerPoint(size.multiplyBy(-pad)).round();
+    const boundsSize = size.multiplyBy(1 + pad * 2).round();
+    this._bounds = L.bounds(min, min.add(boundsSize));
+    this._center = map.getCenter();
+    this._zoom = map.getZoom();
+    L.DomUtil.setPosition(this._canvas, min);
+    const dpr = window.devicePixelRatio || 1;
+    this._dpr = dpr;
+    this._canvas.width = boundsSize.x * dpr;
+    this._canvas.height = boundsSize.y * dpr;
+    this._canvas.style.width = boundsSize.x + "px";
+    this._canvas.style.height = boundsSize.y + "px";
+    this._draw();
+  },
+  _onAnimZoom: function (ev) {
+    const map = this._map;
+    const scale = map.getZoomScale(ev.zoom, this._zoom);
+    const position = L.DomUtil.getPosition(this._canvas);
+    const viewHalf = map.getSize().multiplyBy(0.5 + this.options.padding);
+    const currentCenter = map.project(this._center, ev.zoom);
+    const destCenter = map.project(ev.center, ev.zoom);
+    const centerOffset = destCenter.subtract(currentCenter);
+    const topLeft = viewHalf.multiplyBy(-scale).add(position).add(viewHalf).subtract(centerOffset);
+    L.DomUtil.setTransform(this._canvas, topLeft, scale);
+  },
+  _draw: function () {
+    const map = this._map;
+    const ctx = this._canvas.getContext("2d");
+    const dpr = this._dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, this._canvas.width / dpr, this._canvas.height / dpr);
+    const pack = this.pack;
+    const kpi = this.kpi;
+    const thresholds = kpi === "RSRP" ? RSRP_THRESH : RSRQ_THRESH;
+    const colors = kpi === "RSRP" ? RSRP_COLORS : RSRQ_COLORS;
+    const values = kpi === "RSRP" ? pack.rsrp : pack.rsrq;
+    const radius = this._radius();
+    const origin = this._bounds.min;
+    const buckets = colors.map(function () { return []; });
+    const placed = [];
+    for (let i = 0; i < pack.lon.length; i++) {
+      const cls = classify(values[i], thresholds);
+      if (cls < 0) continue;
+      const p = map.latLngToLayerPoint([pack.lat[i], pack.lon[i]]);
+      placed.push({ cls: cls, x: p.x - origin.x, y: p.y - origin.y });
+      buckets[cls].push(placed.length - 1);
+    }
+    ctx.beginPath();
+    for (let n = 0; n < placed.length; n++) {
+      ctx.moveTo(placed[n].x + radius + 1.6, placed[n].y);
+      ctx.arc(placed[n].x, placed[n].y, radius + 1.6, 0, Math.PI * 2);
+    }
+    ctx.fillStyle = "#ffffff";
+    ctx.fill();
+    for (let cls = 0; cls < buckets.length; cls++) {
+      const ids = buckets[cls];
+      if (!ids.length) continue;
+      ctx.beginPath();
+      for (let k = 0; k < ids.length; k++) {
+        const pt = placed[ids[k]];
+        ctx.moveTo(pt.x + radius, pt.y);
+        ctx.arc(pt.x, pt.y, radius, 0, Math.PI * 2);
+      }
+      ctx.fillStyle = colors[cls];
+      ctx.fill();
+    }
+  },
+  _grid: function () {
+    if (this._index) return this._index;
+    const pack = this.pack;
+    const cell = 0.0015;
+    const grid = new Map();
+    for (let i = 0; i < pack.lon.length; i++) {
+      const key = Math.floor(pack.lat[i] / cell) + "," + Math.floor(pack.lon[i] / cell);
+      let bucket = grid.get(key);
+      if (!bucket) {
+        bucket = [];
+        grid.set(key, bucket);
+      }
+      bucket.push(i);
+    }
+    this._index = { grid: grid, cell: cell };
+    return this._index;
+  },
+  _onClick: function (ev) {
+    const pack = this.pack;
+    const index = this._grid();
+    const gy = Math.floor(ev.latlng.lat / index.cell);
+    const gx = Math.floor(ev.latlng.lng / index.cell);
+    const click = this._map.latLngToContainerPoint(ev.latlng);
+    const limit = this._radius() + 6;
+    let best = -1;
+    let bestD = limit;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const bucket = index.grid.get((gy + dy) + "," + (gx + dx));
+        if (!bucket) continue;
+        for (let k = 0; k < bucket.length; k++) {
+          const i = bucket[k];
+          const p = this._map.latLngToContainerPoint([pack.lat[i], pack.lon[i]]);
+          const dist = Math.hypot(p.x - click.x, p.y - click.y);
+          if (dist <= bestD) {
+            bestD = dist;
+            best = i;
+          }
+        }
+      }
+    }
+    if (best < 0) return;
+    const cell = pack.cell[best] === null ? "—" : String(pack.cell[best]);
+    const name = COVERAGE.names[pack.name[best] || 0] || "Not in system dump";
+    const rsrp = pack.rsrp[best] === null ? "—" : pack.rsrp[best].toFixed(1) + " dBm";
+    const rsrq = pack.rsrq[best] === null ? "—" : pack.rsrq[best].toFixed(1) + " dB";
+    const html = "<div><b>CellID</b> " + esc(cell) +
+      "<br><b>CellName</b> " + esc(name) +
+      "<br><b>RSRP</b> " + esc(rsrp) +
+      "<br><b>RSRQ</b> " + esc(rsrq) + "</div>";
+    L.popup({ maxWidth: 360 })
+      .setLatLng([pack.lat[best], pack.lon[best]])
+      .setContent(html)
+      .openOn(this._map);
+  }
+});
+
+let spots = null;
+
+function currentPack() {
+  const key = document.getElementById("mode").value + "|" + document.getElementById("layer").value;
+  return COVERAGE.sets[key];
+}
+
+function fitRoute() {
+  const pack = currentPack();
+  if (!pack || !pack.lon.length) return;
+  let latMin = Infinity, latMax = -Infinity, lonMin = Infinity, lonMax = -Infinity;
+  for (let i = 0; i < pack.lon.length; i++) {
+    const lat = pack.lat[i];
+    const lon = pack.lon[i];
+    if (lat < latMin) latMin = lat;
+    if (lat > latMax) latMax = lat;
+    if (lon < lonMin) lonMin = lon;
+    if (lon > lonMax) lonMax = lon;
+  }
+  map.fitBounds([[latMin, lonMin], [latMax, lonMax]], { padding: [24, 24] });
+}
+
+function draw() {
+  const kpi = document.getElementById("kpi").value;
+  document.getElementById("legend").innerHTML = legendHtml(kpi);
+  map.closePopup();
+  if (spots) {
+    map.removeLayer(spots);
+    spots = null;
+  }
+  const pack = currentPack();
+  if (!pack || !pack.lon.length) {
+    document.getElementById("status").textContent = "No samples on this layer";
+    return;
+  }
+  const values = kpi === "RSRP" ? pack.rsrp : pack.rsrq;
+  const thresholds = kpi === "RSRP" ? RSRP_THRESH : RSRQ_THRESH;
+  let shown = 0;
+  for (let i = 0; i < values.length; i++) {
+    if (classify(values[i], thresholds) >= 0) shown++;
+  }
+  spots = new SpotCanvas(pack, kpi).addTo(map);
+  document.getElementById("status").textContent =
+    shown.toLocaleString() + " spots · click a spot for CellID and CellName";
+}
+
+["kpi", "mode", "layer"].forEach(function (id) {
+  document.getElementById(id).addEventListener("change", draw);
+});
+document.getElementById("fit").addEventListener("click", fitRoute);
+
+if (typeof COVERAGE === "undefined") {
+  document.getElementById("status").textContent = "Coverage data was not found beside this page";
+} else {
+  draw();
+  fitRoute();
+}
+</script>
+</body>
+</html>
