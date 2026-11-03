@@ -557,6 +557,14 @@ def _bin_route_values(
 MAP_DPI = 200
 MAP_ROUTE_LW = 3.2
 _TILE_CACHE = Path("/tmp/bogura_sat_tiles")
+_LIGHT_BASE_CACHE = Path("/tmp/bogura_light_base")
+_BOUNDARY_CACHE = Path("/tmp/bogura_boundary_tiles")
+_LIGHT_BASE_URL = (
+    "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}"
+)
+_BOUNDARY_URL = (
+    "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
+)
 _BASEMAP_CACHE: dict[tuple, object] = {}
 # Circle geometries for the report, in pixels of the saved PNG (origin top-left).
 # Each circle becomes its own Excel shape so it can be dragged on its own.
@@ -590,30 +598,42 @@ def _choose_zoom(span_deg: float) -> int:
     return best
 
 
-def _fetch_tile(z: int, x: int, y: int):
+def _fetch_cached_tile(cache: Path, url: str, z: int, x: int, y: int):
+    """Download one map tile into its own cache so styles never share a filename."""
     from PIL import Image
 
-    path = _TILE_CACHE / f"{z}_{x}_{y}.jpg"
-    if path.exists() and path.stat().st_size > 200:
-        return Image.open(path).convert("RGB")
+    for ext in (".jpg", ".png"):
+        path = cache / f"{z}_{x}_{y}{ext}"
+        if path.exists() and path.stat().st_size > 80:
+            return Image.open(path)
+    req = urllib.request.Request(url, headers={"User-Agent": "BoguraDriveTestReport/1.47 (coverage map export)"})
+    cache.mkdir(parents=True, exist_ok=True)
+    import time
+    last_error: Exception | None = None
+    data = b""
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                data = resp.read()
+            break
+        except Exception as exc:
+            last_error = exc
+            time.sleep(1.5 * (attempt + 1))
+    else:
+        raise last_error if last_error else RuntimeError(f"tile {z}/{x}/{y}")
+    ext = ".jpg" if data[:3] == b"\xff\xd8\xff" else ".png"
+    path = cache / f"{z}_{x}_{y}{ext}"
+    path.write_bytes(data)
+    return Image.open(path)
+
+
+def _fetch_tile(z: int, x: int, y: int):
     # Esri World Imagery is z/y/x. x is the column, y is the row.
     url = (
         "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/"
         f"{z}/{y}/{x}"
     )
-    req = urllib.request.Request(url, headers={"User-Agent": "BoguraDriveTestReport/1.35 (coverage map export)"})
-    _TILE_CACHE.mkdir(parents=True, exist_ok=True)
-    import time
-    last_error: Exception | None = None
-    for attempt in range(3):
-        try:
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                path.write_bytes(resp.read())
-            return Image.open(path).convert("RGB")
-        except Exception as exc:
-            last_error = exc
-            time.sleep(1.5 * (attempt + 1))
-    raise last_error if last_error else RuntimeError(f"tile {z}/{x}/{y}")
+    return _fetch_cached_tile(_TILE_CACHE, url, z, x, y).convert("RGB")
 
 
 def _add_basemap(ax) -> None:
@@ -682,6 +702,91 @@ def _add_basemap_image(ax) -> None:
     )
 
 
+def _compose_tiles(z: int, x0: int, x1: int, y0: int, y1: int, *, kind: str):
+    """Stitch one basemap. Boundary maps are the light canvas plus admin lines."""
+    from PIL import Image
+    from concurrent.futures import ThreadPoolExecutor
+
+    width = (x1 - x0 + 1) * 256
+    height = (y1 - y0 + 1) * 256
+    if kind == "boundary":
+        canvas = Image.new("RGBA", (width, height), (245, 245, 245, 255))
+        services = (
+            (_LIGHT_BASE_CACHE, _LIGHT_BASE_URL, "RGB"),
+            (_BOUNDARY_CACHE, _BOUNDARY_URL, "RGBA"),
+        )
+    else:
+        canvas = Image.new("RGB", (width, height), (40, 48, 36))
+        services = ((_TILE_CACHE, (
+            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+        ), "RGB"),)
+    coords = [(x, y) for y in range(y0, y1 + 1) for x in range(x0, x1 + 1)]
+
+    def _load(item):
+        cache, template, _mode = item[0]
+        x, y = item[1]
+        try:
+            tile = _fetch_cached_tile(cache, template.format(z=z, y=y, x=x), z, x, y)
+            return (x, y), tile
+        except Exception:
+            return (x, y), None
+
+    # Fetch each service on its own so a missing boundary tile still leaves the canvas.
+    for service in services:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            fetched = list(pool.map(_load, [(service, xy) for xy in coords]))
+        for (x, y), tile in fetched:
+            if tile is None:
+                continue
+            if tile.mode == "RGBA":
+                canvas.paste(tile, ((x - x0) * 256, (y - y0) * 256), tile)
+            else:
+                canvas.paste(tile.convert("RGB"), ((x - x0) * 256, (y - y0) * 256))
+    return np.asarray(canvas.convert("RGB"))
+
+
+def _add_boundary_basemap(ax) -> None:
+    """White admin-boundary map. The coloured KPI trace is the only line drawn on it."""
+    try:
+        west, east = ax.get_xlim()
+        south, north = ax.get_ylim()
+        if east <= west or north <= south:
+            return
+        z = _choose_zoom(max(east - west, north - south))
+        n = 2**z
+        x0 = max(0, int((west + 180.0) / 360.0 * n))
+        x1 = min(n - 1, int((east + 180.0) / 360.0 * n))
+
+        def tile_y(lat: float) -> int:
+            lat_r = math.radians(max(-85.0, min(85.0, lat)))
+            return int((1.0 - math.log(math.tan(lat_r) + 1.0 / math.cos(lat_r)) / math.pi) / 2.0 * n)
+
+        y0 = max(0, min(tile_y(north), n - 1))
+        y1 = max(0, min(tile_y(south), n - 1))
+        if y1 < y0:
+            y0, y1 = y1, y0
+        key = ("boundary", z, x0, x1, y0, y1)
+        image = _BASEMAP_CACHE.get(key)
+        if image is None:
+            image = _compose_tiles(z, x0, x1, y0, y1, kind="boundary")
+            _BASEMAP_CACHE[key] = image
+        west_m, _, _, north_m = _tile_bounds(x0, y0, z)
+        _, east_m, south_m, _ = _tile_bounds(x1, y1, z)
+        ax.imshow(
+            image, extent=(west_m, east_m, south_m, north_m),
+            origin="upper", interpolation="bilinear", zorder=0, aspect="auto",
+        )
+        ax.set_xlim(west, east)
+        ax.set_ylim(south, north)
+        ax.set_aspect("equal", adjustable="box")
+        ax.text(
+            0.99, 0.01, "Boundaries © Esri",
+            transform=ax.transAxes, fontsize=6, color="#666666", ha="right", va="bottom", zorder=6,
+        )
+    except Exception as exc:
+        print(f"Boundary basemap skipped: {exc}")
+
+
 def _route_pieces(geo: pd.DataFrame, column: str, bin_m: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Time-ordered 50 m vertices, coloured by that bin's median, split on gaps."""
     work = geo.dropna(subset=["Longitude", "Latitude", column]).copy()
@@ -730,6 +835,7 @@ def _draw_coverage_points(
     poor_on_top: bool = True,
     bin_m: float | None = None,
     column: str | None = None,
+    route_casing: bool = True,
 ) -> None:
     """Solid drive trace, worst colour on top, same 50 m bins as the bad spots.
 
@@ -778,7 +884,8 @@ def _draw_coverage_points(
                 i = j + 1
         run_start = end
     # A white casing keeps the route readable on satellite imagery.
-    if casing:
+    # Bad-spot boundary maps leave it off: the coloured KPI trace is the chart.
+    if casing and route_casing:
         ax.add_collection(LineCollection(
             casing, colors="#FFFFFF", linewidths=MAP_ROUTE_LW + 2.4,
             capstyle="round", joinstyle="round", zorder=2,
@@ -794,6 +901,56 @@ def _draw_coverage_points(
         if alone[lab]:
             xy = np.vstack(alone[lab])
             ax.scatter(xy[:, 0], xy[:, 1], s=18, c=color_of[lab], linewidths=0, zorder=3 + z)
+
+
+def _legend_sample_counts(df: pd.DataFrame, column: str, classifier, labels: list[str]) -> list[int]:
+    """Sample counts for the rows actually drawn, one number per legend bin."""
+    classes = classifier(df[column])
+    counts = classes.value_counts(dropna=True)
+    return [int(counts.get(lab, 0)) for lab in labels]
+
+
+def _count_legend_handles(labels: list[str], colors: list[str], counts: list[int]) -> list:
+    """Square swatches with the bin count in parentheses, matching the coverage legend."""
+    from matplotlib.patches import Patch
+
+    return [
+        Patch(
+            facecolor=color,
+            edgecolor="#333333",
+            linewidth=0.6,
+            label=f"{label} ({count})",
+        )
+        for label, color, count in zip(labels, colors, counts)
+    ]
+
+
+def _place_count_legend(ax, handles: list, title: str):
+    """Legend box inside the map, on the left, as in the coverage export."""
+    legend = ax.legend(
+        handles=handles,
+        title=title,
+        loc="upper left",
+        bbox_to_anchor=(0.015, 0.985),
+        frameon=True,
+        fontsize=8,
+        title_fontsize=9,
+        borderpad=0.7,
+        labelspacing=0.4,
+        handlelength=1.15,
+        handleheight=1.05,
+        borderaxespad=0.2,
+    )
+    frame = legend.get_frame()
+    frame.set_edgecolor("#000000")
+    frame.set_linewidth(0.9)
+    frame.set_facecolor("#FFFFFF")
+    frame.set_alpha(1.0)
+    legend.get_title().set_fontweight("bold")
+    # The poorest colour is drawn above the other bins, so the box has to sit higher
+    # than that trace. The legend then covers the road the way the reference export does.
+    legend.set_zorder(20)
+    return legend
 
 
 def _coverage_legend_handles(labels: list[str], colors: list[str]) -> list:
@@ -1014,8 +1171,9 @@ def plot_sinr_coverage_map(
 
 
 # Bad-spot contract from report v1.35.
-# 1) Poor is inclusive: RSRP <= -115 dBm (magenta and red; yellow is not poor),
-#    RSRQ <= -20 dB (red), SINR <= 0 dB (orange and red).
+# 1) Poor is inclusive: RSRP <= -115 dBm (all of the red bin, and the yellow
+#    bin only from -115 down), RSRQ <= -20 dB (inside the red bin), SINR <= 0 dB
+#    (orange and red).
 # 2) A bin of road is 50 m. Its colour and its poor/good call both use the median
 #    of the samples in it, and poor bins are drawn on top of good ones.
 # 3) Every poor run is covered. A run stays one run across a gap of at most 150 m
@@ -1847,6 +2005,10 @@ def plot_bad_spot_map(
     basemap: bool = True,
     shapes: bool = False,
     outlines: bool = False,
+    basemap_style: str = "satellite",
+    route_casing: bool = True,
+    legend_inside: bool = False,
+    legend_counts: list[int] | None = None,
 ) -> Path:
     """First all-band coverage map.
 
@@ -1863,7 +2025,8 @@ def plot_bad_spot_map(
     geo = df.dropna(subset=["Longitude", "Latitude", column]).copy()
     fig, ax = plt.subplots(figsize=(8.0, 9.2))
     _draw_coverage_points(
-        ax, geo, class_series, labels, colors, max_points=max_points, bin_m=MAP_BIN_M, column=column
+        ax, geo, class_series, labels, colors, max_points=max_points,
+        bin_m=MAP_BIN_M, column=column, route_casing=route_casing,
     )
     if extent is not None:
         ax.set_xlim(extent[0], extent[1])
@@ -1873,28 +2036,35 @@ def plot_bad_spot_map(
         ax.set_xlim(lon_min, lon_max)
         ax.set_ylim(lat_min, lat_max)
     ax.set_aspect("equal", adjustable="box")
-    if basemap:
+    if basemap and basemap_style == "boundary":
+        _add_boundary_basemap(ax)
+    elif basemap:
         _add_basemap(ax)
-    handles = _coverage_legend_handles(labels, colors)
-    handles.extend(
-        [
-            Line2D([0], [0], color="#FF6600", lw=2.2, linestyle=(0, (3, 2)), label=consecutive_label(column)),
-            Line2D([0], [0], color="#FF6600", lw=2.2, linestyle=(0, (1, 1.4)), label="Discrete area ≥ 1 km²"),
-        ]
-    )
-    legend = ax.legend(
-        handles=handles,
-        title=legend_title,
-        loc="center left",
-        bbox_to_anchor=(1.02, 0.5),
-        frameon=True,
-        fontsize=8,
-        title_fontsize=10,
-    )
+    if legend_inside:
+        counts = legend_counts if legend_counts is not None else [0] * len(labels)
+        legend = _place_count_legend(ax, _count_legend_handles(labels, colors, counts), legend_title)
+    else:
+        handles = _coverage_legend_handles(labels, colors)
+        handles.extend(
+            [
+                Line2D([0], [0], color="#FF6600", lw=2.2, linestyle=(0, (3, 2)), label=consecutive_label(column)),
+                Line2D([0], [0], color="#FF6600", lw=2.2, linestyle=(0, (1, 1.4)), label="Discrete area ≥ 1 km²"),
+            ]
+        )
+        legend = ax.legend(
+            handles=handles,
+            title=legend_title,
+            loc="center left",
+            bbox_to_anchor=(1.02, 0.5),
+            frameon=True,
+            fontsize=8,
+            title_fontsize=10,
+        )
     if spots is not None and not spots.empty and outlines and not shapes:
         for _, spot in spots.iterrows():
             _add_spot_outline(ax, spot, overview=False)
-    ax.set_title(title)
+    if not legend_inside:
+        ax.set_title(title)
     hide_map_axes(ax)
     fig.tight_layout()
     _save_map(fig, path, legends=[legend], ax=ax if shapes else None, spots=spots if shapes else None)
@@ -2058,8 +2228,11 @@ def plot_bad_spot_serial_maps(
     class_series: pd.Series,
     labels: list[str],
     colors: list[str],
+    *,
+    basemap_style: str = "satellite",
+    route_casing: bool = True,
 ) -> list[Path]:
-    """One large satellite map per bad spot, longest first.
+    """One large map per bad spot, longest first.
 
     The circle is recorded and not painted, so the workbook can place one movable
     shape on that map. Sector pies and distance lines stay in the picture. The
@@ -2097,11 +2270,15 @@ def plot_bad_spot_serial_maps(
             poor_on_top=True,
             bin_m=MAP_BIN_M,
             column=column,
+            route_casing=route_casing,
         )
         ax.set_xlim(zext[0], zext[1])
         ax.set_ylim(zext[2], zext[3])
         ax.set_aspect("equal", adjustable="box")
-        _add_basemap(ax)
+        if basemap_style == "boundary":
+            _add_boundary_basemap(ax)
+        else:
+            _add_basemap(ax)
         draw_bad_spot_sector_pies(ax, spot)
         hide_map_axes(ax)
         kind = str(spot.get("kind", "consecutive"))
@@ -2127,7 +2304,13 @@ def plot_rsrp_bad_spot_map(
     title: str = "Combined view — RSRP",
     shapes: bool = False,
     outlines: bool = False,
+    legend_title: str = "Idle by RSRP",
 ) -> Path:
+    """Boundary map coloured by the four-bin RSRP legend, counts on the left.
+
+    The coloured trace is the KPI. No separate route line is drawn under it.
+    """
+    counts = _legend_sample_counts(df, "RSRP", rsrp_map_class, MAP_RSRP_LABELS)
     return plot_bad_spot_map(
         df,
         path,
@@ -2137,10 +2320,14 @@ def plot_rsrp_bad_spot_map(
         colors=MAP_RSRP_COLORS,
         spots=spots,
         title=title,
-        legend_title="RSRP (dBm)",
+        legend_title=legend_title,
         extent=extent,
         shapes=shapes,
         outlines=outlines,
+        basemap_style="boundary",
+        route_casing=False,
+        legend_inside=True,
+        legend_counts=counts,
     )
 
 
@@ -2162,7 +2349,13 @@ def plot_rsrq_bad_spot_map(
     title: str = "Combined view — RSRQ",
     shapes: bool = False,
     outlines: bool = False,
+    legend_title: str = "Idle by RSRQ",
 ) -> Path:
+    """Boundary map coloured by the three-bin RSRQ legend, counts on the left.
+
+    The coloured trace is the KPI. No separate route line is drawn under it.
+    """
+    counts = _legend_sample_counts(df, "RSRQ", rsrq_map_class, MAP_RSRQ_LABELS)
     return plot_bad_spot_map(
         df,
         path,
@@ -2172,10 +2365,14 @@ def plot_rsrq_bad_spot_map(
         colors=MAP_RSRQ_COLORS,
         spots=spots,
         title=title,
-        legend_title="RSRQ (dB)",
+        legend_title=legend_title,
         extent=extent,
         shapes=shapes,
         outlines=outlines,
+        basemap_style="boundary",
+        route_casing=False,
+        legend_inside=True,
+        legend_counts=counts,
     )
 
 

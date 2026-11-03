@@ -87,7 +87,7 @@ RSRP / RSRQ / SINR coverage maps use the Page 1 legend:
 
 **RSRQ (dB):** `-10 to 0` green, `-17 to -10` yellow, `-30 to -17` red.
 
-**SINR (dB):** `15 <= X < Max` blue, `10 <= X < 15` dark green, `5 <= X < 10` cyan, `0 <= X < 5` yellow, `-5 <= X < 0` orange, `Min < X < -5` red. SINR is unchanged. The RSRP and RSRQ coverage maps and their Cover histograms use the four-colour and three-colour legends above. Bad-spot sheets keep the previous poor-run colours and the same circles.
+**SINR (dB):** `15 <= X < Max` blue, `10 <= X < 15` dark green, `5 <= X < 10` cyan, `0 <= X < 5` yellow, `-5 <= X < 0` orange, `Min < X < -5` red. SINR is unchanged. The RSRP and RSRQ coverage maps, their Cover histograms, and the RSRP and RSRQ bad-spot sheets use the four-colour and three-colour legends above. Each bad-spot legend sits inside the map on the left and shows that sheet's own sample count. SINR bad-spot sheets keep the previous SINR colours.
 
 Throughput (PDCP DL) and CQI are on the same legend sheet but are not in these IDLE logs, so those maps are not drawn yet.
 
@@ -97,7 +97,7 @@ Throughput (PDCP DL) and CQI are on the same legend sheet but are not in these I
 
 Active Mode plots **one band per latitude and longitude** (Robi only): the strongest RSRP, and the Cell Id that carried it. RSRQ and SINR follow that row, so L1800 and L2100 are not drawn on top of each other at the same coordinate. Idle collapses the same timestamp first, then keeps the strongest band per scanner sweep.
 
-- Poor is **RSRP ≤ −115 dBm** (magenta and red only; yellow is not a bad-spot colour), **RSRQ ≤ −20 dB** (red), **SINR ≤ 0 dB** (orange and red)
+- Poor is **RSRP ≤ −115 dBm** (the whole red bin, and the yellow bin only from −115 down), **RSRQ ≤ −20 dB** (inside the red bin; red above −20 is not poor), **SINR ≤ 0 dB** (orange and red)
 - Maps and rules read the same **50 m road bins**: a bin is coloured by the median of the samples measured in it and counts as poor only when that median is at or below the threshold, and poor bins are drawn on top of good ones — so a circle can only sit on colour the map actually shows
 - **Every poor run is covered by a circle.** Runs within 2 km join one circle when the poor road inside it spans at most 7 km, so the drawn circle stays within 10 km and covers that road. A longer poor road is split into several circles. Pockets more than 2 km apart stay separate circles even inside the same 10 km neighbourhood
 - **The combined view has no circles**, on the Bad Spot sheet and on the RSRP, RSRQ and SINR sheets. Each of the 16 longest bad spots has its own large map, in that same order, and **one orange Excel shape** on that map (named Circle 1, Circle 2, …). The shape is not painted into the picture, so it can be dragged. The columns to the right of each map are left empty
@@ -114,17 +114,23 @@ The Cover sheet keeps the Idle dataset, KPI table, and Idle histograms. Under Ac
 
 Every coverage map and bad-spot map is drawn on Esri World Imagery. The combined view is the satellite route only: no circle is painted into it and no circle shape is placed on it. Bad Spot 1, Bad Spot 2, and the rest follow down the left side of the sheet, each a larger map with one movable circle. A site that falls in that view is drawn as a transparent cyan outline, one arm per sector, with the Sector name at the end of the arm and no fill. A circle is at most 10 km across. Where the poor road is in separate pockets, several circles sit inside that 10 km neighbourhood.
 
-## Download Excel report (v1.46)
+## Download Excel report (v1.47)
 
-**v1.46 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.46.xlsx
+**v1.47 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.47.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.46.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.47.xlsx
+
+Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.46.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.46.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.47.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+
+### Bad-spot RSRP and RSRQ use the boundary map (v1.47)
+
+Bad Spot RSRP, Bad Spot RSRQ, and the two Active copies draw the new legend on a white boundary map. The legend is inside the combined view, on the left, and the number in parentheses is the count of plotted samples in that bin. The coloured line is the KPI itself. No separate route is drawn on those charts. SINR bad-spot sheets stay on satellite imagery with the SINR colours, and the 96 movable circles are unchanged.
 
 Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 
