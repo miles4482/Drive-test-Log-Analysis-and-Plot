@@ -423,29 +423,25 @@ const PieCanvas = L.Layer.extend({
         }
       }
     }
-    for (let i = 0; i < labels.length; i++) {
-      const x = labels[i][0];
-      const y = labels[i][1];
-      const text = labels[i][2];
-      const width = ctx.measureText(text).width + 6;
-      ctx.fillStyle = "rgba(255,255,255,0.88)";
-      ctx.fillRect(x - width / 2, y - 6, width, 12);
-      ctx.fillStyle = "#04282C";
-      ctx.fillText(text, x, y);
-    }
-    ctx.font = "8px Segoe UI, Calibri, sans-serif";
-    for (let i = 0; i < siteLabels.length; i++) {
-      const x = siteLabels[i][0];
-      const y = siteLabels[i][1];
-      const text = siteLabels[i][2];
-      const width = ctx.measureText(text).width + 4;
-      ctx.fillStyle = "rgba(255,255,255,0.9)";
-      ctx.fillRect(x - width / 2, y - 5, width, 10);
-      ctx.fillStyle = "#7A1F6D";
-      ctx.fillText(text, x, y);
-    }
+    paintLabels(ctx, labels, "9px Segoe UI, Calibri, sans-serif", "#04282C");
+    paintLabels(ctx, siteLabels, "8px Segoe UI, Calibri, sans-serif", "#7A1F6D");
   }
 });
+
+function paintLabels(ctx, items, font, color) {
+  if (!items.length) return;
+  ctx.font = font;
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "#ffffff";
+  ctx.fillStyle = color;
+  for (let i = 0; i < items.length; i++) {
+    const x = items[i][0];
+    const y = items[i][1];
+    const text = items[i][2];
+    ctx.strokeText(text, x, y);
+    ctx.fillText(text, x, y);
+  }
+}
 
 function offsetKm(lat, lon, azimuthDeg, km) {
   const az = azimuthDeg * Math.PI / 180;
@@ -571,8 +567,9 @@ function draw() {
 
 let rulerOn = false;
 let rulerPts = [];
-let rulerLine = null;
-let rulerLabel = null;
+let rulerCursor = null;
+const rulerGroup = L.layerGroup().addTo(map);
+let rulerFrame = 0;
 
 function metresBetween(a, b) {
   const r = 6371000;
@@ -587,35 +584,69 @@ function metresBetween(a, b) {
 
 function clearRuler() {
   rulerPts = [];
-  if (rulerLine) { map.removeLayer(rulerLine); rulerLine = null; }
-  if (rulerLabel) { map.removeLayer(rulerLabel); rulerLabel = null; }
+  rulerCursor = null;
+  rulerGroup.clearLayers();
+}
+
+function metreLabel(metres) {
+  return Math.round(metres).toLocaleString() + " m";
 }
 
 function drawRuler() {
-  if (rulerLine) map.removeLayer(rulerLine);
-  if (rulerLabel) map.removeLayer(rulerLabel);
-  rulerLine = null;
-  rulerLabel = null;
-  if (!rulerPts.length) return;
-  rulerLine = L.polyline(rulerPts, { color: "#F5C400", weight: 3 }).addTo(map);
-  if (rulerPts.length < 2) return;
-  const metres = metresBetween(rulerPts[0], rulerPts[1]);
-  const mid = L.latLng(
-    (rulerPts[0].lat + rulerPts[1].lat) / 2,
-    (rulerPts[0].lng + rulerPts[1].lng) / 2
-  );
-  const text = Math.round(metres).toLocaleString() + " m";
-  rulerLabel = L.marker(mid, {
-    interactive: false,
-    icon: L.divIcon({ className: "ruler-tag", html: "<span>" + text + "</span>", iconSize: [88, 18], iconAnchor: [44, 9] })
-  }).addTo(map);
+  rulerGroup.clearLayers();
+  rulerPts.forEach(function (point) {
+    L.circleMarker(point, {
+      radius: 6, color: "#8C6A32", weight: 2, fillColor: "#E6C48A", fillOpacity: 1, interactive: false
+    }).addTo(rulerGroup);
+  });
+  const line = rulerPts.slice();
+  if (rulerCursor && rulerPts.length) line.push(rulerCursor);
+  if (line.length < 2) return;
+  L.polyline(line, { color: "#E6C48A", weight: 3, interactive: false }).addTo(rulerGroup);
+  const fixedParts = [];
+  let fixedTotal = 0;
+  for (let i = 1; i < rulerPts.length; i++) {
+    const metres = metresBetween(rulerPts[i - 1], rulerPts[i]);
+    fixedTotal += metres;
+    fixedParts.push(metreLabel(metres));
+  }
+  for (let i = 1; i < line.length; i++) {
+    const metres = metresBetween(line[i - 1], line[i]);
+    const mid = L.latLng(
+      (line[i - 1].lat + line[i].lat) / 2,
+      (line[i - 1].lng + line[i].lng) / 2
+    );
+    L.marker(mid, {
+      interactive: false,
+      icon: L.divIcon({
+        className: "ruler-tag",
+        html: "<span>" + metreLabel(metres) + "</span>",
+        iconSize: [88, 18],
+        iconAnchor: [44, 20]
+      })
+    }).addTo(rulerGroup);
+  }
+  if (fixedParts.length) {
+    document.getElementById("status").textContent =
+      "Ruler · " + fixedParts.join(" + ") + " · total " + metreLabel(fixedTotal);
+  }
 }
 
 function onMapClick(ev) {
   if (!rulerOn) return;
   rulerPts.push(ev.latlng);
-  if (rulerPts.length > 2) rulerPts = [ev.latlng];
+  rulerCursor = null;
   drawRuler();
+}
+
+function onMapMove(ev) {
+  if (!rulerOn || !rulerPts.length) return;
+  rulerCursor = ev.latlng;
+  if (rulerFrame) return;
+  rulerFrame = requestAnimationFrame(function () {
+    rulerFrame = 0;
+    drawRuler();
+  });
 }
 
 const searchLayer = L.layerGroup().addTo(map);
@@ -702,13 +733,17 @@ document.getElementById("pies").addEventListener("change", syncPies);
 document.getElementById("ruler").addEventListener("click", function () {
   rulerOn = !rulerOn;
   this.classList.toggle("on", rulerOn);
-  if (!rulerOn) clearRuler();
+  if (!rulerOn) {
+    clearRuler();
+    draw();
+  }
 });
 document.getElementById("search").addEventListener("click", runSearch);
 document.getElementById("q").addEventListener("keydown", function (ev) {
   if (ev.key === "Enter") runSearch();
 });
 map.on("click", onMapClick);
+map.on("mousemove", onMapMove);
 
 if (typeof COVERAGE === "undefined") {
   document.getElementById("status").textContent = "Coverage data was not found beside this page";
