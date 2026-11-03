@@ -884,6 +884,54 @@ def plot_discrete_coverage_map(
     return path
 
 
+def plot_road_map(
+    df: pd.DataFrame,
+    path: Path,
+    extent: tuple[float, float, float, float] | None = None,
+) -> Path:
+    """Satellite trace of the drive. One road colour, no legend and no mode title."""
+    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    geo = df.dropna(subset=["Longitude", "Latitude", "RSRP"]).copy()
+    fig, ax = plt.subplots(figsize=(7.4, 9.2))
+    if geo.empty:
+        ax.text(
+            0.5, 0.5, "No route", transform=ax.transAxes,
+            ha="center", va="center", color="#7F8C8D", fontsize=12,
+        )
+    else:
+        pts, _classes, new_pass = _route_pieces(geo, "RSRP", MAP_BIN_M)
+        segments: list = []
+        run = 0
+        breaks = list(np.flatnonzero(new_pass)) + [len(pts)]
+        for end in breaks:
+            if end - run > 1:
+                segments.append(pts[run:end])
+            run = end
+        if segments:
+            ax.add_collection(LineCollection(
+                segments, colors="#1B4F72", linewidths=MAP_ROUTE_LW + 2.6,
+                capstyle="round", joinstyle="round", zorder=2,
+            ))
+            ax.add_collection(LineCollection(
+                segments, colors="#F4F7FB", linewidths=MAP_ROUTE_LW,
+                capstyle="round", joinstyle="round", zorder=3,
+            ))
+        if extent is not None:
+            ax.set_xlim(extent[0], extent[1])
+            ax.set_ylim(extent[2], extent[3])
+        else:
+            lon_min, lon_max, lat_min, lat_max = _coverage_extent_from_geo(geo)
+            ax.set_xlim(lon_min, lon_max)
+            ax.set_ylim(lat_min, lat_max)
+    ax.set_aspect("equal", adjustable="box")
+    _add_basemap(ax)
+    hide_map_axes(ax)
+    fig.tight_layout()
+    fig.savefig(path, dpi=MAP_DPI, facecolor="white", bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
 def plot_rsrp_coverage_map(
     df: pd.DataFrame,
     path: Path,

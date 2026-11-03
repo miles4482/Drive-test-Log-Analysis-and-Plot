@@ -68,6 +68,7 @@ from merge_and_analyze import (
     strongest_location,
     _equirect_km,
     plot_rsrp_bad_spot_map,
+    plot_road_map,
     plot_rsrp_coverage_map,
     plot_rsrq_bad_spot_map,
     plot_rsrq_coverage_map,
@@ -82,7 +83,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.44"
+REPORT_VERSION = "1.45"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -1977,11 +1978,11 @@ def add_active_cover_extras(cover, data_ws, blocks, route_path: Path, active: pd
         "Samples", "SINR (dB)", MAP_SINR_COLORS, width=9, height=6,
     )
 
-    section_bar(cover, 72, "DT Route  —  Active Mode", 1, 20)
-    write_cell(cover, 74, 1, "DT route plot", size=14, bold=True)
+    section_bar(cover, 72, "DT Route", 1, 20)
+    write_cell(cover, 74, 1, "Drive details", size=14, bold=True)
+    write_cell(cover, 74, 12, "DT route plot", size=14, bold=True)
     if route_path.exists():
-        add_image(cover, route_path, "A76", width=760, height=640)
-    write_cell(cover, 74, 12, "Drive details", size=14, bold=True)
+        add_image(cover, route_path, "L76", width=520, height=640)
     ordered = active.dropna(subset=["Time", "Latitude", "Longitude"]).copy()
     ordered["Time"] = pd.to_datetime(ordered["Time"], errors="coerce")
     ordered = ordered.dropna(subset=["Time"]).sort_values("Time")
@@ -2007,15 +2008,14 @@ def add_active_cover_extras(cover, data_ws, blocks, route_path: Path, active: pd
         ["Unique Cell Ids", int(active["Cell Id"].nunique())],
         ["CSV files", int(active["Source"].nunique()) if "Source" in active.columns else "—"],
     ]
-    write_table(cover, 75, 12, ["Item", "Value"], detail_rows)
-    cover.cell(80, 13).number_format = "#,##0.0"
-    cover.cell(81, 13).number_format = "#,##0.0"
-    cover.cell(82, 13).number_format = "yyyy-mm-dd hh:mm:ss"
-    cover.cell(83, 13).number_format = "yyyy-mm-dd hh:mm:ss"
-    cover.column_dimensions["M"].width = 22
-    cover.merge_cells(start_row=91, start_column=12, end_row=93, end_column=20)
+    write_table(cover, 75, 1, ["Item", "Value"], detail_rows)
+    cover.cell(80, 2).number_format = "#,##0.0"
+    cover.cell(81, 2).number_format = "#,##0.0"
+    cover.cell(82, 2).number_format = "yyyy-mm-dd hh:mm:ss"
+    cover.cell(83, 2).number_format = "yyyy-mm-dd hh:mm:ss"
+    cover.merge_cells(start_row=91, start_column=1, end_row=93, end_column=11)
     write_cell(
-        cover, 91, 12,
+        cover, 91, 1,
         "The route is the plotted Robi track: one Cell Id and one band at each latitude and longitude, "
         "the strongest RSRP. RSRQ and SINR on the histograms are the values from that same row. "
         f"Plotted band mix: {layer_bits}.",
@@ -2242,8 +2242,8 @@ def build_report(df: pd.DataFrame, active: pd.DataFrame | None = None, out_path:
     )
     add_cover_charts(cover, data_ws, blocks)
     if active_plotted is not None and not active_plotted.empty:
-        route_path = plot_rsrp_coverage_map(
-            active_plotted, PLOTS_DIR / "excel_cover_active_route.png", mode_label="Active DT route",
+        route_path = plot_road_map(
+            active_plotted, PLOTS_DIR / "excel_cover_active_route.png",
         )
         add_active_cover_extras(
             cover, data_ws, write_active_histograms(data_ws, active_plotted), route_path, active_plotted,
