@@ -106,27 +106,31 @@ Active Mode plots **one band per latitude and longitude** (Robi only): the stron
 - Each sheet draws the 16 longest circles as separate maps and lists up to 300 in the table, longest first, and states the full count
 - Published circle counts, with 0 discrete areas: Idle RSRP 41, RSRQ 45, SINR 204; Active Robi RSRP 163, RSRQ 50, SINR 190. These rules are locked in `LOGIC_LOCK`. `verify_report` fails if a rebuild moves a threshold, a colour, the circle size, or a count
 
+### Cover shows the Active histograms and the DT route (v1.44)
+
+The Cover sheet keeps the Idle dataset, KPI table, and Idle histograms. Under Active Mode it adds three native histograms (RSRP, RSRQ, SINR) for the plotted Robi rows, using the same legend colours as the Idle charts. Below that, the Active DT route is the satellite track of those plotted rows, with drive details beside it: campaign, operator, plotted samples, route length, duration, start and end, Cell Id count, and the 15 CSV files. RSRP, RSRQ, SINR, bad-spot, and vs-KPI sheets are unchanged from v1.43, including the 96 movable circles.
+
 ### Maps are satellite, and each bad-spot circle is its own shape (v1.43)
 
 Every coverage map and bad-spot map is drawn on Esri World Imagery. The combined view is the satellite route only: no circle is painted into it and no circle shape is placed on it. Bad Spot 1, Bad Spot 2, and the rest follow down the left side of the sheet, each a larger map with one movable circle. A site that falls in that view is drawn as a transparent cyan outline, one arm per sector, with the Sector name at the end of the arm and no fill. A circle is at most 10 km across. Where the poor road is in separate pockets, several circles sit inside that 10 km neighbourhood.
 
-## Download Excel report (v1.43)
+## Download Excel report (v1.44)
 
-**v1.43 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.43.xlsx
+**v1.44 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.44.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.43.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.44.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.43.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.44.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
 Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 
 | Sheet | Contents |
 | --- | --- |
-| Cover | IDLE dataset and KPI tables, histograms, and an Active Mode dataset for the Robi UE |
+| Cover | Idle dataset, KPI tables, and histograms on top. Active Mode dataset, RSRP / RSRQ / SINR histograms, DT route, and drive details below |
 | RSRP / RSRQ / SINR | Idle combined and L900 / L1800 / L2100 / L2600 maps on the left; Active Robi maps on the right |
 | Bad Spot RSRP / RSRQ / SINR | Idle bad spots, one sheet per KPI |
 | Bad Spot RSRP_Active / RSRQ_Active / SINR_Active | Active Robi bad spots, same rules, one sheet per KPI |

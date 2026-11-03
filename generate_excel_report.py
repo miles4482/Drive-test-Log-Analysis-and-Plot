@@ -66,6 +66,7 @@ from merge_and_analyze import (
     best_server,
     strongest_fix,
     strongest_location,
+    _equirect_km,
     plot_rsrp_bad_spot_map,
     plot_rsrp_coverage_map,
     plot_rsrq_bad_spot_map,
@@ -81,7 +82,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.43"
+REPORT_VERSION = "1.44"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -1219,7 +1220,7 @@ def build_cover(
 
     write_cell(ws, 18, 1, "How to read this workbook", size=14, bold=True)
     notes = [
-        "Cover \u2014 Idle dataset and KPI tables on the left, Idle plots on the right, Active Mode dataset at the bottom.",
+        "Cover \u2014 Idle dataset and plots on top. Active Mode dataset, histograms and the DT route are below.",
         "RSRP / RSRQ / SINR \u2014 Idle scanner on the left (combined all-band map with bad spots, then L900 / L1800 / L2100 / L2600). Active Mode Robi UE on the right, same layers. No site pies.",
         "Bad Spot RSRP / RSRQ / SINR are Idle. Bad Spot RSRP_Active / RSRQ_Active / SINR_Active apply the same poor-run rules to the Active Robi track. Each bad spot is its own large map, in order. The combined view has no circles.",
         "Poor is RSRP at or below -115 dBm (magenta/red), RSRQ at or below -20 dB (red), SINR at or below 0 dB (orange/red); every poor run is circled, however short.",
@@ -1919,6 +1920,114 @@ def verify_report(path: Path) -> dict:
     return info
 
 
+def route_length_km(df: pd.DataFrame) -> float:
+    """Kilometres along the drive. A step longer than 500 m is a new pass, not road."""
+    work = df.dropna(subset=["Time", "Latitude", "Longitude"]).copy()
+    if "Time" in work.columns:
+        work["Time"] = pd.to_datetime(work["Time"], errors="coerce")
+        work = work.dropna(subset=["Time"])
+    if len(work) < 2:
+        return 0.0
+    sort_cols = ["Source", "Time"] if "Source" in work.columns else ["Time"]
+    work = work.sort_values(sort_cols)
+    groups = work.groupby("Source", sort=False) if "Source" in work.columns else [(None, work)]
+    total = 0.0
+    for _, part in groups:
+        if len(part) < 2:
+            continue
+        lat = part["Latitude"].to_numpy(dtype=float)
+        lon = part["Longitude"].to_numpy(dtype=float)
+        step = np.asarray(_equirect_km(lat[:-1], lon[:-1], lat[1:], lon[1:]), dtype=float)
+        total += float(step[step < 0.5].sum())
+    return total
+
+
+def write_active_histograms(ws: Worksheet, df: pd.DataFrame) -> dict:
+    """Legend-coloured histogram series for the plotted Active rows."""
+    rsrp_bins = np.arange(-140, -48, 2)
+    rsrq_bins = np.arange(-24, -2.5, 0.5)
+    sinr_bins = np.arange(-15, 31, 1)
+    return {
+        "RSRP": write_stacked_hist(ws, 60, df["RSRP"], rsrp_bins, rsrp_map_class(df["RSRP"]), MAP_RSRP_LABELS),
+        "RSRQ": write_stacked_hist(ws, 68, df["RSRQ"], rsrq_bins, rsrq_map_class(df["RSRQ"]), MAP_RSRQ_LABELS),
+        "SINR": write_stacked_hist(ws, 76, df["SINR"], sinr_bins, sinr_map_class(df["SINR"]), MAP_SINR_LABELS),
+    }
+
+
+def add_active_cover_extras(cover, data_ws, blocks, route_path: Path, active: pd.DataFrame) -> None:
+    """Active histograms and the DT route. Idle charts and the other sheets stay put."""
+    write_cell(cover, 44, 12, "Active histograms (plotted Robi rows)", size=14, bold=True)
+    cover.merge_cells(start_row=44, start_column=12, end_row=44, end_column=20)
+    add_stacked_col_chart(
+        data_ws, cover, "L46", "RSRP histogram — Active",
+        blocks["RSRP"]["cat_col"], blocks["RSRP"]["data_min"], blocks["RSRP"]["data_max"],
+        2, 1 + blocks["RSRP"]["n"],
+        "Samples", "RSRP (dBm)", MAP_RSRP_COLORS, width=9, height=6,
+    )
+    add_stacked_col_chart(
+        data_ws, cover, "R46", "RSRQ histogram — Active",
+        blocks["RSRQ"]["cat_col"], blocks["RSRQ"]["data_min"], blocks["RSRQ"]["data_max"],
+        2, 1 + blocks["RSRQ"]["n"],
+        "Samples", "RSRQ (dB)", MAP_RSRQ_COLORS, width=9, height=6,
+    )
+    add_stacked_col_chart(
+        data_ws, cover, "L58", "SINR histogram — Active",
+        blocks["SINR"]["cat_col"], blocks["SINR"]["data_min"], blocks["SINR"]["data_max"],
+        2, 1 + blocks["SINR"]["n"],
+        "Samples", "SINR (dB)", MAP_SINR_COLORS, width=9, height=6,
+    )
+
+    section_bar(cover, 72, "DT Route  —  Active Mode", 1, 20)
+    write_cell(cover, 74, 1, "DT route plot", size=14, bold=True)
+    if route_path.exists():
+        add_image(cover, route_path, "A76", width=760, height=640)
+    write_cell(cover, 74, 12, "Drive details", size=14, bold=True)
+    ordered = active.dropna(subset=["Time", "Latitude", "Longitude"]).copy()
+    ordered["Time"] = pd.to_datetime(ordered["Time"], errors="coerce")
+    ordered = ordered.dropna(subset=["Time"]).sort_values("Time")
+    start = ordered.iloc[0]
+    end = ordered.iloc[-1]
+    span = end["Time"] - start["Time"]
+    hours = span.total_seconds() / 3600.0
+    layers = pd.to_numeric(active["DL EARFCN"], errors="coerce").map(earfcn_to_layer)
+    layer_bits = ", ".join(f"{name} {int(n):,}" for name, n in layers.value_counts().items() if name)
+    detail_rows = [
+        ["Mode", "Active (UE)"],
+        ["Campaign", _campaign_label(active["Campaign"]) if "Campaign" in active.columns else "—"],
+        ["Operator", ACTIVE_OPERATOR],
+        ["Plotted samples", int(len(active))],
+        ["Route length (km)", round(route_length_km(active), 1)],
+        ["Duration (hours)", round(hours, 1)],
+        ["Start time", start["Time"]],
+        ["End time", end["Time"]],
+        ["Start latitude", round(float(start["Latitude"]), 5)],
+        ["Start longitude", round(float(start["Longitude"]), 5)],
+        ["End latitude", round(float(end["Latitude"]), 5)],
+        ["End longitude", round(float(end["Longitude"]), 5)],
+        ["Unique Cell Ids", int(active["Cell Id"].nunique())],
+        ["CSV files", int(active["Source"].nunique()) if "Source" in active.columns else "—"],
+    ]
+    write_table(cover, 75, 12, ["Item", "Value"], detail_rows)
+    cover.cell(80, 13).number_format = "#,##0.0"
+    cover.cell(81, 13).number_format = "#,##0.0"
+    cover.cell(82, 13).number_format = "yyyy-mm-dd hh:mm:ss"
+    cover.cell(83, 13).number_format = "yyyy-mm-dd hh:mm:ss"
+    cover.column_dimensions["M"].width = 22
+    cover.merge_cells(start_row=91, start_column=12, end_row=93, end_column=20)
+    write_cell(
+        cover, 91, 12,
+        "The route is the plotted Robi track: one Cell Id and one band at each latitude and longitude, "
+        "the strongest RSRP. RSRQ and SINR on the histograms are the values from that same row. "
+        f"Plotted band mix: {layer_bits}.",
+        size=9, wrap=True,
+    )
+    write_cell(
+        cover, 19, 1,
+        "Cover — Idle dataset and plots on top. Active Mode dataset, histograms and the DT route are below.",
+        wrap=True,
+    )
+
+
 def add_cover_charts(cover, data_ws, blocks) -> None:
     write_cell(cover, 5, 12, "RSRP, RSRQ and SINR plots (native Excel charts with legends)", size=14, bold=True)
     cover.merge_cells(start_row=5, start_column=12, end_row=5, end_column=20)
@@ -2132,6 +2241,13 @@ def build_report(df: pd.DataFrame, active: pd.DataFrame | None = None, out_path:
         0 if active_robi is None else len(active_robi),
     )
     add_cover_charts(cover, data_ws, blocks)
+    if active_plotted is not None and not active_plotted.empty:
+        route_path = plot_rsrp_coverage_map(
+            active_plotted, PLOTS_DIR / "excel_cover_active_route.png", mode_label="Active DT route",
+        )
+        add_active_cover_extras(
+            cover, data_ws, write_active_histograms(data_ws, active_plotted), route_path, active_plotted,
+        )
     empty_bands: dict[str, Path] = {}
     build_kpi_sheet(
         rsrp_ws, "RSRP", "dBm", idle["rsrp_bad"],
@@ -2356,6 +2472,12 @@ if __name__ == "__main__":
         raise SystemExit(
             "The bad-spot sheets are a vertical series of maps. Run this script with no arguments "
             "so the workbook is rebuilt."
+        )
+    if len(sys.argv) > 1 and sys.argv[1] == "refresh-cover":
+        raise SystemExit(
+            "Do not openpyxl-save this workbook. That rewrite drops the movable bad-spot circles. "
+            "A full rebuild (no arguments) writes the Cover histograms and DT route with every sheet. "
+            "A Cover-only update has to be grafted into the xlsx zip."
         )
     if len(sys.argv) > 1 and sys.argv[1] == "refresh-pies":
         path = refresh_bad_spot_pies()
