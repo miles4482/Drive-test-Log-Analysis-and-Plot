@@ -1171,9 +1171,8 @@ def plot_sinr_coverage_map(
 
 
 # Bad-spot contract from report v1.35.
-# 1) Poor is inclusive: RSRP <= -115 dBm (all of the red bin, and the yellow
-#    bin only from -115 down), RSRQ <= -20 dB (inside the red bin), SINR <= 0 dB
-#    (orange and red).
+# 1) Poor is RSRP < -120 dBm (red bin only; -120 itself stays yellow),
+#    RSRQ <= -20 dB (inside the red bin), SINR <= 0 dB (orange and red).
 # 2) A bin of road is 50 m. Its colour and its poor/good call both use the median
 #    of the samples in it, and poor bins are drawn on top of good ones.
 # 3) Every poor run is covered. A run stays one run across a gap of at most 150 m
@@ -1225,9 +1224,10 @@ BAD_SPOT_ZOOM_COLS = 4
 BAD_SPOT_MAX_ZOOMS = 16
 BAD_SPOT_MAX = BAD_SPOT_MAX_CONSEC + BAD_SPOT_MAX_DISCRETE
 BAD_SPOT_RULES = {
-    "RSRP": {"threshold": -115.0, "unit": "dBm", "min_consecutive_m": 0.0, "max_consecutive": 2000},
-    "RSRQ": {"threshold": -20.0, "unit": "dB", "min_consecutive_m": 0.0, "max_consecutive": 2000},
-    "SINR": {"threshold": 0.0, "unit": "dB", "min_consecutive_m": 0.0, "max_consecutive": 2000},
+    # strict_less: a value equal to the threshold is not poor. -120 is the top of the red bin.
+    "RSRP": {"threshold": -120.0, "unit": "dBm", "min_consecutive_m": 0.0, "max_consecutive": 2000, "strict_less": True},
+    "RSRQ": {"threshold": -20.0, "unit": "dB", "min_consecutive_m": 0.0, "max_consecutive": 2000, "strict_less": False},
+    "SINR": {"threshold": 0.0, "unit": "dB", "min_consecutive_m": 0.0, "max_consecutive": 2000, "strict_less": False},
 }
 
 
@@ -1253,15 +1253,16 @@ LOGIC_LOCK = {
     "merge_gap_km": 2.0,
     "discrete_km2": 1.0,
     "discrete_share": 0.50,
-    "poor": {"RSRP": -115.0, "RSRQ": -20.0, "SINR": 0.0},
+    "poor": {"RSRP": -120.0, "RSRQ": -20.0, "SINR": 0.0},
+    "poor_strict": {"RSRP": True, "RSRQ": False, "SINR": False},
     "min_consecutive_m": {"RSRP": 0.0, "RSRQ": 0.0, "SINR": 0.0},
     "rsrp_greens": ("#008000", "#00FF00"),
     "ring_tiers": ((40, 2.6, 2.15, True), (250, 1.4, 0.70, False), (10**9, 0.8, 0.50, False)),
     "counts": {
-        "Bad Spot RSRP": (41, 0),
+        "Bad Spot RSRP": (26, 0),
         "Bad Spot RSRQ": (45, 0),
         "Bad Spot SINR": (204, 0),
-        "Bad Spot RSRP_Active": (163, 0),
+        "Bad Spot RSRP_Active": (81, 0),
         "Bad Spot RSRQ_Active": (50, 0),
         "Bad Spot SINR_Active": (190, 0),
     },
@@ -1291,6 +1292,8 @@ def logic_drift() -> list[str]:
         rule = BAD_SPOT_RULES[kpi]
         if float(rule["threshold"]) != threshold or float(rule["min_consecutive_m"]) != LOGIC_LOCK["min_consecutive_m"][kpi]:
             problems.append(f"{kpi} rule {rule['threshold']}, min {rule['min_consecutive_m']}")
+        if bool(rule.get("strict_less")) != bool(LOGIC_LOCK["poor_strict"][kpi]):
+            problems.append(f"{kpi} strict_less is {bool(rule.get('strict_less'))}")
     if tuple(MAP_RSRP_COLORS[:2]) != LOGIC_LOCK["rsrp_greens"]:
         problems.append(f"RSRP greens are {MAP_RSRP_COLORS[:2]}")
     if BAD_SPOT_OVERVIEW_TIERS != LOGIC_LOCK["ring_tiers"]:
@@ -1317,10 +1320,11 @@ def _equirect_km(lat1, lon1, lat2, lon2) -> np.ndarray:
     return np.sqrt(dlat**2 + dlon**2)
 
 
-def _poor_mask(values: pd.Series, threshold: float) -> pd.Series:
-    """Poor is at or below the KPI threshold (RSRP <= -115, RSRQ <= -20, SINR <= 0)."""
+def _poor_mask(values: pd.Series, threshold: float, *, strict_less: bool = False) -> pd.Series:
+    """Poor samples. RSRP is strictly below -120. RSRQ and SINR are at or below their threshold."""
     v = pd.to_numeric(values, errors="coerce")
-    return v.notna() & (v <= threshold)
+    poor = v < threshold if strict_less else v <= threshold
+    return v.notna() & poor
 
 
 def _prepare_track(df: pd.DataFrame, column: str) -> pd.DataFrame:
@@ -1434,7 +1438,7 @@ def _spot_from_points(
     lon_max = float(part["Longitude"].max())
     vals = pd.to_numeric(part[column], errors="coerce")
     n = int(vals.notna().sum())
-    n_poor = int(_poor_mask(vals, threshold).sum())
+    n_poor = int(_poor_mask(vals, threshold, strict_less=bool(BAD_SPOT_RULES[column].get("strict_less"))).sum())
     mean = float(vals.mean()) if n else np.nan
     return {
         "kind": kind,
@@ -1620,7 +1624,9 @@ def _consecutive_bad_spots(
         if "Source" in track.columns
         else np.zeros(n, dtype=np.int64)
     )
-    poor = _poor_mask(track[detect_column], threshold).to_numpy()
+    poor = _poor_mask(
+        track[detect_column], threshold, strict_less=bool(BAD_SPOT_RULES[column].get("strict_less"))
+    ).to_numpy()
     step_m = np.zeros(n)
     step_m[1:] = _equirect_km(lat[:-1], lon[:-1], lat[1:], lon[1:]) * 1000.0
     cum_m = np.cumsum(step_m)
@@ -1769,7 +1775,8 @@ def find_bad_spots(df: pd.DataFrame, column: str, max_spots: int | None = None) 
     max_consec = int(rule.get("max_consecutive", BAD_SPOT_MAX_CONSEC))
     if total_consec > max_consec:
         consec = consec.head(max_consec).copy()
-    leftover = track.iloc[np.flatnonzero(_poor_mask(track[binned_col], threshold).to_numpy() & ~used)]
+    strict_less = bool(rule.get("strict_less"))
+    leftover = track.iloc[np.flatnonzero(_poor_mask(track[binned_col], threshold, strict_less=strict_less).to_numpy() & ~used)]
     discrete = _discrete_area_bad_spots(leftover, column, threshold)
     if not discrete.empty:
         dense = [
@@ -1816,7 +1823,7 @@ def _map_poor_share(df: pd.DataFrame, spot: pd.Series, column: str, threshold: f
         & df["Longitude"].between(lon_min - 0.15 * dlon, lon_max + 0.15 * dlon)
     ]
     vals = pd.to_numeric(box[column], errors="coerce")
-    mask = _poor_mask(vals, threshold)
+    mask = _poor_mask(vals, threshold, strict_less=bool(BAD_SPOT_RULES[column].get("strict_less")))
     n = int(vals.notna().sum())
     if n == 0:
         return 0.0
@@ -2306,9 +2313,10 @@ def plot_rsrp_bad_spot_map(
     outlines: bool = False,
     legend_title: str = "Idle by RSRP",
 ) -> Path:
-    """Boundary map coloured by the four-bin RSRP legend, counts on the left.
+    """Satellite map coloured by the four-bin RSRP legend, counts on the left.
 
-    The coloured trace is the KPI. No separate route line is drawn under it.
+    The basemap is the same Esri imagery as the RSRP sheet. The coloured trace
+    is the KPI, with the same white casing the coverage maps use.
     """
     counts = _legend_sample_counts(df, "RSRP", rsrp_map_class, MAP_RSRP_LABELS)
     return plot_bad_spot_map(
@@ -2324,8 +2332,8 @@ def plot_rsrp_bad_spot_map(
         extent=extent,
         shapes=shapes,
         outlines=outlines,
-        basemap_style="boundary",
-        route_casing=False,
+        basemap_style="satellite",
+        route_casing=True,
         legend_inside=True,
         legend_counts=counts,
     )
@@ -2351,9 +2359,10 @@ def plot_rsrq_bad_spot_map(
     outlines: bool = False,
     legend_title: str = "Idle by RSRQ",
 ) -> Path:
-    """Boundary map coloured by the three-bin RSRQ legend, counts on the left.
+    """Satellite map coloured by the three-bin RSRQ legend, counts on the left.
 
-    The coloured trace is the KPI. No separate route line is drawn under it.
+    The basemap is the same Esri imagery as the RSRP sheet. The coloured trace
+    is the KPI, with the same white casing the coverage maps use.
     """
     counts = _legend_sample_counts(df, "RSRQ", rsrq_map_class, MAP_RSRQ_LABELS)
     return plot_bad_spot_map(
@@ -2369,8 +2378,8 @@ def plot_rsrq_bad_spot_map(
         extent=extent,
         shapes=shapes,
         outlines=outlines,
-        basemap_style="boundary",
-        route_casing=False,
+        basemap_style="satellite",
+        route_casing=True,
         legend_inside=True,
         legend_counts=counts,
     )
