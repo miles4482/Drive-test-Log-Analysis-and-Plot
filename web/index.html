@@ -18,6 +18,7 @@
     font: inherit; color: #1a1a1a; background: #fff; border: 0; border-radius: 4px;
     padding: 4px 8px;
   }
+  header .check input { width: 15px; height: 15px; margin: 0; accent-color: #0b3a58; }
   header button { cursor: pointer; }
   #map { flex: 1; min-height: 0; background: #d5d8dc; }
   .legend {
@@ -57,6 +58,7 @@
         <option value="L2600">L2600</option>
       </select>
     </label>
+    <label class="check"><input type="checkbox" id="pies" checked> Pie widget</label>
     <button type="button" id="fit">Fit route</button>
     <span id="status">Loading the drive…</span>
   </header>
@@ -258,7 +260,7 @@ const SpotCanvas = L.Layer.extend({
     }
     if (best < 0) return;
     const cell = pack.cell[best] === null ? "—" : String(pack.cell[best]);
-    const name = COVERAGE.names[pack.name[best] || 0] || "Not in system dump";
+    const name = COVERAGE.names[pack.name[best] || 0] || "";
     const rsrp = pack.rsrp[best] === null ? "—" : pack.rsrp[best].toFixed(1) + " dBm";
     const rsrq = pack.rsrq[best] === null ? "—" : pack.rsrq[best].toFixed(1) + " dB";
     const html = "<div><b>CellID</b> " + esc(cell) +
@@ -272,7 +274,145 @@ const SpotCanvas = L.Layer.extend({
   }
 });
 
+const PieCanvas = L.Layer.extend({
+  options: { padding: 0.5 },
+  onAdd: function (map) {
+    this._map = map;
+    this._canvas = L.DomUtil.create("canvas", "leaflet-zoom-animated");
+    this._canvas.style.pointerEvents = "none";
+    map.getPanes().overlayPane.appendChild(this._canvas);
+    map.on("moveend", this._reset, this);
+    map.on("zoomend", this._reset, this);
+    map.on("viewreset", this._reset, this);
+    map.on("zoomanim", this._onAnimZoom, this);
+    this._reset();
+  },
+  onRemove: function (map) {
+    L.DomUtil.remove(this._canvas);
+    map.off("moveend", this._reset, this);
+    map.off("zoomend", this._reset, this);
+    map.off("viewreset", this._reset, this);
+    map.off("zoomanim", this._onAnimZoom, this);
+  },
+  bringFront: function () {
+    if (this._canvas && this._canvas.parentNode) this._canvas.parentNode.appendChild(this._canvas);
+  },
+  _reset: function () {
+    const map = this._map;
+    const pad = this.options.padding;
+    const size = map.getSize();
+    const min = map.containerPointToLayerPoint(size.multiplyBy(-pad)).round();
+    const boundsSize = size.multiplyBy(1 + pad * 2).round();
+    this._bounds = L.bounds(min, min.add(boundsSize));
+    this._center = map.getCenter();
+    this._zoom = map.getZoom();
+    L.DomUtil.setPosition(this._canvas, min);
+    const dpr = window.devicePixelRatio || 1;
+    this._dpr = dpr;
+    this._canvas.width = boundsSize.x * dpr;
+    this._canvas.height = boundsSize.y * dpr;
+    this._canvas.style.width = boundsSize.x + "px";
+    this._canvas.style.height = boundsSize.y + "px";
+    this._draw();
+  },
+  _onAnimZoom: function (ev) {
+    const map = this._map;
+    const scale = map.getZoomScale(ev.zoom, this._zoom);
+    const position = L.DomUtil.getPosition(this._canvas);
+    const viewHalf = map.getSize().multiplyBy(0.5 + this.options.padding);
+    const currentCenter = map.project(this._center, ev.zoom);
+    const destCenter = map.project(ev.center, ev.zoom);
+    const centerOffset = destCenter.subtract(currentCenter);
+    const topLeft = viewHalf.multiplyBy(-scale).add(position).add(viewHalf).subtract(centerOffset);
+    L.DomUtil.setTransform(this._canvas, topLeft, scale);
+  },
+  _armKm: function () {
+    const map = this._map;
+    const lat = map.getCenter().lat * Math.PI / 180;
+    const metresPerPx = 156543.03392 * Math.cos(lat) / Math.pow(2, map.getZoom());
+    return Math.max(0.28, Math.min((48 * metresPerPx) / 1000, 1.05));
+  },
+  _draw: function () {
+    const sites = COVERAGE.sites || [];
+    const map = this._map;
+    const ctx = this._canvas.getContext("2d");
+    const dpr = this._dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, this._canvas.width / dpr, this._canvas.height / dpr);
+    if (!sites.length) return;
+    const origin = this._bounds.min;
+    const bounds = map.getBounds().pad(0.2);
+    const km = this._armKm();
+    const showNames = map.getZoom() >= 13;
+    ctx.lineCap = "round";
+    ctx.font = "600 11px Segoe UI, Calibri, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const labels = [];
+    for (let s = 0; s < sites.length; s++) {
+      const lat = sites[s][0];
+      const lon = sites[s][1];
+      if (!bounds.contains([lat, lon])) continue;
+      const arms = sites[s][2];
+      const centre = map.latLngToLayerPoint([lat, lon]);
+      const cx = centre.x - origin.x;
+      const cy = centre.y - origin.y;
+      for (let a = 0; a < arms.length; a++) {
+        const az = arms[a][1] * Math.PI / 180;
+        const tip = map.latLngToLayerPoint(offsetKm(lat, lon, arms[a][1], km));
+        const x = tip.x - origin.x;
+        const y = tip.y - origin.y;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(x, y);
+        ctx.strokeStyle = "#08343A";
+        ctx.lineWidth = 4.2;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(x, y);
+        ctx.strokeStyle = "#00E5EE";
+        ctx.lineWidth = 2.3;
+        ctx.stroke();
+        if (showNames && arms[a][0]) {
+          const nameAt = map.latLngToLayerPoint(offsetKm(lat, lon, arms[a][1], km * 1.28));
+          labels.push([nameAt.x - origin.x, nameAt.y - origin.y, arms[a][0]]);
+        }
+      }
+    }
+    for (let i = 0; i < labels.length; i++) {
+      const x = labels[i][0];
+      const y = labels[i][1];
+      const text = labels[i][2];
+      const width = ctx.measureText(text).width + 8;
+      ctx.fillStyle = "rgba(255,255,255,0.88)";
+      ctx.fillRect(x - width / 2, y - 8, width, 16);
+      ctx.fillStyle = "#04282C";
+      ctx.fillText(text, x, y);
+    }
+  }
+});
+
+function offsetKm(lat, lon, azimuthDeg, km) {
+  const az = azimuthDeg * Math.PI / 180;
+  const dlat = (km / 111.32) * Math.cos(az);
+  const dlon = (km / (111.32 * Math.cos(lat * Math.PI / 180))) * Math.sin(az);
+  return [lat + dlat, lon + dlon];
+}
+
 let spots = null;
+let pies = null;
+
+function syncPies() {
+  const on = document.getElementById("pies").checked;
+  if (on) {
+    if (!pies) pies = new PieCanvas().addTo(map);
+    else pies.bringFront();
+  } else if (pies) {
+    map.removeLayer(pies);
+    pies = null;
+  }
+}
 
 function currentPack() {
   const key = document.getElementById("mode").value + "|" + document.getElementById("layer").value;
@@ -314,6 +454,7 @@ function draw() {
     if (classify(values[i], thresholds) >= 0) shown++;
   }
   spots = new SpotCanvas(pack, kpi).addTo(map);
+  if (pies) pies.bringFront();
   document.getElementById("status").textContent =
     shown.toLocaleString() + " spots · click a spot for CellID and CellName";
 }
@@ -322,12 +463,14 @@ function draw() {
   document.getElementById(id).addEventListener("change", draw);
 });
 document.getElementById("fit").addEventListener("click", fitRoute);
+document.getElementById("pies").addEventListener("change", syncPies);
 
 if (typeof COVERAGE === "undefined") {
   document.getElementById("status").textContent = "Coverage data was not found beside this page";
 } else {
   draw();
   fitRoute();
+  syncPies();
 }
 </script>
 </body>

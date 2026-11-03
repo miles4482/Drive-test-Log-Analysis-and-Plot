@@ -120,7 +120,7 @@ Same version as the Excel report. Download, unzip, and open `Bogura_DriveTest_We
 
 **v1.48 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Web_v1.48.zip
 
-The page is the same RSRP and RSRQ coverage as those sheets. It has Idle and Active, all bands, and L900 / L1800 / L2100 / L2600. SINR and the bad-spot sheets are not on this page. It needs a network connection: the satellite picture is Esri World Imagery, and the zoom buttons come from Leaflet. Zooming moves the satellite picture and the coloured drive together. Click a spot and the popup shows **CellID** and **CellName** for that spot, plus the RSRP and RSRQ of its 50 m bin.
+The page is the same RSRP and RSRQ coverage as those sheets. It has Idle and Active, all bands, and L900 / L1800 / L2100 / L2600. SINR and the bad-spot sheets are not on this page. It needs a network connection: the satellite picture is Esri World Imagery, and the zoom buttons come from Leaflet. Zooming moves the satellite picture and the coloured drive together. Click a spot and the popup shows **CellID** and **CellName** for that spot, plus the RSRP and RSRQ of its 50 m bin. A CellName that is not in the system dump is left blank. The Pie widget box draws every site along the drive: a cyan arm for each sector, with the sector name at the end of the arm. Uncheck Pie widget to hide the sites.
 
 CellID and CellName come from the drive log and `System DUMP.xlsb`:
 

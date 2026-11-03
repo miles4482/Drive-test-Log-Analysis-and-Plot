@@ -218,7 +218,48 @@ def build() -> None:
     text = "const COVERAGE = " + json.dumps(payload, separators=(",", ":")) + ";\n"
     DATA_JS.write_text(text)
     print(f"Wrote {DATA_JS} ({DATA_JS.stat().st_size / 1e6:.1f} MB)", flush=True)
+    add_site_pies()
     package_web()
+
+
+def add_site_pies(radius_km: float = 3.0) -> int:
+    """Sites along the drive, one centre and every sector arm, for the web pies."""
+    from merge_and_analyze import _sites_near_drive, load_site_sectors
+
+    text = DATA_JS.read_text().strip()
+    if not text.startswith("const COVERAGE = "):
+        raise SystemExit(f"{DATA_JS.name} is not a coverage page")
+    payload = json.loads(text[len("const COVERAGE = "):-1])
+    lat: list[float] = []
+    lon: list[float] = []
+    for key in ("idle|all", "active|all"):
+        pack = payload["sets"][key]
+        lat.extend(pack["lat"])
+        lon.extend(pack["lon"])
+    drive = pd.DataFrame({"Latitude": lat, "Longitude": lon})
+    near = _sites_near_drive(load_site_sectors(), drive, radius_km=radius_km)
+    sites: list[list] = []
+    for _site, part in near.groupby("SiteName", sort=False):
+        part = part.drop_duplicates(subset=["Sector"]).dropna(subset=["azimuth"])
+        if part.empty:
+            continue
+        arms = []
+        for _, row in part.iterrows():
+            name = str(row["Sector"]).strip()
+            if not name or name.lower() == "nan":
+                continue
+            arms.append([name, round(float(row["azimuth"]) % 360.0, 1)])
+        if not arms:
+            continue
+        sites.append([
+            round(float(part["lat"].median()), 5),
+            round(float(part["lon"].median()), 5),
+            arms,
+        ])
+    payload["sites"] = sites
+    DATA_JS.write_text("const COVERAGE = " + json.dumps(payload, separators=(",", ":")) + ";\n")
+    print(f"Site pies {len(sites):,} along the drive", flush=True)
+    return len(sites)
 
 
 def package_web() -> Path:
@@ -246,6 +287,7 @@ def package_web() -> Path:
 
 if __name__ == "__main__":
     if "--package" in sys.argv:
+        add_site_pies()
         package_web()
     else:
         build()
