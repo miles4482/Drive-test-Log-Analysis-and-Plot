@@ -44,7 +44,14 @@
   #stage.n3 { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr; }
   #stage.n4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
   .board { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #d5d8dc; }
-  .board.second-row .bar { display: none; }
+  .board.second-row .bar {
+    display: flex; font-size: 10px; padding: 1px 4px; gap: 2px 5px;
+  }
+  .board.second-row .bar > :not(.ctl-kpi):not(.ctl-mode):not(.ctl-band):not(.win) { display: none; }
+  .board.second-row .bar select,
+  .board.second-row .bar .layer-btn { padding: 0 3px; }
+  .board.second-row .layer-btn { min-width: 64px; font-size: 10px; }
+  .board.second-row .win { font-size: 10px; }
   .bar {
     position: relative; z-index: 5;
     display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center;
@@ -576,9 +583,9 @@ function shareSpot(latlng) {
 function boardHtml(number) {
   return '<div class="bar">' +
     '<span class="win">Window ' + number + '</span>' +
-    '<label>KPI <select class="kpi"><option value="RSRP" selected>RSRP</option><option value="RSRQ">RSRQ</option></select></label>' +
-    '<label>Mode <select class="mode"><option value="idle">Idle</option><option value="active">Active</option></select></label>' +
-    '<label>Layer <span class="dropdown">' +
+    '<label class="ctl-kpi">KPI <select class="kpi"><option value="RSRP" selected>RSRP</option><option value="RSRQ">RSRQ</option></select></label>' +
+    '<label class="ctl-mode">Mode <select class="mode"><option value="idle">Idle</option><option value="active">Active</option></select></label>' +
+    '<label class="ctl-band"><span class="layer-name">Layer</span> <span class="dropdown">' +
       '<button type="button" class="layer-btn" aria-haspopup="listbox" aria-expanded="false">All bands</button>' +
       '<div class="menu" hidden>' +
         '<label class="check"><input type="checkbox" class="band" value="L900" checked> L900</label>' +
@@ -1048,8 +1055,10 @@ function setSplit(count) {
   }
   const across = count <= 3 ? count : 2;
   views.forEach(function (view, index) {
-    view.host.querySelector(".win").textContent = "Window " + (index + 1);
-    view.host.classList.toggle("second-row", index >= across);
+    const onSecond = index >= across;
+    view.host.querySelector(".win").textContent = onSecond ? ("W" + (index + 1)) : ("Window " + (index + 1));
+    view.host.querySelector(".layer-name").textContent = onSecond ? "Band" : "Layer";
+    view.host.classList.toggle("second-row", onSecond);
   });
   pageNote(count);
   requestAnimationFrame(function () {
