@@ -24,9 +24,9 @@
     font: inherit; color: #1a1a1a; background: #fff; border: 0; border-radius: 4px;
     padding: 4px 8px; width: 150px;
   }
-  header button.on { background: #F5C400; }
+  header button.on, .bar button.on { background: #F5C400; }
   .dropdown { position: relative; display: inline-block; }
-  #layer-btn { min-width: 168px; text-align: left; cursor: pointer; }
+  .layer-btn { min-width: 148px; text-align: left; cursor: pointer; }
   .dropdown .menu {
     position: absolute; top: calc(100% + 4px); left: 0; z-index: 2000;
     background: #fff; color: #1a1a1a; border-radius: 4px;
@@ -38,7 +38,27 @@
     background: #fff; border: 1px solid #222; padding: 1px 5px;
     font: 600 12px "Segoe UI", Calibri, sans-serif;
   }
-  #map { flex: 1; min-height: 0; background: #d5d8dc; }
+  #stage { flex: 1; min-height: 0; display: grid; background: #0b3a58; gap: 3px; }
+  #stage.n1 { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+  #stage.n3 { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr; }
+  #stage.n4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+  .board { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #d5d8dc; }
+  .bar {
+    position: relative; z-index: 5;
+    display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center;
+    padding: 6px 8px; background: #1b4f72; color: #fff; font-size: 12px;
+  }
+  .bar label { display: flex; align-items: center; gap: 4px; }
+  .bar select, .bar button, .bar input[type="search"] {
+    font: inherit; color: #1a1a1a; background: #fff; border: 0; border-radius: 4px;
+    padding: 3px 6px;
+  }
+  .bar input[type="search"] { width: 112px; }
+  .bar .check input { width: 14px; height: 14px; margin: 0; accent-color: #0b3a58; }
+  .bar button { cursor: pointer; }
+  .bar .win { font-weight: 650; }
+  .bar .status { margin-left: auto; opacity: 0.92; }
+  .map { position: relative; z-index: 1; flex: 1; min-height: 0; background: #d5d8dc; }
   .legend {
     background: #fff; border: 1px solid #000; padding: 8px 10px 6px; line-height: 1.35;
     font-size: 13px; box-shadow: 0 1px 4px rgba(0,0,0,.25);
@@ -55,39 +75,16 @@
 <div id="app">
   <header>
     <h1>Bogura coverage v1.48</h1>
-    <label>KPI
-      <select id="kpi">
-        <option value="RSRP">RSRP</option>
-        <option value="RSRQ">RSRQ</option>
+    <label>Windows
+      <select id="split">
+        <option value="1" selected>1</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
       </select>
     </label>
-    <label>Mode
-      <select id="mode">
-        <option value="idle">Idle</option>
-        <option value="active">Active</option>
-      </select>
-    </label>
-    <label>Layer
-      <span class="dropdown">
-        <button type="button" id="layer-btn" aria-haspopup="listbox" aria-expanded="false">All bands</button>
-        <div class="menu" id="layer-menu" hidden>
-          <label class="check"><input type="checkbox" class="band" value="L900" checked> L900</label>
-          <label class="check"><input type="checkbox" class="band" value="L1800" checked> L1800</label>
-          <label class="check"><input type="checkbox" class="band" value="L2100" checked> L2100</label>
-          <label class="check"><input type="checkbox" class="band" value="L2600" checked> L2600</label>
-        </div>
-      </span>
-    </label>
-    <label class="check"><input type="checkbox" id="pies" checked> Pie widget</label>
-    <label class="check"><input type="checkbox" id="levels" checked> Sector level</label>
-    <label class="check"><input type="checkbox" id="sitenames" checked> Site level</label>
-    <button type="button" id="ruler">Ruler</button>
-    <button type="button" id="fit">Fit route</button>
-    <input id="q" type="search" placeholder="Site or sector" aria-label="Site or sector">
-    <button type="button" id="search">Search</button>
-    <span id="status">Loading the drive…</span>
+    <span id="status">One window. Choose 3 or 4 to compare the same place.</span>
   </header>
-  <div id="map"></div>
+  <div id="stage" class="n1"></div>
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="coverage_data.js"></script>
@@ -120,29 +117,14 @@ function esc(value) {
   });
 }
 
-const map = L.map("map", { zoomControl: true, worldCopyJump: false });
-L.tileLayer(
-  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-  { attribution: "Satellite © Esri", maxZoom: 19 }
-).addTo(map);
-
-const legend = L.control({ position: "topleft" });
-legend.onAdd = function () {
-  const div = L.DomUtil.create("div", "legend");
-  div.id = "legend";
-  L.DomEvent.disableClickPropagation(div);
-  return div;
-};
-legend.addTo(map);
-
-function legendHtml(kpi) {
+function legendHtml(kpi, mode) {
   const labels = kpi === "RSRP" ? RSRP_LABELS : RSRQ_LABELS;
   const colors = kpi === "RSRP" ? RSRP_COLORS : RSRQ_COLORS;
-  const mode = document.getElementById("mode").value === "idle" ? "Idle" : "Active";
+  const modeText = mode === "idle" ? "Idle" : "Active";
   const rows = labels.map(function (label, i) {
     return '<div><span class="swatch" style="background:' + colors[i] + '"></span>' + label + "</div>";
   }).join("");
-  return "<h2>" + mode + " by " + kpi + "</h2>" + rows;
+  return "<h2>" + modeText + " by " + kpi + "</h2>" + rows;
 }
 
 const SpotCanvas = L.Layer.extend({
@@ -290,26 +272,8 @@ const SpotCanvas = L.Layer.extend({
         }
       }
     }
-    if (best < 0 || rulerOn) return;
-    const cell = pack.cell[best] === null ? "—" : String(pack.cell[best]);
-    const nameId = pack.name[best] || 0;
-    const name = COVERAGE.names[nameId] || "";
-    const rf = (COVERAGE.cells || [])[nameId] || [null, null, null, null, null];
-    const rfLabels = ["Azimuth", "Height", "E_tilt", "M_tilt", "RS Power(dBm)"];
-    const rfHtml = rfLabels.map(function (label, i) {
-      return "<br><b>" + label + "</b> " + esc(formatNum(rf[i]));
-    }).join("");
-    const rsrp = pack.rsrp[best] === null ? "—" : pack.rsrp[best].toFixed(1) + " dBm";
-    const rsrq = pack.rsrq[best] === null ? "—" : pack.rsrq[best].toFixed(1) + " dB";
-    const html = "<div><b>CellID</b> " + esc(cell) +
-      "<br><b>CellName</b> " + esc(name) +
-      rfHtml +
-      "<br><b>RSRP</b> " + esc(rsrp) +
-      "<br><b>RSRQ</b> " + esc(rsrq) + "</div>";
-    L.popup({ maxWidth: 360 })
-      .setLatLng([pack.lat[best], pack.lon[best]])
-      .setContent(html)
-      .openOn(this._map);
+    if (best < 0 || (this.rulerBusy && this.rulerBusy())) return;
+    if (this.onSpot) this.onSpot(best, pack);
   }
 });
 
@@ -382,8 +346,8 @@ const PieCanvas = L.Layer.extend({
     const origin = this._bounds.min;
     const bounds = map.getBounds().pad(0.2);
     const km = this._armKm();
-    const showNames = document.getElementById("levels").checked;
-    const showSites = document.getElementById("sitenames").checked;
+    const showNames = this.showSector !== false;
+    const showSites = this.showSite !== false;
     ctx.lineCap = "round";
     ctx.font = "9px Segoe UI, Calibri, sans-serif";
     ctx.textAlign = "center";
@@ -450,27 +414,24 @@ function offsetKm(lat, lon, azimuthDeg, km) {
   return [lat + dlat, lon + dlon];
 }
 
-let spots = null;
-let pies = null;
+const BANDS = ["L900", "L1800", "L2100", "L2600"];
+const PICK_METRES = 150;
+const views = [];
+let syncingView = false;
 
-function syncPies() {
-  const on = document.getElementById("pies").checked;
-  if (on) {
-    if (!pies) pies = new PieCanvas().addTo(map);
-    else pies.bringFront();
-  } else if (pies) {
-    map.removeLayer(pies);
-    pies = null;
-  }
+function metresBetween(a, b) {
+  const r = 6371000;
+  const dLat = (b.lat - a.lat) * Math.PI / 180;
+  const dLon = (b.lng - a.lng) * Math.PI / 180;
+  const lat1 = a.lat * Math.PI / 180;
+  const lat2 = b.lat * Math.PI / 180;
+  const h = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return 2 * r * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-const BANDS = ["L900", "L1800", "L2100", "L2600"];
-
-function selectedBands() {
-  return Array.prototype.map.call(
-    document.querySelectorAll(".band:checked"),
-    function (box) { return box.value; }
-  );
+function metreLabel(metres) {
+  return Math.round(metres).toLocaleString() + " m";
 }
 
 function emptyPack() {
@@ -514,359 +475,579 @@ function combinePacks(packs) {
   return out;
 }
 
-function currentPack() {
-  const mode = document.getElementById("mode").value;
-  const bands = selectedBands();
-  if (!bands.length) return emptyPack();
-  if (bands.length === BANDS.length) return COVERAGE.sets[mode + "|all"];
-  if (bands.length === 1) return COVERAGE.sets[mode + "|" + bands[0]];
-  return combinePacks(bands.map(function (band) { return COVERAGE.sets[mode + "|" + band]; }));
+function popupHtml(pack, index) {
+  const cell = pack.cell[index] === null || pack.cell[index] === undefined ? "—" : String(pack.cell[index]);
+  const nameId = pack.name[index] || 0;
+  const name = (typeof COVERAGE === "undefined" ? "" : (COVERAGE.names[nameId] || ""));
+  const rf = (typeof COVERAGE === "undefined" ? null : (COVERAGE.cells || [])[nameId]) || [null, null, null, null, null];
+  const rfLabels = ["Azimuth", "Height", "E_tilt", "M_tilt", "RS Power(dBm)"];
+  const rfHtml = rfLabels.map(function (label, i) {
+    return "<br><b>" + label + "</b> " + esc(formatNum(rf[i]));
+  }).join("");
+  const rsrp = pack.rsrp[index] === null || pack.rsrp[index] === undefined ? "—" : pack.rsrp[index].toFixed(1) + " dBm";
+  const rsrq = pack.rsrq[index] === null || pack.rsrq[index] === undefined ? "—" : pack.rsrq[index].toFixed(1) + " dB";
+  return "<div class=\"spot-popup\"><b>CellID</b> " + esc(cell) +
+    "<br><b>CellName</b> " + esc(name) +
+    rfHtml +
+    "<br><b>RSRP</b> " + esc(rsrp) +
+    "<br><b>RSRQ</b> " + esc(rsrq) + "</div>";
 }
 
-function fitRoute() {
-  const pack = currentPack();
-  if (!pack || !pack.lon.length) return;
-  let latMin = Infinity, latMax = -Infinity, lonMin = Infinity, lonMax = -Infinity;
+function nearestIndex(pack, latlng, maxMetres) {
+  if (!pack || !pack.lon.length) return -1;
+  let best = -1;
+  let bestD = maxMetres;
   for (let i = 0; i < pack.lon.length; i++) {
-    const lat = pack.lat[i];
-    const lon = pack.lon[i];
-    if (lat < latMin) latMin = lat;
-    if (lat > latMax) latMax = lat;
-    if (lon < lonMin) lonMin = lon;
-    if (lon > lonMax) lonMax = lon;
+    const dist = metresBetween(latlng, { lat: pack.lat[i], lng: pack.lon[i] });
+    if (dist <= bestD) {
+      bestD = dist;
+      best = i;
+    }
   }
-  map.fitBounds([[latMin, lonMin], [latMax, lonMax]], { padding: [24, 24] });
+  return best;
 }
 
-function draw() {
-  const kpi = document.getElementById("kpi").value;
-  document.getElementById("legend").innerHTML = legendHtml(kpi);
-  map.closePopup();
-  if (spots) {
-    map.removeLayer(spots);
-    spots = null;
-  }
-  const pack = currentPack();
-  if (!pack || !pack.lon.length) {
-    document.getElementById("status").textContent = "No samples on this layer";
-    return;
-  }
-  const values = kpi === "RSRP" ? pack.rsrp : pack.rsrq;
-  const thresholds = kpi === "RSRP" ? RSRP_THRESH : RSRQ_THRESH;
-  let shown = 0;
-  for (let i = 0; i < values.length; i++) {
-    if (classify(values[i], thresholds) >= 0) shown++;
-  }
-  spots = new SpotCanvas(pack, kpi).addTo(map);
-  if (pies) pies.bringFront();
-  const bands = selectedBands();
-  const bandText = bands.length === BANDS.length ? "all bands" : (bands.join("+") || "no band");
-  document.getElementById("status").textContent =
-    shown.toLocaleString() + " spots · " + bandText + " · click a spot for CellID and CellName";
-}
-
-let rulerOn = false;
-let rulerPts = [];
-let rulerCursor = null;
-const rulerGroup = L.layerGroup().addTo(map);
-let rulerChains = [];
-let rulerTimes = [];
-let rulerIgnoreDbl = false;
-let rulerInClick = false;
-let rulerSwallowClick = false;
-let rulerFinishedAt = 0;
-let rulerFrame = 0;
-map.getContainer().addEventListener("click", function () { rulerInClick = true; }, true);
-map.getContainer().addEventListener("click", function () { rulerInClick = false; }, false);
-
-function metresBetween(a, b) {
-  const r = 6371000;
-  const dLat = (b.lat - a.lat) * Math.PI / 180;
-  const dLon = (b.lng - a.lng) * Math.PI / 180;
-  const lat1 = a.lat * Math.PI / 180;
-  const lat2 = b.lat * Math.PI / 180;
-  const h = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  return 2 * r * Math.asin(Math.min(1, Math.sqrt(h)));
-}
-
-function clearRuler() {
-  rulerPts = [];
-  rulerTimes = [];
-  rulerSwallowClick = false;
-  rulerCursor = null;
-  rulerGroup.clearLayers();
-  rulerChains.forEach(function (chain) { map.removeLayer(chain.group); });
-  rulerChains = [];
-}
-
-function sameSpot(a, b, pixels) {
-  return map.latLngToContainerPoint(a).distanceTo(map.latLngToContainerPoint(b)) < (pixels || 8);
-}
-
-function placeRulerPoint(latlng) {
-  rulerPts.push(latlng);
-  rulerTimes.push(Date.now());
-  rulerCursor = null;
-  drawRuler();
-}
-
-function metreLabel(metres) {
-  return Math.round(metres).toLocaleString() + " m";
-}
-
-function drawRuler() {
-  rulerGroup.clearLayers();
-  const fixed = rulerPts.slice();
-  fixed.forEach(function (point) {
-    L.circleMarker(point, {
-      radius: 6, color: "#8C6A32", weight: 2, fillColor: "#E6C48A", fillOpacity: 1, interactive: false
-    }).addTo(rulerGroup);
-  });
-  const line = fixed.slice();
-  if (rulerCursor && fixed.length) line.push(rulerCursor);
-  if (line.length < 2) return;
-  L.polyline(line, { color: "#E6C48A", weight: 3, interactive: false }).addTo(rulerGroup);
-  const fixedParts = [];
-  let fixedTotal = 0;
-  for (let i = 1; i < fixed.length; i++) {
-    const metres = metresBetween(fixed[i - 1], fixed[i]);
-    fixedTotal += metres;
-    fixedParts.push(metreLabel(metres));
-  }
-  for (let i = 1; i < line.length; i++) {
-    const metres = metresBetween(line[i - 1], line[i]);
-    const mid = L.latLng(
-      (line[i - 1].lat + line[i].lat) / 2,
-      (line[i - 1].lng + line[i].lng) / 2
-    );
-    L.marker(mid, {
-      interactive: false,
-      icon: L.divIcon({
-        className: "ruler-tag",
-        html: "<span>" + metreLabel(metres) + "</span>",
-        iconSize: [88, 18],
-        iconAnchor: [44, 20]
-      })
-    }).addTo(rulerGroup);
-  }
-  if (fixedParts.length) {
-    document.getElementById("status").textContent =
-      "Ruler · " + fixedParts.join(" + ") + " · total " + metreLabel(fixedTotal);
-  }
-}
-
-function finishRuler() {
-  if (rulerPts.length < 2) {
-    drawRuler();
-    return;
-  }
-  const points = rulerPts.map(function (point) { return L.latLng(point.lat, point.lng); });
-  const group = L.layerGroup().addTo(map);
-  const chain = { group: group };
-  function removeChain(ev) {
-    rulerIgnoreDbl = true;
-    if (ev && ev.originalEvent) L.DomEvent.stopPropagation(ev.originalEvent);
-    map.removeLayer(group);
-    rulerChains = rulerChains.filter(function (item) { return item !== chain; });
-    setTimeout(function () { rulerIgnoreDbl = false; }, 0);
-  }
-  points.forEach(function (point) {
-    const dot = L.circleMarker(point, {
-      radius: 6, color: "#8C6A32", weight: 2, fillColor: "#E6C48A", fillOpacity: 1
-    }).addTo(group);
-    dot.on("click", function (ev) {
-      if (ev.originalEvent) L.DomEvent.stopPropagation(ev.originalEvent);
-    });
-    dot.on("dblclick", removeChain);
-  });
-  const hit = L.polyline(points, {
-    color: "#E6C48A", weight: 16, opacity: 0.01, interactive: true
-  }).addTo(group);
-  L.polyline(points, { color: "#E6C48A", weight: 3, interactive: false }).addTo(group);
-  hit.on("click", function (ev) {
-    if (ev.originalEvent) L.DomEvent.stopPropagation(ev.originalEvent);
-  });
-  hit.on("dblclick", removeChain);
-  const parts = [];
-  let total = 0;
-  for (let i = 1; i < points.length; i++) {
-    const metres = metresBetween(points[i - 1], points[i]);
-    total += metres;
-    parts.push(metreLabel(metres));
-    const mid = L.latLng(
-      (points[i - 1].lat + points[i].lat) / 2,
-      (points[i - 1].lng + points[i].lng) / 2
-    );
-    const label = L.marker(mid, {
-      icon: L.divIcon({
-        className: "ruler-tag",
-        html: "<span>" + metreLabel(metres) + "</span>",
-        iconSize: [88, 18],
-        iconAnchor: [44, 20]
-      })
-    }).addTo(group);
-    label.on("click", function (ev) {
-      if (ev.originalEvent) L.DomEvent.stopPropagation(ev.originalEvent);
-    });
-    label.on("dblclick", removeChain);
-  }
-  rulerChains.push(chain);
-  rulerPts = [];
-  rulerTimes = [];
-  rulerCursor = null;
-  rulerGroup.clearLayers();
-  document.getElementById("status").textContent =
-    "Ruler · " + parts.join(" + ") + " · total " + metreLabel(total);
-}
-
-function onMapClick(ev) {
-  if (!rulerOn) return;
-  if (rulerSwallowClick) {
-    rulerSwallowClick = false;
-    return;
-  }
-  placeRulerPoint(ev.latlng);
-}
-
-function onMapDblClick(ev) {
-  if (!rulerOn) return;
-  if (ev.originalEvent) L.DomEvent.stop(ev.originalEvent);
-  if (rulerIgnoreDbl) {
-    rulerIgnoreDbl = false;
-    if (rulerInClick) rulerSwallowClick = true;
-    return;
-  }
-  if (rulerPts.length === 0 && Date.now() - rulerFinishedAt < 400) return;
-  const n = rulerPts.length;
-  if (n >= 2 && Date.now() - rulerTimes[n - 2] < 800 && sameSpot(rulerPts[n - 2], rulerPts[n - 1], 6)) {
-    rulerPts.pop();
-    rulerTimes.pop();
-  }
-  const last = rulerPts[rulerPts.length - 1];
-  if ((!last || !sameSpot(last, ev.latlng, 6)) && !rulerInClick) placeRulerPoint(ev.latlng);
-  if (rulerInClick) rulerSwallowClick = true;
-  rulerCursor = null;
-  finishRuler();
-  rulerFinishedAt = Date.now();
-}
-
-function onMapMove(ev) {
-  if (!rulerOn || !rulerPts.length) return;
-  rulerCursor = ev.latlng;
-  if (rulerFrame) return;
-  rulerFrame = requestAnimationFrame(function () {
-    rulerFrame = 0;
-    drawRuler();
-  });
-}
-
-const searchLayer = L.layerGroup().addTo(map);
-
-function runSearch() {
-  const query = document.getElementById("q").value.trim().toLowerCase();
-  searchLayer.clearLayers();
-  if (!query) return;
+function findSites(query) {
   const exact = [];
   const partial = [];
-  (COVERAGE.sites || []).forEach(function (site) {
+  (typeof COVERAGE === "undefined" ? [] : (COVERAGE.sites || [])).forEach(function (site) {
     const siteName = String(site[2] || "");
-    const arms = site[3] || [];
-    const sectors = arms.map(function (arm) { return String(arm[0] || ""); });
+    const sectors = (site[3] || []).map(function (arm) { return String(arm[0] || ""); });
     const exactHit = siteName.toLowerCase() === query || sectors.some(function (name) { return name.toLowerCase() === query; });
     const partialHit = siteName.toLowerCase().indexOf(query) >= 0 || sectors.some(function (name) { return name.toLowerCase().indexOf(query) >= 0; });
     if (exactHit) exact.push(site);
     else if (partialHit) partial.push(site);
   });
-  const hits = exact.length ? exact : partial;
-  if (!hits.length) {
-    document.getElementById("status").textContent = "No site or sector matches “" + document.getElementById("q").value.trim() + "”";
-    return;
-  }
-  const bounds = [];
-  hits.forEach(function (site) {
-    const latlng = [site[0], site[1]];
-    bounds.push(latlng);
-    const sectors = (site[3] || []).map(function (arm) { return arm[0]; }).filter(Boolean).join(", ");
-    const marker = L.circleMarker(latlng, {
-      radius: 11, color: "#F5C400", weight: 3, fillColor: "#F5C400", fillOpacity: 0.35
-    });
-    marker.bindPopup("<div><b>Site</b> " + esc(site[2] || "") + "<br><b>Sector</b> " + esc(sectors) + "</div>");
-    marker.addTo(searchLayer);
-  });
-  if (hits.length === 1) {
-    map.setView(bounds[0], 16, { animate: false });
-    searchLayer.eachLayer(function (marker) { marker.openPopup(); });
-  } else {
-    map.fitBounds(bounds, { padding: [36, 36], maxZoom: 15, animate: false });
-  }
-  document.getElementById("status").textContent = hits.length.toLocaleString() + " site match" + (hits.length === 1 ? "" : "es");
+  return exact.length ? exact : partial;
 }
 
-["kpi", "mode"].forEach(function (id) {
-  document.getElementById(id).addEventListener("change", draw);
-});
-function layerSummary() {
-  const bands = selectedBands();
-  if (!bands.length) return "No band";
-  if (bands.length === BANDS.length) return "All bands";
-  return bands.join(" + ");
+function broadcastView(source) {
+  if (syncingView || views.length < 2) return;
+  syncingView = true;
+  const center = source.map.getCenter();
+  const zoom = source.map.getZoom();
+  views.forEach(function (view) {
+    if (view === source) return;
+    const other = view.map.getCenter();
+    if (view.map.getZoom() === zoom && center.distanceTo(other) < 0.5) return;
+    view.map.setView(center, zoom, { animate: false });
+  });
+  syncingView = false;
 }
-function syncLayerButton() {
-  document.getElementById("layer-btn").textContent = layerSummary();
+
+let sharedPin = null;
+function shareSpot(latlng) {
+  sharedPin = latlng;
+  views.forEach(function (view) { view.markSpot(latlng); });
 }
-document.getElementById("layer-btn").addEventListener("click", function (ev) {
-  ev.stopPropagation();
-  const menu = document.getElementById("layer-menu");
-  const open = menu.hasAttribute("hidden");
-  if (open) menu.removeAttribute("hidden");
-  else menu.setAttribute("hidden", "");
-  this.setAttribute("aria-expanded", open ? "true" : "false");
+
+function boardHtml(number) {
+  return '<div class="bar">' +
+    '<span class="win">Window ' + number + '</span>' +
+    '<label>KPI <select class="kpi"><option value="RSRP" selected>RSRP</option><option value="RSRQ">RSRQ</option></select></label>' +
+    '<label>Mode <select class="mode"><option value="idle">Idle</option><option value="active">Active</option></select></label>' +
+    '<label>Layer <span class="dropdown">' +
+      '<button type="button" class="layer-btn" aria-haspopup="listbox" aria-expanded="false">All bands</button>' +
+      '<div class="menu" hidden>' +
+        '<label class="check"><input type="checkbox" class="band" value="L900" checked> L900</label>' +
+        '<label class="check"><input type="checkbox" class="band" value="L1800" checked> L1800</label>' +
+        '<label class="check"><input type="checkbox" class="band" value="L2100" checked> L2100</label>' +
+        '<label class="check"><input type="checkbox" class="band" value="L2600" checked> L2600</label>' +
+      '</div></span></label>' +
+    '<label class="check"><input type="checkbox" class="pies" checked> Pie widget</label>' +
+    '<label class="check"><input type="checkbox" class="levels" checked> Sector level</label>' +
+    '<label class="check"><input type="checkbox" class="sitenames" checked> Site level</label>' +
+    '<button type="button" class="ruler">Ruler</button>' +
+    '<button type="button" class="fit">Fit route</button>' +
+    '<input class="q" type="search" placeholder="Site or sector" aria-label="Site or sector">' +
+    '<button type="button" class="search">Search</button>' +
+    '<span class="status"></span>' +
+    '</div><div class="map"></div>';
+}
+
+function createView(host, preset) {
+  host.innerHTML = boardHtml(views.length + 1);
+  const q = function (sel) { return host.querySelector(sel); };
+  const map = L.map(q(".map"), { zoomControl: true, worldCopyJump: false });
+  L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    { attribution: "Satellite © Esri", maxZoom: 19 }
+  ).addTo(map);
+  const legend = L.control({ position: "topleft" });
+  let legendDiv = null;
+  legend.onAdd = function () {
+    legendDiv = L.DomUtil.create("div", "legend");
+    L.DomEvent.disableClickPropagation(legendDiv);
+    return legendDiv;
+  };
+  legend.addTo(map);
+
+  let spots = null;
+  let pies = null;
+  let pinned = null;
+  const pickLayer = L.layerGroup().addTo(map);
+  const searchLayer = L.layerGroup().addTo(map);
+
+  let rulerOn = false;
+  let rulerPts = [];
+  let rulerCursor = null;
+  const rulerGroup = L.layerGroup().addTo(map);
+  let rulerChains = [];
+  let rulerTimes = [];
+  let rulerIgnoreDbl = false;
+  let rulerInClick = false;
+  let rulerSwallowClick = false;
+  let rulerFinishedAt = 0;
+  let rulerFrame = 0;
+  map.getContainer().addEventListener("click", function () { rulerInClick = true; }, true);
+  map.getContainer().addEventListener("click", function () { rulerInClick = false; }, false);
+
+  function setStatus(text) { q(".status").textContent = text; }
+  function selectedBands() {
+    return Array.prototype.map.call(host.querySelectorAll(".band:checked"), function (box) { return box.value; });
+  }
+  function layerSummary() {
+    const bands = selectedBands();
+    if (!bands.length) return "No band";
+    if (bands.length === BANDS.length) return "All bands";
+    return bands.join(" + ");
+  }
+  function currentPack() {
+    if (typeof COVERAGE === "undefined") return emptyPack();
+    const mode = q(".mode").value;
+    const bands = selectedBands();
+    if (!bands.length) return emptyPack();
+    if (bands.length === BANDS.length) return COVERAGE.sets[mode + "|all"];
+    if (bands.length === 1) return COVERAGE.sets[mode + "|" + bands[0]];
+    return combinePacks(bands.map(function (band) { return COVERAGE.sets[mode + "|" + band]; }));
+  }
+  function sameSpot(a, b, pixels) {
+    return map.latLngToContainerPoint(a).distanceTo(map.latLngToContainerPoint(b)) < (pixels || 8);
+  }
+  function clearRuler() {
+    rulerPts = [];
+    rulerTimes = [];
+    rulerSwallowClick = false;
+    rulerCursor = null;
+    rulerGroup.clearLayers();
+    rulerChains.forEach(function (chain) { map.removeLayer(chain.group); });
+    rulerChains = [];
+  }
+  function drawRuler() {
+    rulerGroup.clearLayers();
+    const fixed = rulerPts.slice();
+    fixed.forEach(function (point) {
+      L.circleMarker(point, {
+        radius: 6, color: "#8C6A32", weight: 2, fillColor: "#E6C48A", fillOpacity: 1, interactive: false
+      }).addTo(rulerGroup);
+    });
+    const line = fixed.slice();
+    if (rulerCursor && fixed.length) line.push(rulerCursor);
+    if (line.length < 2) return;
+    L.polyline(line, { color: "#E6C48A", weight: 3, interactive: false }).addTo(rulerGroup);
+    const fixedParts = [];
+    let fixedTotal = 0;
+    for (let i = 1; i < fixed.length; i++) {
+      const metres = metresBetween(fixed[i - 1], fixed[i]);
+      fixedTotal += metres;
+      fixedParts.push(metreLabel(metres));
+    }
+    for (let i = 1; i < line.length; i++) {
+      const metres = metresBetween(line[i - 1], line[i]);
+      const mid = L.latLng((line[i - 1].lat + line[i].lat) / 2, (line[i - 1].lng + line[i].lng) / 2);
+      L.marker(mid, {
+        interactive: false,
+        icon: L.divIcon({
+          className: "ruler-tag",
+          html: "<span>" + metreLabel(metres) + "</span>",
+          iconSize: [88, 18],
+          iconAnchor: [44, 20]
+        })
+      }).addTo(rulerGroup);
+    }
+    if (fixedParts.length) setStatus("Ruler · " + fixedParts.join(" + ") + " · total " + metreLabel(fixedTotal));
+  }
+  function placeRulerPoint(latlng) {
+    rulerPts.push(latlng);
+    rulerTimes.push(Date.now());
+    rulerCursor = null;
+    drawRuler();
+  }
+  function finishRuler() {
+    if (rulerPts.length < 2) {
+      drawRuler();
+      return;
+    }
+    const points = rulerPts.map(function (point) { return L.latLng(point.lat, point.lng); });
+    const group = L.layerGroup().addTo(map);
+    const chain = { group: group };
+    function removeChain(ev) {
+      rulerIgnoreDbl = true;
+      if (ev && ev.originalEvent) L.DomEvent.stopPropagation(ev.originalEvent);
+      map.removeLayer(group);
+      rulerChains = rulerChains.filter(function (item) { return item !== chain; });
+      setTimeout(function () { rulerIgnoreDbl = false; }, 0);
+    }
+    points.forEach(function (point) {
+      const dot = L.circleMarker(point, {
+        radius: 6, color: "#8C6A32", weight: 2, fillColor: "#E6C48A", fillOpacity: 1
+      }).addTo(group);
+      dot.on("click", function (ev) {
+        if (ev.originalEvent) L.DomEvent.stopPropagation(ev.originalEvent);
+      });
+      dot.on("dblclick", removeChain);
+    });
+    const hit = L.polyline(points, { color: "#E6C48A", weight: 16, opacity: 0.01, interactive: true }).addTo(group);
+    L.polyline(points, { color: "#E6C48A", weight: 3, interactive: false }).addTo(group);
+    hit.on("click", function (ev) {
+      if (ev.originalEvent) L.DomEvent.stopPropagation(ev.originalEvent);
+    });
+    hit.on("dblclick", removeChain);
+    const parts = [];
+    let total = 0;
+    for (let i = 1; i < points.length; i++) {
+      const metres = metresBetween(points[i - 1], points[i]);
+      total += metres;
+      parts.push(metreLabel(metres));
+      const mid = L.latLng((points[i - 1].lat + points[i].lat) / 2, (points[i - 1].lng + points[i].lng) / 2);
+      const label = L.marker(mid, {
+        icon: L.divIcon({
+          className: "ruler-tag",
+          html: "<span>" + metreLabel(metres) + "</span>",
+          iconSize: [88, 18],
+          iconAnchor: [44, 20]
+        })
+      }).addTo(group);
+      label.on("click", function (ev) {
+        if (ev.originalEvent) L.DomEvent.stopPropagation(ev.originalEvent);
+      });
+      label.on("dblclick", removeChain);
+    }
+    rulerChains.push(chain);
+    rulerPts = [];
+    rulerTimes = [];
+    rulerCursor = null;
+    rulerGroup.clearLayers();
+    setStatus("Ruler · " + parts.join(" + ") + " · total " + metreLabel(total));
+  }
+  function onMapClick(ev) {
+    if (!rulerOn) return;
+    if (rulerSwallowClick) {
+      rulerSwallowClick = false;
+      return;
+    }
+    placeRulerPoint(ev.latlng);
+  }
+  function onMapDblClick(ev) {
+    if (!rulerOn) return;
+    if (ev.originalEvent) L.DomEvent.stop(ev.originalEvent);
+    if (rulerIgnoreDbl) {
+      rulerIgnoreDbl = false;
+      if (rulerInClick) rulerSwallowClick = true;
+      return;
+    }
+    if (rulerPts.length === 0 && Date.now() - rulerFinishedAt < 400) return;
+    const n = rulerPts.length;
+    if (n >= 2 && Date.now() - rulerTimes[n - 2] < 800 && sameSpot(rulerPts[n - 2], rulerPts[n - 1], 6)) {
+      rulerPts.pop();
+      rulerTimes.pop();
+    }
+    const last = rulerPts[rulerPts.length - 1];
+    if ((!last || !sameSpot(last, ev.latlng, 6)) && !rulerInClick) placeRulerPoint(ev.latlng);
+    if (rulerInClick) rulerSwallowClick = true;
+    rulerCursor = null;
+    finishRuler();
+    rulerFinishedAt = Date.now();
+  }
+  function onMapMove(ev) {
+    if (!rulerOn || !rulerPts.length) return;
+    rulerCursor = ev.latlng;
+    if (rulerFrame) return;
+    rulerFrame = requestAnimationFrame(function () {
+      rulerFrame = 0;
+      drawRuler();
+    });
+  }
+
+  function renderPin() {
+    pickLayer.clearLayers();
+    map.closePopup();
+    if (!pinned) return;
+    const pack = currentPack();
+    const index = nearestIndex(pack, pinned, PICK_METRES);
+    const html = index < 0 ? "<div class=\"spot-popup\">No sample in this window</div>" : popupHtml(pack, index);
+    L.circleMarker(pinned, {
+      radius: 8, color: "#111", weight: 2, fillColor: "#F5C400", fillOpacity: 1, className: "pick-pin"
+    }).addTo(pickLayer);
+    L.popup({ maxWidth: 360, autoPan: false })
+      .setLatLng(pinned)
+      .setContent(html)
+      .openOn(map);
+  }
+
+  function syncPies() {
+    const on = q(".pies").checked;
+    if (pies) {
+      pies.showSector = q(".levels").checked;
+      pies.showSite = q(".sitenames").checked;
+    }
+    if (on) {
+      if (!pies) {
+        pies = new PieCanvas();
+        pies.showSector = q(".levels").checked;
+        pies.showSite = q(".sitenames").checked;
+        pies.addTo(map);
+      } else {
+        pies.bringFront();
+        pies._reset();
+      }
+    } else if (pies) {
+      map.removeLayer(pies);
+      pies = null;
+    }
+  }
+
+  function draw() {
+    const kpi = q(".kpi").value;
+    const mode = q(".mode").value;
+    if (legendDiv) legendDiv.innerHTML = legendHtml(kpi, mode);
+    map.closePopup();
+    if (spots) {
+      map.removeLayer(spots);
+      spots = null;
+    }
+    const pack = currentPack();
+    if (!pack || !pack.lon.length) {
+      setStatus("No samples on this layer");
+      if (pinned) renderPin();
+      return;
+    }
+    const values = kpi === "RSRP" ? pack.rsrp : pack.rsrq;
+    const thresholds = kpi === "RSRP" ? RSRP_THRESH : RSRQ_THRESH;
+    let shown = 0;
+    for (let i = 0; i < values.length; i++) {
+      if (classify(values[i], thresholds) >= 0) shown++;
+    }
+    spots = new SpotCanvas(pack, kpi);
+    spots.rulerBusy = function () { return rulerOn; };
+    spots.onSpot = function (index, spotPack) {
+      shareSpot(L.latLng(spotPack.lat[index], spotPack.lon[index]));
+    };
+    spots.addTo(map);
+    if (pies) pies.bringFront();
+    const bands = selectedBands();
+    const bandText = bands.length === BANDS.length ? "all bands" : (bands.join("+") || "no band");
+    setStatus(shown.toLocaleString() + " spots · " + bandText + " · click a spot");
+    if (pinned) renderPin();
+  }
+
+  function fit() {
+    const pack = currentPack();
+    if (!pack || !pack.lon.length) return;
+    let latMin = Infinity, latMax = -Infinity, lonMin = Infinity, lonMax = -Infinity;
+    for (let i = 0; i < pack.lon.length; i++) {
+      const lat = pack.lat[i];
+      const lon = pack.lon[i];
+      if (lat < latMin) latMin = lat;
+      if (lat > latMax) latMax = lat;
+      if (lon < lonMin) lonMin = lon;
+      if (lon > lonMax) lonMax = lon;
+    }
+    map.fitBounds([[latMin, lonMin], [latMax, lonMax]], { padding: [24, 24], animate: false });
+  }
+
+  function showSearch(hits, focus) {
+    searchLayer.clearLayers();
+    const bounds = [];
+    hits.forEach(function (site) {
+      const latlng = [site[0], site[1]];
+      bounds.push(latlng);
+      const sectors = (site[3] || []).map(function (arm) { return arm[0]; }).filter(Boolean).join(", ");
+      const marker = L.circleMarker(latlng, {
+        radius: 11, color: "#F5C400", weight: 3, fillColor: "#F5C400", fillOpacity: 0.35
+      });
+      marker.bindPopup("<div><b>Site</b> " + esc(site[2] || "") + "<br><b>Sector</b> " + esc(sectors) + "</div>", { autoPan: false });
+      marker.addTo(searchLayer);
+    });
+    if (!focus) return;
+    if (hits.length === 1) {
+      map.setView(bounds[0], 16, { animate: false });
+      searchLayer.eachLayer(function (marker) { marker.openPopup(); });
+    } else {
+      map.fitBounds(bounds, { padding: [36, 36], maxZoom: 15, animate: false });
+    }
+    setStatus(hits.length.toLocaleString() + " site match" + (hits.length === 1 ? "" : "es"));
+  }
+
+  function runSearch() {
+    const raw = q(".q").value.trim();
+    const query = raw.toLowerCase();
+    if (!query) {
+      views.forEach(function (view) { view.clearSearch(); });
+      return;
+    }
+    const hits = findSites(query);
+    if (!hits.length) {
+      setStatus("No site or sector matches “" + raw + "”");
+      views.forEach(function (view) { view.clearSearch(); });
+      return;
+    }
+    const self = api;
+    views.forEach(function (view) { view.showSearch(hits, view === self); });
+  }
+
+  function applyPreset(source) {
+    if (!source) return;
+    q(".kpi").value = source.kpi;
+    q(".mode").value = source.mode;
+    host.querySelectorAll(".band").forEach(function (box) {
+      box.checked = source.bands.indexOf(box.value) >= 0;
+    });
+    q(".pies").checked = source.pies;
+    q(".levels").checked = source.levels;
+    q(".sitenames").checked = source.sites;
+    q(".layer-btn").textContent = layerSummary();
+  }
+
+  q(".kpi").addEventListener("change", draw);
+  q(".mode").addEventListener("change", draw);
+  q(".layer-btn").addEventListener("click", function (ev) {
+    ev.stopPropagation();
+    const menu = q(".menu");
+    const open = menu.hasAttribute("hidden");
+    if (open) menu.removeAttribute("hidden");
+    else menu.setAttribute("hidden", "");
+    this.setAttribute("aria-expanded", open ? "true" : "false");
+  });
+  host.querySelectorAll(".band").forEach(function (box) {
+    box.addEventListener("change", function () {
+      q(".layer-btn").textContent = layerSummary();
+      draw();
+    });
+  });
+  q(".fit").addEventListener("click", fit);
+  q(".pies").addEventListener("change", syncPies);
+  q(".levels").addEventListener("change", syncPies);
+  q(".sitenames").addEventListener("change", syncPies);
+  q(".ruler").addEventListener("click", function () {
+    rulerOn = !rulerOn;
+    this.classList.toggle("on", rulerOn);
+    if (rulerOn) map.doubleClickZoom.disable();
+    else {
+      map.doubleClickZoom.enable();
+      clearRuler();
+      draw();
+    }
+  });
+  q(".search").addEventListener("click", runSearch);
+  q(".q").addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") runSearch();
+  });
+  map.on("click", onMapClick);
+  map.on("dblclick", onMapDblClick);
+  map.on("mousemove", onMapMove);
+
+  const api = {
+    host: host,
+    map: map,
+    draw: draw,
+    fit: fit,
+    syncPies: syncPies,
+    markSpot: function (latlng) {
+      pinned = latlng;
+      renderPin();
+    },
+    showSearch: showSearch,
+    clearSearch: function () { searchLayer.clearLayers(); },
+    snapshot: function () {
+      return {
+        kpi: q(".kpi").value,
+        mode: q(".mode").value,
+        bands: selectedBands(),
+        pies: q(".pies").checked,
+        levels: q(".levels").checked,
+        sites: q(".sitenames").checked
+      };
+    },
+    applyPreset: applyPreset,
+    closeMenu: function (target) {
+      const menu = q(".menu");
+      if (menu.contains(target)) return;
+      menu.setAttribute("hidden", "");
+      q(".layer-btn").setAttribute("aria-expanded", "false");
+    },
+    destroy: function () {
+      map.remove();
+      host.remove();
+    }
+  };
+  if (preset) applyPreset(preset);
+  map.on("moveend", function () { broadcastView(api); });
+  host.__view = api;
+  return api;
+}
+
+function pageNote(count) {
+  const status = document.getElementById("status");
+  if (count === 1) status.textContent = "One window. Choose 3 or 4 to compare the same place.";
+  else status.textContent = count + " windows. Pan, zoom and a spot click stay aligned. Each window keeps its own RSRP settings.";
+}
+
+function setSplit(count) {
+  const stage = document.getElementById("stage");
+  stage.className = "n" + count;
+  const preset = views[0] ? views[0].snapshot() : null;
+  const center = views[0] ? views[0].map.getCenter() : null;
+  const zoom = views[0] ? views[0].map.getZoom() : null;
+  while (views.length > count) views.pop().destroy();
+  while (views.length < count) {
+    const board = document.createElement("section");
+    board.className = "board";
+    stage.appendChild(board);
+    views.push(createView(board, views.length ? preset : null));
+  }
+  views.forEach(function (view, index) {
+    view.host.querySelector(".win").textContent = "Window " + (index + 1);
+  });
+  pageNote(count);
+  requestAnimationFrame(function () {
+    syncingView = true;
+    views.forEach(function (view, index) {
+      view.map.invalidateSize();
+      if (index > 0 && center) view.map.setView(center, zoom, { animate: false });
+      if (index > 0) {
+        view.draw();
+        view.syncPies();
+        if (sharedPin) view.markSpot(sharedPin);
+      }
+    });
+    syncingView = false;
+  });
+}
+
+document.getElementById("split").addEventListener("change", function () {
+  setSplit(Number(this.value));
 });
 document.addEventListener("click", function (ev) {
-  const menu = document.getElementById("layer-menu");
-  if (menu.contains(ev.target)) return;
-  menu.setAttribute("hidden", "");
-  document.getElementById("layer-btn").setAttribute("aria-expanded", "false");
+  views.forEach(function (view) { view.closeMenu(ev.target); });
 });
-document.querySelectorAll(".band").forEach(function (box) {
-  box.addEventListener("change", function () {
-    syncLayerButton();
-    draw();
-  });
+window.addEventListener("resize", function () {
+  views.forEach(function (view) { view.map.invalidateSize(); });
 });
-document.getElementById("fit").addEventListener("click", fitRoute);
-document.getElementById("pies").addEventListener("change", syncPies);
-["levels", "sitenames"].forEach(function (id) {
-  document.getElementById(id).addEventListener("change", function () {
-    if (pies) pies._reset();
-  });
-});
-document.getElementById("ruler").addEventListener("click", function () {
-  rulerOn = !rulerOn;
-  this.classList.toggle("on", rulerOn);
-  if (rulerOn) map.doubleClickZoom.disable();
-  else {
-    map.doubleClickZoom.enable();
-    clearRuler();
-    draw();
-  }
-});
-document.getElementById("search").addEventListener("click", runSearch);
-document.getElementById("q").addEventListener("keydown", function (ev) {
-  if (ev.key === "Enter") runSearch();
-});
-map.on("click", onMapClick);
-map.on("dblclick", onMapDblClick);
-map.on("mousemove", onMapMove);
 
 if (typeof COVERAGE === "undefined") {
   document.getElementById("status").textContent = "Coverage data was not found beside this page";
+  setSplit(1);
 } else {
-  draw();
-  fitRoute();
-  syncPies();
+  setSplit(1);
+  requestAnimationFrame(function () {
+    views[0].map.invalidateSize();
+    views[0].draw();
+    views[0].syncPies();
+    views[0].fit();
+  });
 }
 </script>
+
 </body>
 </html>
