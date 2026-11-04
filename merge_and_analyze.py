@@ -43,6 +43,9 @@ ACTIVE_CLOCK_ANCHOR = pd.Timestamp("1970-01-01")
 # Idle maps are the Robi scanner. The active file also carries a Grameenphone UE on the
 # same drive; only Robi is drawn so Active sits beside Idle for the same network.
 ACTIVE_OPERATOR = "Robi"
+# Primary serving cell. M-SCell1 and M-SCell2 are carrier-aggregation neighbours
+# and are left out of the Active maps.
+ACTIVE_CELL_TYPE = "M-PCell"
 
 SCANNER_RENAME = {
     "NB RSRP": "RSRP",
@@ -1260,8 +1263,8 @@ LOGIC_LOCK = {
         "Bad Spot RSRQ": (45, 0),
         "Bad Spot SINR": (204, 0),
         "Bad Spot RSRP_Active": (2, 0),
-        "Bad Spot RSRQ_Active": (1, 0),
-        "Bad Spot SINR_Active": (5, 0),
+        "Bad Spot RSRQ_Active": (0, 0),
+        "Bad Spot SINR_Active": (6, 0),
     },
 }
 
@@ -2601,6 +2604,24 @@ def strongest_location(df: pd.DataFrame) -> pd.DataFrame:
     work = pd.concat(parts, ignore_index=True)
     per_loc = work.groupby(["Latitude", "Longitude"], sort=False)["RSRP"].idxmax()
     return work.loc[per_loc].reset_index(drop=True)
+
+
+def select_active_report(df: pd.DataFrame) -> pd.DataFrame:
+    """Active rows used on the Excel and web reports.
+
+    Home Operator is stored as Operator. Only Robi primary cells (Type M-PCell)
+    are drawn. Other operators and secondary cells stay in the merged CSV.
+    """
+    if df is None or df.empty:
+        return df
+    if "Type" not in df.columns:
+        sys.exit("Active log has no Type column, so M-PCell cannot be selected")
+    work = df
+    if "Operator" in work.columns:
+        operator = work["Operator"].astype("string").str.strip()
+        work = work.loc[operator.eq(ACTIVE_OPERATOR)]
+    kind = work["Type"].astype("string").str.strip()
+    return work.loc[kind.eq(ACTIVE_CELL_TYPE)].copy()
 
 
 def best_carrier(df: pd.DataFrame) -> pd.DataFrame:

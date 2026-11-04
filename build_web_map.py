@@ -23,7 +23,7 @@ import pandas as pd
 
 from merge_and_analyze import (
     ACTIVE_MERGED,
-    ACTIVE_OPERATOR,
+    select_active_report,
     MAP_BIN_M,
     MERGED_CSV,
     REPORT_LAYERS,
@@ -183,8 +183,7 @@ def build() -> None:
     print(f"  names by EARFCN {len(exact):,}  unique pairs {len(pair):,}", flush=True)
     print("Loading drive logs", flush=True)
     idle = load_merged_csv()
-    active = load_active_merged()
-    active = active.loc[active["Operator"].astype("string").str.strip().eq(ACTIVE_OPERATOR)].copy()
+    active = select_active_report(load_active_merged())
     idle_base = strongest_fix(idle)
     idle_all = best_server(idle_base)
     active_all = strongest_location(active)

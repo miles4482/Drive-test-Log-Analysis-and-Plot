@@ -37,6 +37,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from merge_and_analyze import (
+    ACTIVE_CELL_TYPE,
     ACTIVE_CSV,
     ACTIVE_OPERATOR,
     OUTPUT_DIR,
@@ -64,6 +65,7 @@ from merge_and_analyze import (
     min_consecutive_m,
     best_carrier,
     best_server,
+    select_active_report,
     strongest_fix,
     strongest_location,
     _equirect_km,
@@ -83,7 +85,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.49"
+REPORT_VERSION = "1.50"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -620,9 +622,8 @@ def refresh_zoom_circles(src: Path | None = None) -> Path:
     active = load_active_merged() if ACTIVE_MERGED.exists() else None
     if idle is None or active is None:
         raise SystemExit("Merged drive logs are missing; a full report build is required.")
-    if "Operator" in active.columns:
-        active = active.loc[active["Operator"] == ACTIVE_OPERATOR].copy()
-    print(f"Idle rows {len(idle):,}  Active {ACTIVE_OPERATOR} rows {len(active):,}", flush=True)
+    active = select_active_report(active)
+    print(f"Idle rows {len(idle):,}  Active {ACTIVE_OPERATOR} {ACTIVE_CELL_TYPE} rows {len(active):,}", flush=True)
     idle_track = best_server(idle)
     active_track = best_carrier(active)
     MAP_CIRCLE_PIXELS.clear()
@@ -1272,18 +1273,19 @@ def build_cover(
         ["Mode", "Active (UE voice)" if voice else "Active (UE)"],
         ["Archive", ACTIVE_CSV.name],
         ["Campaign", campaign or "—"],
-        ["Plotted operator", ACTIVE_OPERATOR],
-        [f"{ACTIVE_OPERATOR} rows in the log", operator_n],
+        ["Home Operator", ACTIVE_OPERATOR],
+        ["Type", ACTIVE_CELL_TYPE],
+        [f"{ACTIVE_OPERATOR} {ACTIVE_CELL_TYPE} rows", operator_n],
         ["Plotted samples", plotted_n],
-        ["Other operator samples", other_n],
+        ["Samples left out", other_n],
         ["CSV files", int(active["Source"].nunique())],
         ["Start time", active["Time"].min()],
         ["End time", active["Time"].max()],
         ["Unique Cell Ids", int(active["Cell Id"].nunique())],
     ]
     write_table(ws, 45, 1, ["Item", "Value"], info_rows, num_formats={1: "#,##0"})
-    ws.cell(54, 2).number_format = "hh:mm:ss"
     ws.cell(55, 2).number_format = "hh:mm:ss"
+    ws.cell(56, 2).number_format = "hh:mm:ss"
     write_cell(ws, 44, 4, f"Radio KPIs ({ACTIVE_OPERATOR}, plotted rows)", size=14, bold=True)
     stats_headers = ["KPI", "Count", "Min", "P5", "Median", "Mean", "P95", "Max"]
     stats_rows = []
@@ -1299,12 +1301,12 @@ def build_cover(
     ws.merge_cells(start_row=50, start_column=4, end_row=51, end_column=11)
     write_cell(
         ws, 50, 4,
-        f"Maps and bad spots use {ACTIVE_OPERATOR} only, so Active sits beside the Idle scanner of the same network. "
-        f"Where several {ACTIVE_OPERATOR} rows share a latitude and longitude, the strongest RSRP is kept. "
+        f"Maps and bad spots use Home Operator {ACTIVE_OPERATOR} and Type {ACTIVE_CELL_TYPE}. "
+        f"Where several of those rows share a latitude and longitude, the strongest RSRP is kept. "
         "That row is one band, and its RSRQ and SINR are the values drawn. "
-        "Cell Id is the last number of the CGI. A secondary cell with no CGI still competes; if it wins, the cell name stays blank. "
+        "Cell Id is the last number of the CGI. "
         f"The file has clock time only, so the start and end above are the time of day. "
-        f"Other operators ({other_n:,} samples) stay in output/Bogura_active_merged.csv.gz and are not drawn.",
+        f"Other operators and secondary cells ({other_n:,} samples) stay in output/Bogura_active_merged.csv.gz and are not drawn.",
         size=9, wrap=True,
     )
 
@@ -1411,7 +1413,10 @@ def _bad_spot_table_rows(spots: pd.DataFrame, *, include_kpi: bool = True) -> li
 def _detection_summary(kpi: str, spots: pd.DataFrame) -> str:
     """State how many spots the rules found and how many of them are drawn."""
     if spots is None or spots.empty:
-        return f"No {kpi} location meets either rule."
+        return (
+            f"The rules find 0 poor {kpi} circle(s) and 0 discrete area(s). "
+            f"No {kpi} location meets either rule."
+        )
     total_consec = int(spots.attrs.get("total_consecutive", int((spots["kind"] == "consecutive").sum())))
     total_discrete = int(spots.attrs.get("total_discrete", int((spots["kind"] == "discrete").sum())))
     shown_consec = int((spots["kind"] == "consecutive").sum())
@@ -1470,10 +1475,9 @@ def build_kpi_bad_spot_sheet(
     active_rule = ""
     if mode.startswith("Active"):
         active_rule = (
-            f"Active Mode is the {ACTIVE_OPERATOR} UE in auto mode, so one band is plotted at a location. "
-            "Rows that share a latitude, longitude and Cell Id keep the strongest RSRP. Then one Cell Id "
-            "remains at that location, again the strongest RSRP, and the RSRQ and SINR maps use that row. "
-            "Any other Cell Id at that location is left blank. "
+            f"Active Mode uses Home Operator {ACTIVE_OPERATOR} and Type {ACTIVE_CELL_TYPE}, "
+            "so one band is plotted at a location: the strongest RSRP. "
+            "The RSRQ and SINR maps use that same row. "
         )
     note = (
         active_rule
@@ -2029,7 +2033,7 @@ def add_active_cover_extras(cover, data_ws, blocks, route_path: Path, active: pd
     cover.merge_cells(start_row=91, start_column=1, end_row=93, end_column=11)
     write_cell(
         cover, 91, 1,
-        "The route is the plotted Robi track: one band at each latitude and longitude, "
+        "The route is the plotted Robi M-PCell track: one band at each latitude and longitude, "
         "the strongest RSRP. RSRQ and SINR on the histograms are the values from that same row. "
         "Borga_Active_mode.csv has clock time only, so start and end are the time of day. "
         f"Plotted band mix: {layer_bits}.",
@@ -2192,12 +2196,11 @@ def build_report(df: pd.DataFrame, active: pd.DataFrame | None = None, out_path:
     if active is not None and not active.empty:
         active = _with_layers(active)
         active_raw_n = len(active)
-        if "Operator" in active.columns:
-            operator = active["Operator"].astype("string").str.strip()
-            active_robi = active.loc[operator.eq(ACTIVE_OPERATOR)].copy()
-        else:
-            active_robi = active
-        print(f"Active Mode {ACTIVE_OPERATOR}: {len(active_robi):,} rows of {active_raw_n:,}")
+        active_robi = select_active_report(active)
+        print(
+            f"Active Mode {ACTIVE_OPERATOR} {ACTIVE_CELL_TYPE}: "
+            f"{len(active_robi):,} rows of {active_raw_n:,}"
+        )
 
     idle_fixed = strongest_fix(df)
     print(f"Idle strongest row per lat/lon/time: {len(idle_fixed):,} of {len(df):,}", flush=True)
@@ -2374,10 +2377,8 @@ def refresh_bad_spot_pies(src: Path | None = None) -> Path:
     active = load_active_merged() if ACTIVE_MERGED.exists() else None
     if idle is None or active is None:
         raise SystemExit("Merged drive logs are missing; a full report build is required.")
-    if "Operator" in active.columns:
-        operator = active["Operator"].astype("string").str.strip()
-        active = active.loc[operator.eq(ACTIVE_OPERATOR)].copy()
-    print(f"Idle rows {len(idle):,}  Active {ACTIVE_OPERATOR} rows {len(active):,}", flush=True)
+    active = select_active_report(active)
+    print(f"Idle rows {len(idle):,}  Active {ACTIVE_OPERATOR} {ACTIVE_CELL_TYPE} rows {len(active):,}", flush=True)
     idle_track = best_server(idle)
     active_track = best_carrier(active)
     MAP_CIRCLE_PIXELS.clear()
