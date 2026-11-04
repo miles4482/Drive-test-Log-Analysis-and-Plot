@@ -37,8 +37,8 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from merge_and_analyze import (
+    ACTIVE_CSV,
     ACTIVE_OPERATOR,
-    ACTIVE_PARTS,
     OUTPUT_DIR,
     PLOTS_DIR,
     SITE_DB_PATH,
@@ -83,7 +83,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.48"
+REPORT_VERSION = "1.49"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -1270,7 +1270,7 @@ def build_cover(
     voice = "VOICE" in campaign.upper()
     info_rows = [
         ["Mode", "Active (UE voice)" if voice else "Active (UE)"],
-        ["Archive", " + ".join(p.name for p in ACTIVE_PARTS)],
+        ["Archive", ACTIVE_CSV.name],
         ["Campaign", campaign or "—"],
         ["Plotted operator", ACTIVE_OPERATOR],
         [f"{ACTIVE_OPERATOR} rows in the log", operator_n],
@@ -1282,8 +1282,8 @@ def build_cover(
         ["Unique Cell Ids", int(active["Cell Id"].nunique())],
     ]
     write_table(ws, 45, 1, ["Item", "Value"], info_rows, num_formats={1: "#,##0"})
-    ws.cell(54, 2).number_format = "yyyy-mm-dd hh:mm:ss"
-    ws.cell(55, 2).number_format = "yyyy-mm-dd hh:mm:ss"
+    ws.cell(54, 2).number_format = "hh:mm:ss"
+    ws.cell(55, 2).number_format = "hh:mm:ss"
     write_cell(ws, 44, 4, f"Radio KPIs ({ACTIVE_OPERATOR}, plotted rows)", size=14, bold=True)
     stats_headers = ["KPI", "Count", "Min", "P5", "Median", "Mean", "P95", "Max"]
     stats_rows = []
@@ -1300,9 +1300,11 @@ def build_cover(
     write_cell(
         ws, 50, 4,
         f"Maps and bad spots use {ACTIVE_OPERATOR} only, so Active sits beside the Idle scanner of the same network. "
-        f"Where several {ACTIVE_OPERATOR} rows share a latitude and longitude, one Cell Id is kept: the strongest RSRP. "
-        "That row is one band, and its RSRQ and SINR are the values drawn. Any other Cell Id at that location is not drawn. "
-        f"The other operator ({other_n:,} samples) stays in output/Bogura_active_merged.csv.gz and is not drawn.",
+        f"Where several {ACTIVE_OPERATOR} rows share a latitude and longitude, the strongest RSRP is kept. "
+        "That row is one band, and its RSRQ and SINR are the values drawn. "
+        "Cell Id is the last number of the CGI. A secondary cell with no CGI still competes; if it wins, the cell name stays blank. "
+        f"The file has clock time only, so the start and end above are the time of day. "
+        f"Other operators ({other_n:,} samples) stay in output/Bogura_active_merged.csv.gz and are not drawn.",
         size=9, wrap=True,
     )
 
@@ -2022,13 +2024,14 @@ def add_active_cover_extras(cover, data_ws, blocks, route_path: Path, active: pd
     write_table(cover, 75, 1, ["Item", "Value"], detail_rows)
     cover.cell(80, 2).number_format = "#,##0.0"
     cover.cell(81, 2).number_format = "#,##0.0"
-    cover.cell(82, 2).number_format = "yyyy-mm-dd hh:mm:ss"
-    cover.cell(83, 2).number_format = "yyyy-mm-dd hh:mm:ss"
+    cover.cell(82, 2).number_format = "hh:mm:ss"
+    cover.cell(83, 2).number_format = "hh:mm:ss"
     cover.merge_cells(start_row=91, start_column=1, end_row=93, end_column=11)
     write_cell(
         cover, 91, 1,
-        "The route is the plotted Robi track: one Cell Id and one band at each latitude and longitude, "
+        "The route is the plotted Robi track: one band at each latitude and longitude, "
         "the strongest RSRP. RSRQ and SINR on the histograms are the values from that same row. "
+        "Borga_Active_mode.csv has clock time only, so start and end are the time of day. "
         f"Plotted band mix: {layer_bits}.",
         size=9, wrap=True,
     )
@@ -2508,10 +2511,9 @@ if __name__ == "__main__":
         print("Verified: transparent sector outlines on the bad-spot maps.")
         raise SystemExit(0)
     from merge_and_analyze import (
+        ACTIVE_CSV,
         ACTIVE_MERGED,
-        ACTIVE_PARTS,
         MERGED_CSV,
-        extract_active_archive,
         extract_archives,
         load_active_merged,
         load_merged_csv,
@@ -2524,11 +2526,15 @@ if __name__ == "__main__":
     else:
         extract_archives()
         frame = merge_parts()
-    if ACTIVE_MERGED.exists():
-        active_frame = load_active_merged()
-    elif all(part.exists() for part in ACTIVE_PARTS):
-        extract_active_archive()
+    source_newer = (
+        ACTIVE_CSV.exists()
+        and ACTIVE_MERGED.exists()
+        and ACTIVE_CSV.stat().st_mtime >= ACTIVE_MERGED.stat().st_mtime
+    )
+    if ACTIVE_CSV.exists() and (not ACTIVE_MERGED.exists() or source_newer):
         active_frame = merge_active()
+    elif ACTIVE_MERGED.exists():
+        active_frame = load_active_merged()
     else:
         active_frame = None
     path = build_report(frame, active_frame)

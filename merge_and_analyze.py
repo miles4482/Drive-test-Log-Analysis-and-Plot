@@ -4,11 +4,9 @@
 from __future__ import annotations
 
 import math
-import shutil
 import subprocess
 import sys
 import urllib.request
-import zipfile
 from collections import deque
 from pathlib import Path
 
@@ -35,14 +33,13 @@ SUMMARY_MD = OUTPUT_DIR / "analysis_summary.md"
 # Cell-level system dump. One site pie is built from its Sector column, not from the
 # old node-level Physical_Site_Database_V1.0.xlsb.
 SITE_DB_PATH = ROOT / "System DUMP.xlsb"
-# Active Mode UE log, uploaded as a split zip. Both operators are in the file;
-# the report draws Robi only.
-ACTIVE_PARTS = (
-    ROOT / "Borga_Active_V2.1.zip.001",
-    ROOT / "Borga_Active_V2.1.zip.002",
-)
-ACTIVE_DIR = EXTRACT_DIR / "Borga_Active_V2.1"
+# Active Mode UE log. One CSV replaces the old split zip. Robi, Grameenphone
+# and Banglalink are in the file; the report draws Robi only.
+ACTIVE_CSV = ROOT / "Borga_Active_mode.csv"
 ACTIVE_MERGED = OUTPUT_DIR / "Bogura_active_merged.csv.gz"
+# The CSV stores a clock ("8:40:30 AM") and no calendar date. Pin that clock
+# so a later rebuild does not move the timestamp onto the day the script runs.
+ACTIVE_CLOCK_ANCHOR = pd.Timestamp("1970-01-01")
 # Idle maps are the Robi scanner. The active file also carries a Grameenphone UE on the
 # same drive; only Robi is drawn so Active sits beside Idle for the same network.
 ACTIVE_OPERATOR = "Robi"
@@ -1237,9 +1234,9 @@ def min_consecutive_m(column: str) -> float:
 
 # Expected values for the contract above. Kept separate from the live constants so
 # a later edit that retunes a rule fails the report check instead of passing quietly.
-# Spot counts are the published v1.43 result (circles, discrete areas) per sheet.
-# Idle is unchanged. Active is Robi only, one Cell Id and one band per latitude
-# and longitude: the strongest RSRP on the AUTO DATA log.
+# Spot counts are circles and discrete areas per sheet.
+# Idle stays on the published Borga_Idle_V2.0 result. Active follows
+# Borga_Active_mode.csv: Robi only, strongest RSRP at each location.
 LOGIC_LOCK = {
     "active_operator": "Robi",
     "sweep_s": 4.0,
@@ -1262,9 +1259,9 @@ LOGIC_LOCK = {
         "Bad Spot RSRP": (26, 0),
         "Bad Spot RSRQ": (45, 0),
         "Bad Spot SINR": (204, 0),
-        "Bad Spot RSRP_Active": (81, 0),
-        "Bad Spot RSRQ_Active": (50, 0),
-        "Bad Spot SINR_Active": (190, 0),
+        "Bad Spot RSRP_Active": (2, 0),
+        "Bad Spot RSRQ_Active": (1, 0),
+        "Bad Spot SINR_Active": (5, 0),
     },
 }
 
@@ -2432,12 +2429,6 @@ def idle_csv_files() -> list[Path]:
     return sorted(IDLE_DIR.glob("*.csv"), key=lambda p: int(p.stem) if p.stem.isdigit() else p.stem)
 
 
-def active_csv_files() -> list[Path]:
-    if not ACTIVE_DIR.exists():
-        return []
-    return sorted(ACTIVE_DIR.glob("*.csv"), key=lambda p: int(p.stem) if p.stem.isdigit() else p.stem)
-
-
 def extract_archives() -> None:
     EXTRACT_DIR.mkdir(parents=True, exist_ok=True)
     if not IDLE_ARCHIVE.exists():
@@ -2450,26 +2441,27 @@ def extract_archives() -> None:
     print(f"  {len(files)} CSV files")
 
 
-def extract_active_archive() -> None:
-    """Join the split zip and unpack Borga_Active_V2.1/1.csv … 15.csv."""
-    EXTRACT_DIR.mkdir(parents=True, exist_ok=True)
-    missing = [p.name for p in ACTIVE_PARTS if not p.exists()]
-    if missing:
-        sys.exit("Missing active archive parts: " + ", ".join(missing))
-    joined = EXTRACT_DIR / "Borga_Active_V2.1.zip"
-    print("Joining " + " + ".join(p.name for p in ACTIVE_PARTS), flush=True)
-    with joined.open("wb") as out:
-        for part in ACTIVE_PARTS:
-            with part.open("rb") as src:
-                shutil.copyfileobj(src, out)
-    print(f"Extracting {joined.name} -> {EXTRACT_DIR}", flush=True)
-    with zipfile.ZipFile(joined) as zf:
-        zf.extractall(EXTRACT_DIR)
-    joined.unlink(missing_ok=True)
-    files = active_csv_files()
-    if not files:
-        sys.exit(f"Extraction finished but no CSV files were found in {ACTIVE_DIR}")
-    print(f"  {len(files)} CSV files", flush=True)
+def _cgi_eci(value: object) -> object:
+    """Last number of a CGI such as 470-2-168962068, which is the E-UTRAN cell identity."""
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return pd.NA
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "<na>", "none"}:
+        return pd.NA
+    token = text.replace(" ", "").split("-")[-1]
+    if not token.isdigit():
+        return pd.NA
+    return int(token)
+
+
+def _parse_active_time(series: pd.Series) -> pd.Series:
+    """Parse either a full timestamp or a clock with no date."""
+    raw = series.astype("string").str.strip()
+    clock = raw.str.match(r"^\d{1,2}:\d{2}:\d{2}\s*[AaPp][Mm]$", na=False)
+    if float(clock.mean()) > 0.9:
+        parsed = pd.to_datetime(raw.where(clock), format="%I:%M:%S %p", errors="coerce")
+        return ACTIVE_CLOCK_ANCHOR + (parsed - parsed.dt.normalize())
+    return pd.to_datetime(series, errors="coerce")
 
 
 def earfcn_to_layer(earfcn: object) -> str:
@@ -2577,11 +2569,11 @@ def strongest_location(df: pd.DataFrame) -> pd.DataFrame:
     """Active auto mode: one band at each latitude and longitude.
 
     Rows that share a latitude, longitude and Cell Id collapse to the strongest
-    RSRP, so one cell keeps one band. Then the strongest of those cells is kept
-    at that location. RSRQ and SINR stay on that row. Every other Cell Id at
-    the location is dropped, and a row with no Cell Id is not plotted.
+    RSRP, so one cell keeps one band. A secondary carrier with no CGI has no
+    Cell Id; those rows still compete, one per EARFCN at that location. The
+    strongest RSRP remains. RSRQ and SINR stay on that row.
     """
-    work = df.dropna(subset=["RSRP", "Latitude", "Longitude", "Cell Id"]).copy()
+    work = df.dropna(subset=["RSRP", "Latitude", "Longitude"]).copy()
     if work.empty:
         return work
     work = work.reset_index(drop=True)
@@ -2589,11 +2581,24 @@ def strongest_location(df: pd.DataFrame) -> pd.DataFrame:
     work["Latitude"] = pd.to_numeric(work["Latitude"], errors="coerce")
     work["Longitude"] = pd.to_numeric(work["Longitude"], errors="coerce")
     work["Cell Id"] = pd.to_numeric(work["Cell Id"], errors="coerce")
-    work = work.dropna(subset=["RSRP", "Latitude", "Longitude", "Cell Id"])
+    work = work.dropna(subset=["RSRP", "Latitude", "Longitude"])
     if work.empty:
         return work
-    per_cell = work.groupby(["Latitude", "Longitude", "Cell Id"], sort=False)["RSRP"].idxmax()
-    work = work.loc[per_cell]
+    identified = work.loc[work["Cell Id"].notna()]
+    anonymous = work.loc[work["Cell Id"].isna()]
+    parts = []
+    if not identified.empty:
+        per_cell = identified.groupby(["Latitude", "Longitude", "Cell Id"], sort=False)["RSRP"].idxmax()
+        parts.append(identified.loc[per_cell])
+    if not anonymous.empty:
+        keys = ["Latitude", "Longitude"]
+        if "DL EARFCN" in anonymous.columns:
+            keys.append("DL EARFCN")
+        per_carrier = anonymous.groupby(keys, sort=False, dropna=False)["RSRP"].idxmax()
+        parts.append(anonymous.loc[per_carrier])
+    if not parts:
+        return work.iloc[0:0].copy()
+    work = pd.concat(parts, ignore_index=True)
     per_loc = work.groupby(["Latitude", "Longitude"], sort=False)["RSRP"].idxmax()
     return work.loc[per_loc].reset_index(drop=True)
 
@@ -2666,19 +2671,31 @@ def merge_parts() -> pd.DataFrame:
 
 
 def load_active_csv(path: Path) -> pd.DataFrame:
-    """Active Mode UE export. KPIs are already named RSRP / RSRQ / SINR."""
+    """Active Mode UE export. KPIs are already named RSRP / RSRQ / SINR.
+
+    Borga_Active_mode.csv names the operator Home Operator and carries the cell
+    as CGI. Cell Id is the E-UTRAN cell identity, the last number of that CGI.
+    A secondary cell often has no CGI, so its Cell Id stays empty.
+    """
     print(f"Loading active {path.name} ...")
     df = pd.read_csv(path)
+    df = df.loc[:, ~df.columns.astype(str).str.startswith("Unnamed")].copy()
+    if "Home Operator" in df.columns and "Operator" not in df.columns:
+        df = df.rename(columns={"Home Operator": "Operator"})
+    if "Cell Id" not in df.columns:
+        if "CGI" not in df.columns:
+            sys.exit(f"{path.name} has no Cell Id and no CGI")
+        df["Cell Id"] = df["CGI"].map(_cgi_eci)
     missing = [c for c in COLUMNS if c not in df.columns]
     if missing:
         sys.exit(f"{path.name} is missing columns: {missing}")
     keep = [c for c in df.columns if c in set(COLUMNS) | {
-        "Operator", "Data Technology", "Technology Band", "Collection", "Campaign",
+        "Operator", "Data Technology", "Technology Band", "Collection", "Campaign", "Type",
     }]
     df = df[keep].copy()
     if "Operator" in df.columns:
         df["Operator"] = df["Operator"].astype("string").str.strip()
-    df["Time"] = pd.to_datetime(df["Time"], errors="coerce")
+    df["Time"] = _parse_active_time(df["Time"])
     for col in ("RSRP", "RSRQ", "SINR", "Longitude", "Latitude", "DL EARFCN"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df["Cell Id"] = pd.to_numeric(df["Cell Id"], errors="coerce").astype("Int64")
@@ -2691,11 +2708,9 @@ def load_active_csv(path: Path) -> pd.DataFrame:
 
 
 def merge_active() -> pd.DataFrame:
-    files = active_csv_files()
-    if not files:
-        sys.exit(f"No active CSV files in {ACTIVE_DIR}; run extract first")
-    frames = [load_active_csv(p) for p in files]
-    merged = pd.concat(frames, ignore_index=True)
+    if not ACTIVE_CSV.exists():
+        sys.exit(f"Missing active log: {ACTIVE_CSV.name}")
+    merged = load_active_csv(ACTIVE_CSV)
     merged = merged.drop_duplicates(subset=["Time", "Operator", "Cell Id", "DL EARFCN", "RSRP"], keep="first")
     sort_cols = ["Time", "Source"]
     if "Operator" in merged.columns:
@@ -2924,7 +2939,6 @@ def main() -> None:
     else:
         extract_archives()
         merged = merge_parts()
-        extract_active_archive()
         active = merge_active()
     write_summary(merged)
     plot_all(merged)

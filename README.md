@@ -1,25 +1,25 @@
 # Drive-test Log Analysis and Plot
 
-LTE **IDLE Mode scanner** and **Active Mode UE** logs from **Bogura** (Robi). Idle source is `Borga_Idle_V2.0.7z`. Active source is the replacement `Borga_Active_V2.1.zip.001` + `Borga_Active_V2.1.zip.002` (campaign AUTO DATA). The report draws **Robi** only.
+LTE **IDLE Mode scanner** and **Active Mode UE** logs from **Bogura** (Robi). Idle source is `Borga_Idle_V2.0.7z`. Active source is `Borga_Active_mode.csv`, which replaces the split `Borga_Active_V2.1` zip. The report draws **Robi** only.
 
 ## What these files are
 
 | File(s) | Role | After extract |
 | --- | --- | --- |
 | `Borga_Idle_V2.0.7z` | IDLE Mode scanner export | `extracted/Borga_Idle_V2.0/1.csv` … `15.csv` |
-| `Borga_Active_V2.1.zip.001` + `.002` | Active Mode UE export (Robi and Grameenphone). Join the two parts before unzip | `extracted/Borga_Active_V2.1/1.csv` … `15.csv` |
+| `Borga_Active_mode.csv` | Active Mode UE export (Robi, Grameenphone and Banglalink) | `output/Bogura_active_merged.csv.gz` |
 | `System DUMP.xlsb` | Cell-level site dump. Several EUtranCellId values share one Sector name | Sector name on every arm, plus the distance line, on the individual bad-spot maps only |
 | `Physical_Site_Database_V2.0.xlsx` | Earlier physical site database | Not used on the current maps |
 
 Idle scanner columns include `Time`, `Longitude`, `Latitude`, `Cell Id`, `DL EARFCN`, `NB RSRP`, `NB RSRQ`, `NB RS SINR` (mapped to RSRP / RSRQ / SINR). Campaign is **Scanner**. Files 1–15 cover 11–21 May 2026.
 
-Active columns are already named `RSRP`, `RSRQ`, `SINR`, plus `Operator`, `Data Technology`, `DL EARFCN` and `Cell Id`. Campaign is **AUTO DATA**. The Operator column also contains Grameenphone. The report keeps rows whose Operator is exactly **Robi** (surrounding spaces are stripped) and does not draw Grameenphone. LTE and LTE CA both stay in when the operator is Robi. Those other-operator rows stay in the merged CSV.
+Active columns are already named `RSRP`, `RSRQ`, `SINR`, plus `Home Operator`, `Data Technology`, `DL EARFCN` and `CGI`. The file has a clock (`8:40:30 AM` through `10:12:26 AM`) and no calendar date. `Home Operator` contains Robi, Grameenphone and Banglalink. The report keeps rows whose operator is exactly **Robi** and does not draw the other two. LTE and LTE CA both stay in when the operator is Robi. Cell Id is the last number of the CGI, the E-UTRAN cell identity. A secondary cell in this export has no CGI, so its Cell Id is empty. Those rows still compete on RSRP. If one of them is the strongest sample at a location, the spot is drawn and the cell name stays blank.
 
-Active auto mode keeps **one band at each latitude and longitude**. Robi rows that share a latitude, longitude and Cell Id collapse to the strongest RSRP, so that cell keeps one band. Then one Cell Id remains at that location, again the strongest RSRP. RSRQ and SINR come from that row. Any other Cell Id at that location is not plotted, and a row with no Cell Id is not plotted. Idle still collapses rows that share a latitude, longitude and timestamp, then keeps the strongest band in each scanner sweep (at most 4 s and 40 m).
+Active auto mode keeps **one band at each latitude and longitude**: the strongest RSRP. RSRQ and SINR come from that row. Idle still collapses rows that share a latitude, longitude and timestamp, then keeps the strongest band in each scanner sweep (at most 4 s and 40 m).
 
 ```
-Borga_Idle_V2.0.7z              -->  1.csv … 15.csv                         -->  output/Bogura_merged.csv.gz
-Borga_Active_V2.1.zip.001+.002  -->  Borga_Active_V2.1/1.csv … 15.csv       -->  output/Bogura_active_merged.csv.gz
+Borga_Idle_V2.0.7z     -->  1.csv … 15.csv               -->  output/Bogura_merged.csv.gz
+Borga_Active_mode.csv  -->  output/Bogura_active_merged.csv.gz
 ```
 
 ## How to rebuild the final file and plots
@@ -77,7 +77,7 @@ python merge_and_analyze.py --from-merged
 | Dominant bands | B8 900 (28.4%), B1 2100 (25.4%), B3 1800 (23.5%), B41 2500 (22.7%) |
 | Unique Cell Ids | 5,132 |
 
-Active log (replacement `Borga_Active_V2.1`, campaign AUTO DATA): 2,185,081 rows, of which 1,075,048 are Robi and 1,110,033 are the other operator. Robi rows with no Cell Id are not plotted. At each latitude and longitude one Cell Id and one band remain, the strongest RSRP: 280,640 plotted rows. An Active L1800 map is blank wherever L2100 (or another layer) was stronger at that same coordinate. RSRQ and SINR come from that same row.
+Active log (`Borga_Active_mode.csv`): 49,257 rows, 47,087 after exact duplicates are dropped. Robi 16,962, Grameenphone 21,003, Banglalink 9,122. Of the Robi rows, 9,855 have a CGI and 7,107 secondary cells do not. At each latitude and longitude one band remains, the strongest RSRP: 5,278 plotted rows (3,976 with a Cell Id, 1,302 where a secondary cell with no CGI was strongest). Plotted mix: L1800 3,903, L2100 1,062, L2600 255, L900 58. An Active L1800 map is blank wherever another layer was stronger at that same coordinate. RSRQ and SINR come from that same row. Clock span is 08:40:30–10:12:26, with no date in the file.
 
 The Idle all-band coverage maps show the **best server per scanner sweep**. Rows that already share a latitude, longitude and timestamp are reduced to the strongest RSRP first (395,121 of 1,178,276). The scanner still writes the bands at their own millisecond timestamps and revisits each band about every 3 s, so the remaining rows are grouped into sweep windows (at most 4 s and 40 m of the same pass) before the strongest band is taken. Idle band maps are built from those surviving rows, then the same sweep.
 
@@ -104,7 +104,7 @@ Active Mode plots **one band per latitude and longitude** (Robi only): the stron
 - **Sector marks are only on those individual bad-spot maps.** Cells in `System DUMP.xlsb` are rolled up by the Sector column: one sector name covers many EUtranCellId values. If any sector of a site falls in the view, every sector of that site is drawn. The mark is a transparent cyan outline with no fill, and the Sector name is written at the end of each arm. A yellow distance line is drawn only from a sector whose azimuth points at that bad spot (within 32°). A sector that faces another way has no line
 - **Discrete area:** leftover poor bins covering at least 1 km² where that area is at least half poor (dotted circle). With every run already covered, this drive has none
 - Each sheet draws the 16 longest circles as separate maps and lists up to 300 in the table, longest first, and states the full count
-- Published circle counts, with 0 discrete areas: Idle RSRP 26, RSRQ 45, SINR 204; Active Robi RSRP 81, RSRQ 50, SINR 190. These rules are locked in `LOGIC_LOCK`. `verify_report` fails if a rebuild moves a threshold, a colour, the circle size, or a count
+- Published circle counts, with 0 discrete areas: Idle RSRP 26, RSRQ 45, SINR 204; Active Robi on `Borga_Active_mode.csv` RSRP 2, RSRQ 1, SINR 5. These rules are locked in `LOGIC_LOCK`. `verify_report` fails if a rebuild moves a threshold, a colour, the circle size, or a count
 
 ### Cover shows the Active histograms and the DT route (v1.45)
 
@@ -114,11 +114,11 @@ The Cover sheet keeps the Idle dataset, KPI table, and Idle histograms. Under Ac
 
 Every coverage map and bad-spot map is drawn on Esri World Imagery. The combined view is the satellite route only: no circle is painted into it and no circle shape is placed on it. Bad Spot 1, Bad Spot 2, and the rest follow down the left side of the sheet, each a larger map with one movable circle. A site that falls in that view is drawn as a transparent cyan outline, one arm per sector, with the Sector name at the end of the arm and no fill. A circle is at most 10 km across. Where the poor road is in separate pockets, several circles sit inside that 10 km neighbourhood.
 
-## Web coverage map (v1.48)
+## Web coverage map (v1.49)
 
-Same version as the Excel report. Download, unzip, and open `Bogura_DriveTest_Web_v1.48.html`.
+Same version as the Excel report. Download, unzip, and open `Bogura_DriveTest_Web_v1.49.html`.
 
-**v1.48 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Web_v1.48.zip
+**v1.49 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Web_v1.49.zip
 
 The page opens as one window. Windows can be 1, 2, 3 or 4. One, two and three windows sit in a single row, each with its own controls. Four windows are two by two. The top row keeps the full control bar. The bottom row keeps a smaller bar with KPI, Mode and Band only, so those maps can be set for the comparison. For now the comparison is RSRP; a window can still show RSRQ. Pan and zoom stay together. A spot click marks that place in every window and does not open a popup. Turn on Info, then click a spot, and that window alone shows a small Field and Value table. The table leaves out electrical tilt and mechanical tilt. It has Idle and Active, all bands, and L900 / L1800 / L2100 / L2600. SINR and the bad-spot sheets are not on this page. It needs a network connection: the satellite picture is Esri World Imagery, and the zoom buttons come from Leaflet. Zooming moves the satellite picture and the coloured drive together. Click a spot and the popup shows **CellID** and **CellName** for that spot, plus the RSRP and RSRQ of its 50 m bin. A CellName that is not in the system dump is left blank. The Layer control is a dropdown. Tick more than one band, for example L900 and L1800, and the map draws one coverage trace for those bands, keeping the stronger RSRP in each 50 m bin. Pie widget draws every site along the drive. Sector level shows the sector name at the end of each arm. Site level shows the site name, in a smaller size, at the centre. Ruler follows the pointer after each click. A double-click ends that line and leaves the distances on the map, so the next line does not erase it. Click Ruler to clear every line, or double-click one line to remove only that line. Search finds a site or sector name and moves the map to it. A click also shows Azimuth, Height, E_tilt, M_tilt and RS Power(dBm) from the system dump for that cell.
 
@@ -131,19 +131,23 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
-## Download Excel report (v1.48)
+## Download Excel report (v1.49)
 
-**v1.48 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.48.xlsx
+**v1.49 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.49.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.48.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.49.xlsx
 
-Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.47.xlsx
+Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.48.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.48.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.49.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+
+### Active Mode uses Borga_Active_mode.csv (v1.49)
+
+The Active maps, histograms, bad spots and the web map read `Borga_Active_mode.csv`. Idle stays on `Borga_Idle_V2.0`. Active bad-spot circles are RSRP 2, RSRQ 1 and SINR 5.
 
 ### Bad-spot RSRP and RSRQ sit on satellite imagery (v1.48)
 
