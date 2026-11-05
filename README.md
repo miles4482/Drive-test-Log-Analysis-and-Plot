@@ -13,7 +13,7 @@ LTE **IDLE Mode scanner** and **Active Mode UE** logs from **Bogura** (Robi). Id
 
 Idle scanner columns include `Time`, `Longitude`, `Latitude`, `Cell Id`, `DL EARFCN`, `NB RSRP`, `NB RSRQ`, `NB RS SINR` (mapped to RSRP / RSRQ / SINR). Campaign is **Scanner**. Files 1–15 cover 11–21 May 2026.
 
-Active columns are already named `RSRP`, `RSRQ`, `SINR`, plus `Home Operator`, `Data Technology`, `DL EARFCN` and `CGI`. The file has a clock (`8:40:30 AM` through `10:12:26 AM`) and no calendar date. `Home Operator` contains Robi, Grameenphone and Banglalink. `Type` is M-PCell, M-SCell1 or M-SCell2. The report keeps rows whose Home Operator is exactly **Robi** and whose Type is exactly **M-PCell**. Other operators and secondary cells stay in the merged CSV and are not drawn. Cell Id is the last number of the CGI, the E-UTRAN cell identity.
+Active columns are already named `RSRP`, `RSRQ`, `SINR`, plus `Home Operator`, `Data Technology`, `DL EARFCN` and `CGI`. The file has a clock (`8:40:30 AM` through `10:12:26 AM`) and no calendar date. `Home Operator` contains Robi, Grameenphone and Banglalink. `Type` is M-PCell, M-SCell1 or M-SCell2. The report keeps rows whose Home Operator is exactly **Robi** and whose Type is exactly **M-PCell**. Every Grameenphone row and every Banglalink row is dropped before a map, a histogram, or a bad spot, including their M-PCell rows. Robi secondary cells are dropped the same way. Cell Id is the last number of the CGI, the E-UTRAN cell identity.
 
 Active auto mode keeps **one band at each latitude and longitude**: the strongest RSRP. RSRQ and SINR come from that row. Idle still collapses rows that share a latitude, longitude and timestamp, then keeps the strongest band in each scanner sweep (at most 4 s and 40 m).
 

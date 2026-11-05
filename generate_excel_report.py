@@ -1266,7 +1266,6 @@ def build_cover(
     write_cell(ws, 44, 1, "Dataset", size=14, bold=True)
     plotted_n = int(len(active))
     operator_n = int(active_operator_n) if active_operator_n else plotted_n
-    other_n = max(0, int(active_raw_n) - operator_n)
     campaign = _campaign_label(active["Campaign"]) if "Campaign" in active.columns else ""
     voice = "VOICE" in campaign.upper()
     info_rows = [
@@ -1277,15 +1276,14 @@ def build_cover(
         ["Type", ACTIVE_CELL_TYPE],
         [f"{ACTIVE_OPERATOR} {ACTIVE_CELL_TYPE} rows", operator_n],
         ["Plotted samples", plotted_n],
-        ["Samples left out", other_n],
         ["CSV files", int(active["Source"].nunique())],
         ["Start time", active["Time"].min()],
         ["End time", active["Time"].max()],
         ["Unique Cell Ids", int(active["Cell Id"].nunique())],
     ]
     write_table(ws, 45, 1, ["Item", "Value"], info_rows, num_formats={1: "#,##0"})
+    ws.cell(54, 2).number_format = "hh:mm:ss"
     ws.cell(55, 2).number_format = "hh:mm:ss"
-    ws.cell(56, 2).number_format = "hh:mm:ss"
     write_cell(ws, 44, 4, f"Radio KPIs ({ACTIVE_OPERATOR}, plotted rows)", size=14, bold=True)
     stats_headers = ["KPI", "Count", "Min", "P5", "Median", "Mean", "P95", "Max"]
     stats_rows = []
@@ -1305,8 +1303,7 @@ def build_cover(
         f"Where several of those rows share a latitude and longitude, the strongest RSRP is kept. "
         "That row is one band, and its RSRQ and SINR are the values drawn. "
         "Cell Id is the last number of the CGI. "
-        f"The file has clock time only, so the start and end above are the time of day. "
-        f"Other operators and secondary cells ({other_n:,} samples) stay in output/Bogura_active_merged.csv.gz and are not drawn.",
+        f"The file has clock time only, so the start and end above are the time of day.",
         size=9, wrap=True,
     )
 
