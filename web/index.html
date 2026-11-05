@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bogura Drive Test Web v1.50</title>
+<title>Bogura Drive Test Web v1.51</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   html, body { margin: 0; height: 100%; font-family: "Segoe UI", Calibri, sans-serif; color: #1a1a1a; }
@@ -101,7 +101,7 @@
 <body>
 <div id="app">
   <header>
-    <h1>Bogura coverage v1.50</h1>
+    <h1>Bogura coverage v1.51</h1>
     <label>Windows
       <select id="split">
         <option value="1" selected>1</option>
@@ -118,9 +118,9 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="coverage_data.js"></script>
 <script>
-const RSRP_COLORS = ["#008000", "#00FF00", "#FFFF00", "#FF0000"];
-const RSRP_LABELS = ["-95 to 0", "-110 to -95", "-120 to -110", "-150 to -120"];
-const RSRP_THRESH = [-95, -110, -120];
+const RSRP_COLORS = ["#008000", "#00FF00", "#FFFF00", "#FF6666", "#FF0000"];
+const RSRP_LABELS = ["-95 to 0", "-110 to -95", "-115 to -110", "-120 to -115", "-150 to -120"];
+const RSRP_THRESH = [-95, -110, -115, -120];
 const RSRQ_COLORS = ["#00FF00", "#FFFF00", "#FF0000"];
 const RSRQ_LABELS = ["-10 to 0", "-17 to -10", "-30 to -17"];
 const RSRQ_THRESH = [-10, -17];
@@ -138,6 +138,15 @@ function classify(value, thresholds) {
     if (value >= thresholds[i]) return i;
   }
   return thresholds.length;
+}
+
+function classifyRsrp(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) return -1;
+  if (value >= -95) return 0;
+  if (value >= -110) return 1;
+  if (value > -115) return 2;
+  if (value >= -120) return 3;
+  return 4;
 }
 
 function esc(value) {
@@ -226,7 +235,6 @@ const SpotCanvas = L.Layer.extend({
     ctx.clearRect(0, 0, this._canvas.width / dpr, this._canvas.height / dpr);
     const pack = this.pack;
     const kpi = this.kpi;
-    const thresholds = kpi === "RSRP" ? RSRP_THRESH : RSRQ_THRESH;
     const colors = kpi === "RSRP" ? RSRP_COLORS : RSRQ_COLORS;
     const values = kpi === "RSRP" ? pack.rsrp : pack.rsrq;
     const radius = this._radius();
@@ -234,7 +242,7 @@ const SpotCanvas = L.Layer.extend({
     const buckets = colors.map(function () { return []; });
     const placed = [];
     for (let i = 0; i < pack.lon.length; i++) {
-      const cls = classify(values[i], thresholds);
+      const cls = kpi === "RSRP" ? classifyRsrp(values[i]) : classify(values[i], RSRQ_THRESH);
       if (cls < 0) continue;
       const p = map.latLngToLayerPoint([pack.lat[i], pack.lon[i]]);
       placed.push({ cls: cls, x: p.x - origin.x, y: p.y - origin.y });

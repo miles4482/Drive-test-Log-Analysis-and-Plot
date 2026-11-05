@@ -83,7 +83,7 @@ The Idle all-band coverage maps show the **best server per scanner sweep**. Rows
 
 RSRP / RSRQ / SINR coverage maps use the Page 1 legend:
 
-**RSRP (dBm):** `-95 to 0` dark green, `-110 to -95` green, `-120 to -110` yellow, `-150 to -120` red.
+**RSRP (dBm):** `-95 to 0` dark green, `-110 to -95` green, `-115 to -110` yellow, `-120 to -115` light red (light red from −115, and −115 and −120 are light red), `-150 to -120` red.
 
 **RSRQ (dB):** `-10 to 0` green, `-17 to -10` yellow, `-30 to -17` red.
 
@@ -114,11 +114,11 @@ The Cover sheet keeps the Idle dataset, KPI table, and Idle histograms. Under Ac
 
 Every coverage map and bad-spot map is drawn on Esri World Imagery. The combined view is the satellite route only: no circle is painted into it and no circle shape is placed on it. Bad Spot 1, Bad Spot 2, and the rest follow down the left side of the sheet, each a larger map with one movable circle. A site that falls in that view is drawn as a transparent cyan outline, one arm per sector, with the Sector name at the end of the arm and no fill. A circle is at most 10 km across. Where the poor road is in separate pockets, several circles sit inside that 10 km neighbourhood.
 
-## Web coverage map (v1.50)
+## Web coverage map (v1.51)
 
-Same version as the Excel report. Download, unzip, and open `Bogura_DriveTest_Web_v1.50.html`.
+Same version as the Excel report. Download, unzip, and open `Bogura_DriveTest_Web_v1.51.html`.
 
-**v1.50 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Web_v1.50.zip
+**v1.51 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Web_v1.51.zip
 
 The page opens as one window. Windows can be 1, 2, 3 or 4. One, two and three windows sit in a single row, each with its own controls. Four windows are two by two. The top row keeps the full control bar. The bottom row keeps a smaller bar with KPI, Mode and Band only, so those maps can be set for the comparison. For now the comparison is RSRP; a window can still show RSRQ. Pan and zoom stay together. A spot click marks that place in every window and does not open a popup. Turn on Info, then click a spot, and that window alone shows a small Field and Value table. The table leaves out electrical tilt and mechanical tilt. It has Idle and Active, all bands, and L900 / L1800 / L2100 / L2600. SINR and the bad-spot sheets are not on this page. It needs a network connection: the satellite picture is Esri World Imagery, and the zoom buttons come from Leaflet. Zooming moves the satellite picture and the coloured drive together. Click a spot and the popup shows **CellID** and **CellName** for that spot, plus the RSRP and RSRQ of its 50 m bin. A CellName that is not in the system dump is left blank. The Layer control is a dropdown. Tick more than one band, for example L900 and L1800, and the map draws one coverage trace for those bands, keeping the stronger RSRP in each 50 m bin. Pie widget draws every site along the drive. Sector level shows the sector name at the end of each arm. Site level shows the site name, in a smaller size, at the centre. Ruler follows the pointer after each click. A double-click ends that line and leaves the distances on the map, so the next line does not erase it. Click Ruler to clear every line, or double-click one line to remove only that line. Search finds a site or sector name and moves the map to it. A click also shows Azimuth, Height, E_tilt, M_tilt and RS Power(dBm) from the system dump for that cell.
 
@@ -131,19 +131,23 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
-## Download Excel report (v1.50)
+## Download Excel report (v1.51)
 
-**v1.50 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.50.xlsx
+**v1.51 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.51.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.50.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.51.xlsx
 
-Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.49.xlsx
+Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/merge-bogura-drive-test-logs-7dfb/output/Bogura_DriveTest_Report_v1.50.xlsx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.50.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.51.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+
+### RSRP legend has light red from −115 (v1.51)
+
+RSRP colours are −95 to 0 dark green, −110 to −95 green, −115 to −110 yellow, −120 to −115 light red, and −150 to −120 red. −115 and −120 are light red. A bad spot is still only the red bin, below −120 dBm.
 
 ### Active Mode uses Robi M-PCell rows (v1.50)
 
@@ -151,7 +155,7 @@ The Active maps, histograms, bad spots and the web map read `Borga_Active_mode.c
 
 ### Bad-spot RSRP and RSRQ sit on satellite imagery (v1.48)
 
-Bad Spot RSRP, Bad Spot RSRQ, and the two Active copies use the same Esri satellite basemap as the RSRP sheet. The legend stays inside the combined view, on the left, with that sheet's sample count in parentheses. An RSRP bad spot is only where the 50 m median is below −120 dBm. RSRQ and SINR rules are unchanged. SINR bad-spot pictures stay as published.
+Bad Spot RSRP, Bad Spot RSRQ, and the two Active copies use the same Esri satellite basemap as the RSRP sheet. The legend stays inside the combined view, on the left, with that sheet's sample count in parentheses. An RSRP bad spot is only where the 50 m median is below −120 dBm. Light red, from −115 through −120, is not a bad spot. RSRQ and SINR rules are unchanged. SINR bad-spot pictures stay as published.
 
 Sheet banners do not include the file version. The filename still carries the version when the report is updated.
 

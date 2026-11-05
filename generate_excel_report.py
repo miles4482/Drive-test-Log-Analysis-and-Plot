@@ -85,7 +85,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.50"
+REPORT_VERSION = "1.51"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -1225,7 +1225,7 @@ def build_cover(
         "Cover \u2014 Idle dataset and plots on top. Active Mode dataset, histograms and the DT route are below.",
         "RSRP / RSRQ / SINR \u2014 Idle scanner on the left (combined all-band map with bad spots, then L900 / L1800 / L2100 / L2600). Active Mode Robi UE on the right, same layers. No site pies.",
         "Bad Spot RSRP / RSRQ / SINR are Idle. Bad Spot RSRP_Active / RSRQ_Active / SINR_Active apply the same poor-run rules to the Active Robi track. Each bad spot is its own large map, in order. The combined view has no circles.",
-        "Poor is RSRP below -120 dBm (red only; -120 is yellow and is not poor), RSRQ at or below -20 dB (inside red -30 to -17), SINR at or below 0 dB (orange/red); every poor run is circled, however short.",
+        "Poor is RSRP below -120 dBm (red only; -115 through -120 is light red and is not poor), RSRQ at or below -20 dB (inside red -30 to -17), SINR at or below 0 dB (orange/red); every poor run is circled, however short.",
         "RSRP vs KPIs is Idle. RSRP vs KPIs_Active is the same chart set for the Active Robi UE.",
         "Sample Log \u2014 evenly spaced subset of the Idle samples (full logs: output/Bogura_merged.csv.gz and output/Bogura_active_merged.csv.gz).",
     ]
@@ -1254,7 +1254,7 @@ def build_cover(
         ws,
         36,
         5,
-        "Ranges match the coverage-map legend: -95 to 0 (dark green), -110 to -95 (green), -120 to -110 (yellow), -150 to -120 (red).",
+        "Ranges match the coverage-map legend: -95 to 0 (dark green), -110 to -95 (green), -115 to -110 (yellow), -120 to -115 (light red, from -115), -150 to -120 (red).",
         size=9,
         wrap=True,
     )
@@ -1352,7 +1352,7 @@ def _kind_label(kind: object, kpi: object = None) -> str:
 
 BAD_SPOT_KPI_NOTES = {
     "RSRP": (
-        "Poor is RSRP below -120 dBm. Only the red bin is a bad spot. A value of -120 is yellow and is not poor. "
+        "Poor is RSRP below -120 dBm. Only the red bin is a bad spot. Light red, from -115 through -120, is not a bad spot. "
         "Every poor run is covered by a circle. Nearby runs join one circle, up to 10 km across, "
         "and a longer poor road is split into several circles. "
         "The combined view at the top is the all-band best-server map on satellite imagery, the same basemap as the "

@@ -111,11 +111,13 @@ LEGEND_ORANGE = "#FF6600"
 MAP_RSRP_LABELS = [
     "-95 to 0",
     "-110 to -95",
-    "-120 to -110",
+    "-115 to -110",
+    "-120 to -115",
     "-150 to -120",
 ]
-MAP_RSRP_THRESHOLDS = [-95, -110, -120]
-MAP_RSRP_COLORS = ["#008000", "#00FF00", "#FFFF00", "#FF0000"]
+# Light red includes -115 and -120. Yellow is only better than -115.
+MAP_RSRP_THRESHOLDS = [-95, -110, -115, -120]
+MAP_RSRP_COLORS = ["#008000", "#00FF00", "#FFFF00", "#FF6666", "#FF0000"]
 
 # Source table listed RSRQ worst-first and wrote "X < -5" for the blue bin.
 # Blue is the best colour, so that row is X >= -5; red is X < -20.
@@ -164,8 +166,14 @@ def _map_class(series: pd.Series, thresholds: list[float], labels: list[str]) ->
 
 
 def rsrp_map_class(series: pd.Series) -> pd.Series:
-    """Classify RSRP into the coverage-map legend bins."""
-    return _map_class(series, MAP_RSRP_THRESHOLDS, MAP_RSRP_LABELS)
+    """Classify RSRP. Light red starts at -115 and includes -115 and -120."""
+    v = pd.to_numeric(series, errors="coerce")
+    classified = np.select(
+        [v >= -95, v >= -110, v > -115, v >= -120],
+        MAP_RSRP_LABELS[:-1],
+        default=MAP_RSRP_LABELS[-1],
+    )
+    return pd.Series(classified, index=v.index).where(v.notna(), other=pd.NA)
 
 
 def rsrq_map_class(series: pd.Series) -> pd.Series:
@@ -1171,7 +1179,7 @@ def plot_sinr_coverage_map(
 
 
 # Bad-spot contract from report v1.35.
-# 1) Poor is RSRP < -120 dBm (red bin only; -120 itself stays yellow),
+# 1) Poor is RSRP < -120 dBm (red bin only; -120 through -115 is light red),
 #    RSRQ <= -20 dB (inside the red bin), SINR <= 0 dB (orange and red).
 # 2) A bin of road is 50 m. Its colour and its poor/good call both use the median
 #    of the samples in it, and poor bins are drawn on top of good ones.
@@ -1321,7 +1329,7 @@ def _equirect_km(lat1, lon1, lat2, lon2) -> np.ndarray:
 
 
 def _poor_mask(values: pd.Series, threshold: float, *, strict_less: bool = False) -> pd.Series:
-    """Poor samples. RSRP is strictly below -120. RSRQ and SINR are at or below their threshold."""
+    """Poor samples. RSRP is strictly below -120. Light red is not poor. RSRQ and SINR are at or below their threshold."""
     v = pd.to_numeric(values, errors="coerce")
     poor = v < threshold if strict_less else v <= threshold
     return v.notna() & poor
