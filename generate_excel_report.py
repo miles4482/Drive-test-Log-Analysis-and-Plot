@@ -1489,9 +1489,10 @@ def build_kpi_bad_spot_sheet(
         "SINR sheets do not repeat these circles. Each bad-spot map draws a transparent cyan outline "
         "for every sector of a site that falls in that view, from System DUMP.xlsb. No sector of "
         "that site is left out, and the outline is not filled. The label on each arm is the Sector "
-        "name. A yellow line runs from the serving cell to each red sample inside the orange circle. "
-        "That cell is the Cell Id on the sample, on L900, L1800, L2100 or L2600, and it has to be in "
-        "System DUMP.xlsb. The length of each red run is written beside it in metres. "
+        "name. A yellow dashed line starts at the end of the serving sector, not at the middle of the site, "
+        "and runs to each red sample inside the orange circle. That cell is the Cell Id on the sample, "
+        "on L900, L1800, L2100 or L2600, and it has to be in System DUMP.xlsb. Every serving cell is drawn. "
+        "The length beside the red is the full red stretch, and a short gap of good coverage stays in that length. "
         "The columns to the right of each "
         "map are left empty. Several circles can sit inside one 10 km neighbourhood when the poor "
         "road is not one stretch. A discrete patch of at least 1 km\u00b2 is a dotted circle. "
@@ -2343,6 +2344,12 @@ _AIM_SENTENCE_OLD = (
     "points at that bad spot. A sector that faces another way has no line."
 )
 _AIM_SENTENCE_NEW = (
+    "The label on each arm is the Sector name. A yellow dashed line starts at the end of the serving sector, "
+    "not at the middle of the site, and runs to each red sample inside the orange circle. That cell is the Cell Id "
+    "on the sample, on L900, L1800, L2100 or L2600, and it has to be in System DUMP.xlsb. Every serving cell is drawn. "
+    "The length beside the red is the full red stretch, and a short gap of good coverage stays in that length."
+)
+_AIM_SENTENCE_CELL = (
     "The label on each arm is the Sector name. A yellow line runs from the serving cell to each red sample inside "
     "the orange circle. That cell is the Cell Id on the sample, on L900, L1800, L2100 or L2600, and it has to be in "
     "System DUMP.xlsb. The length of each red run is written beside it in metres."
@@ -2469,6 +2476,9 @@ def refresh_bad_spot_pies(src: Path | None = None) -> Path:
         if _AIM_SENTENCE_OLD in replaced:
             note_hits += replaced.count(_AIM_SENTENCE_OLD)
             replaced = replaced.replace(_AIM_SENTENCE_OLD, _AIM_SENTENCE_NEW)
+        if _AIM_SENTENCE_CELL in replaced:
+            note_hits += replaced.count(_AIM_SENTENCE_CELL)
+            replaced = replaced.replace(_AIM_SENTENCE_CELL, _AIM_SENTENCE_NEW)
         if replaced == text:
             continue
         parts[name] = replaced.encode("utf-8")

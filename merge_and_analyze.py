@@ -441,14 +441,18 @@ def _serving_cell_index() -> tuple[dict, dict]:
             lon = pd.to_numeric(row.get("Lon"), errors="coerce")
             if pd.isna(enb) or pd.isna(cid) or pd.isna(lat) or pd.isna(lon):
                 continue
+            az = pd.to_numeric(row.get("Azimuth"), errors="coerce")
             rec = {
                 "lat": float(lat),
                 "lon": float(lon),
                 "sector": str(row.get("Sector") or "").strip(),
                 "layer": layer,
+                "azimuth": None if pd.isna(az) else float(az) % 360.0,
             }
             key = (int(enb), int(cid))
-            pair.setdefault(key, rec)
+            previous = pair.get(key)
+            if previous is None or (previous.get("azimuth") is None and rec["azimuth"] is not None):
+                pair[key] = rec
             ear = pd.to_numeric(row.get("EARFCN"), errors="coerce")
             if pd.notna(ear):
                 exact[(*key, int(ear))] = rec
@@ -564,7 +568,8 @@ def _red_runs(bins: list[dict]) -> list[list[dict]]:
             i = parent[i]
         return i
 
-    limit_m = MAP_BIN_M * 1.8
+    # A short stretch of good coverage still belongs to the same red spot.
+    limit_m = 400.0
     for i in range(n):
         for j in range(i + 1, n):
             gap_m = float(_equirect_km(bins[i]["lat"], bins[i]["lon"], bins[j]["lat"], bins[j]["lon"])) * 1000.0
@@ -593,16 +598,30 @@ def _run_length_m(run: list[dict]) -> float:
     total = 0.0
     for left, right in zip(ordered, ordered[1:]):
         total += float(_equirect_km(left["lat"], left["lon"], right["lat"], right["lon"])) * 1000.0
-    return max(total, float(MAP_BIN_M) * len(run) * 0.5)
+    # Path from the first red bin to the last, plus one bin so both ends count.
+    # A short good gap that joined the bins is included, so the label is the
+    # full stretch rather than 50 m on every piece.
+    return total + float(MAP_BIN_M)
+
+
+def _view_arm_deg(ax, spot_lat: float) -> float:
+    """Same arm length the cyan sector mark uses, in degrees of latitude."""
+    xlim, ylim = ax.get_xlim(), ax.get_ylim()
+    span_km = min((xlim[1] - xlim[0]) * _km_per_deg_lon(spot_lat), (ylim[1] - ylim[0]) * 111.32)
+    radius_km = float(np.clip(span_km * 0.07, 0.30, 0.85))
+    return radius_km / 111.32
 
 
 def _draw_serving_spider(ax, samples: pd.DataFrame, column: str, spot: pd.Series) -> None:
-    """Yellow line from the serving cell to each red bin inside the orange circle.
+    """Dashed yellow line from the serving sector arm to each red bin.
 
-    The cell is the Cell Id on those samples, limited to L900, L1800, L2100 and
-    L2600 in the system dump. The length of each red run is written on the road.
+    The line starts at the end of that cell's sector, not at the middle of the
+    site, so the sector that served the sample is the one the line leaves.
+    Every Cell Id on the red samples is drawn when it is an L900, L1800, L2100
+    or L2600 cell in the system dump. The length label is the full red stretch.
     """
     bins = _red_bins_inside(samples, column, spot)
+    arm = _view_arm_deg(ax, float(spot["lat"]))
     segments = []
     for item in bins:
         for end in item.get("ends") or ():
@@ -610,18 +629,24 @@ def _draw_serving_spider(ax, samples: pd.DataFrame, column: str, spot: pd.Series
             if cell is None:
                 continue
             dist_km = float(_equirect_km(cell["lat"], cell["lon"], end["lat"], end["lon"]))
-            if dist_km < 0.05 or dist_km > 12.0:
+            if dist_km < 0.03:
                 continue
-            segments.append([(cell["lon"], cell["lat"]), (end["lon"], end["lat"])])
+            lat0 = cell["lat"]
+            lon0 = cell["lon"]
+            az = cell.get("azimuth")
+            if az is not None:
+                rad = np.radians(float(az) % 360.0)
+                lon0 = lon0 + arm * np.sin(rad)
+                lat0 = lat0 + arm * np.cos(rad)
+            segments.append([(lon0, lat0), (end["lon"], end["lat"])])
     if segments:
-        # Under the coloured road, so the red samples stay visible and the
-        # lines still meet them.
         ax.add_collection(LineCollection(
             segments,
             colors="#F5C400",
-            linewidths=0.8,
-            capstyle="round",
-            zorder=1,
+            linewidths=1.15,
+            linestyles=(0, (6, 3.5)),
+            capstyle="butt",
+            zorder=23,
             alpha=0.95,
         ))
     for run in _red_runs(bins):
