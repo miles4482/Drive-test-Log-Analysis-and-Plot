@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bogura Drive Test Web v1.53</title>
+<title>Bogura Drive Test Web v1.54</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   html, body { margin: 0; height: 100%; font-family: "Segoe UI", Calibri, sans-serif; color: #1a1a1a; }
@@ -63,6 +63,7 @@
     padding: 3px 6px;
   }
   .bar input[type="search"] { width: 92px; }
+  .bar input.latlong { width: 132px; }
   .map-wrap { position: relative; flex: 1; min-height: 0; display: flex; }
   .info-panel {
     position: absolute; z-index: 30; top: 8px; right: 8px;
@@ -101,7 +102,7 @@
 <body>
 <div id="app">
   <header>
-    <h1>Bogura coverage v1.53</h1>
+    <h1>Bogura coverage v1.54</h1>
     <label>Windows
       <select id="split">
         <option value="1" selected>1</option>
@@ -156,6 +157,7 @@ function esc(value) {
 }
 
 function legendHtml(kpi, mode) {
+  if (!kpi) return "";
   const labels = kpi === "RSRP" ? RSRP_LABELS : RSRQ_LABELS;
   const colors = kpi === "RSRP" ? RSRP_COLORS : RSRQ_COLORS;
   const modeText = mode === "idle" ? "Idle" : "Active";
@@ -381,7 +383,7 @@ const PieCanvas = L.Layer.extend({
     ctx.clearRect(0, 0, this._canvas.width / dpr, this._canvas.height / dpr);
     if (!sites.length) return;
     const origin = this._bounds.min;
-    const bounds = map.getBounds().pad(0.2);
+    const bounds = map.getBounds();
     const km = this._armKm();
     const showNames = this.showSector !== false;
     const showSites = this.showSite !== false;
@@ -424,22 +426,22 @@ const PieCanvas = L.Layer.extend({
         }
       }
     }
-    paintLabels(ctx, labels, "9px Segoe UI, Calibri, sans-serif", "#04282C");
-    paintLabels(ctx, siteLabels, "8px Segoe UI, Calibri, sans-serif", "#7A1F6D");
+    paintLabels(ctx, labels, "11px Segoe UI, Calibri, sans-serif", "#FFFFFF", false);
+    paintLabels(ctx, siteLabels, "8px Segoe UI, Calibri, sans-serif", "#7A1F6D", true);
   }
 });
 
-function paintLabels(ctx, items, font, color) {
+function paintLabels(ctx, items, font, color, halo) {
   if (!items.length) return;
   ctx.font = font;
+  ctx.fillStyle = color;
   ctx.lineWidth = 2;
   ctx.strokeStyle = "#ffffff";
-  ctx.fillStyle = color;
   for (let i = 0; i < items.length; i++) {
     const x = items[i][0];
     const y = items[i][1];
     const text = items[i][2];
-    ctx.strokeText(text, x, y);
+    if (halo !== false) ctx.strokeText(text, x, y);
     ctx.fillText(text, x, y);
   }
 }
@@ -514,11 +516,18 @@ function combinePacks(packs) {
 
 let infoOn = false;
 
+function bandwidthText(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "";
+  if (Math.abs(n) >= 1000) return String(Math.round(n / 1000)) + " MHz";
+  return formatNum(n) + " MHz";
+}
+
 function spotRows(pack, index) {
   const cell = pack.cell[index] === null || pack.cell[index] === undefined ? "" : String(pack.cell[index]);
   const nameId = pack.name[index] || 0;
   const name = (typeof COVERAGE === "undefined" ? "" : (COVERAGE.names[nameId] || ""));
-  const rf = (typeof COVERAGE === "undefined" ? null : (COVERAGE.cells || [])[nameId]) || [null, null, null, null, null];
+  const rf = (typeof COVERAGE === "undefined" ? null : (COVERAGE.cells || [])[nameId]) || [null, null, null, null, null, null, null, null];
   const rsrp = pack.rsrp[index] === null || pack.rsrp[index] === undefined ? "" : pack.rsrp[index].toFixed(1) + " dBm";
   const rsrq = pack.rsrq[index] === null || pack.rsrq[index] === undefined ? "" : pack.rsrq[index].toFixed(1) + " dB";
   return [
@@ -526,6 +535,11 @@ function spotRows(pack, index) {
     ["CellName", name],
     ["Azimuth", formatNum(rf[0])],
     ["Height", formatNum(rf[1])],
+    ["E_tilt", formatNum(rf[2])],
+    ["M_tilt", formatNum(rf[3])],
+    ["BW", bandwidthText(rf[5])],
+    ["Tx", formatNum(rf[6])],
+    ["Rx", formatNum(rf[7])],
     ["RS Power(dBm)", formatNum(rf[4])],
     ["RSRP", rsrp],
     ["RSRQ", rsrq]
@@ -591,7 +605,7 @@ function shareSpot(latlng) {
 function boardHtml(number) {
   return '<div class="bar">' +
     '<span class="win">Window ' + number + '</span>' +
-    '<label class="ctl-kpi">KPI <select class="kpi"><option value="RSRP" selected>RSRP</option><option value="RSRQ">RSRQ</option></select></label>' +
+    '<label class="ctl-kpi">KPI <select class="kpi"><option value="">Blank</option><option value="RSRP" selected>RSRP</option><option value="RSRQ">RSRQ</option></select></label>' +
     '<label class="ctl-mode">Mode <select class="mode"><option value="idle">Idle</option><option value="active">Active</option></select></label>' +
     '<label class="ctl-band"><span class="layer-name">Layer</span> <span class="dropdown">' +
       '<button type="button" class="layer-btn" aria-haspopup="listbox" aria-expanded="false">All bands</button>' +
@@ -608,6 +622,8 @@ function boardHtml(number) {
     '<button type="button" class="fit">Fit route</button>' +
     '<input class="q" type="search" placeholder="Site or sector" aria-label="Site or sector">' +
     '<button type="button" class="search">Search</button>' +
+    '<input class="latlong" type="search" placeholder="Lat, long" aria-label="Latitude, longitude">' +
+    '<button type="button" class="latlong-go">Lat-long</button>' +
     '<span class="status"></span>' +
     '</div><div class="map-wrap"><div class="map"></div><div class="info-panel" hidden></div></div>';
 }
@@ -860,13 +876,22 @@ function createView(host, preset) {
   function draw() {
     const kpi = q(".kpi").value;
     const mode = q(".mode").value;
-    if (legendDiv) legendDiv.innerHTML = legendHtml(kpi, mode);
+    if (legendDiv) {
+      legendDiv.innerHTML = legendHtml(kpi, mode);
+      legendDiv.style.display = kpi ? "" : "none";
+    }
     map.closePopup();
     if (spots) {
       map.removeLayer(spots);
       spots = null;
     }
     const pack = currentPack();
+    if (!kpi) {
+      setStatus("Map only");
+      if (pinned) renderPin();
+      if (pies) pies.bringFront();
+      return;
+    }
     if (!pack || !pack.lon.length) {
       setStatus("No samples on this layer");
       if (pinned) renderPin();
@@ -991,9 +1016,31 @@ function createView(host, preset) {
       draw();
     }
   });
+  function showLatLong() {
+    const box = q(".latlong");
+    if (document.activeElement === box) return;
+    const center = map.getCenter();
+    box.value = center.lat.toFixed(5) + ", " + center.lng.toFixed(5);
+  }
+  function runLatLong() {
+    const raw = q(".latlong").value.trim();
+    const parts = raw.split(/[,\s]+/).filter(Boolean);
+    const lat = parts.length >= 2 ? Number(parts[0]) : NaN;
+    const lon = parts.length >= 2 ? Number(parts[1]) : NaN;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+      setStatus("Enter latitude, longitude");
+      return;
+    }
+    map.setView([lat, lon], Math.max(map.getZoom(), 16), { animate: false });
+    setStatus("Lat-long " + lat.toFixed(5) + ", " + lon.toFixed(5));
+  }
   q(".search").addEventListener("click", runSearch);
   q(".q").addEventListener("keydown", function (ev) {
     if (ev.key === "Enter") runSearch();
+  });
+  q(".latlong-go").addEventListener("click", runLatLong);
+  q(".latlong").addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") runLatLong();
   });
   map.on("click", onMapClick);
   map.on("dblclick", onMapDblClick);
@@ -1036,7 +1083,10 @@ function createView(host, preset) {
     }
   };
   if (preset) applyPreset(preset);
-  map.on("moveend", function () { broadcastView(api); });
+  map.on("moveend", function () {
+    showLatLong();
+    broadcastView(api);
+  });
   host.__view = api;
   return api;
 }

@@ -222,8 +222,11 @@ def build() -> None:
     package_web()
 
 
-RF_COLUMNS = ("Azimuth", "Height", "E_tilt", "M_tilt", "RS Power(dBm)")
-RF_DIGITS = (1, 1, 1, 1, 2)
+RF_COLUMNS = (
+    "Azimuth", "Height", "E_tilt", "M_tilt", "RS Power(dBm)",
+    "dlChannelBandwidth", "noOfTxAntennas", "noOfRxAntennas",
+)
+RF_DIGITS = (1, 1, 1, 1, 2, 0, 0, 0)
 
 
 def _rf_number(value, digits: int):
@@ -282,23 +285,21 @@ def add_cell_params() -> int:
 
 
 def add_site_pies(radius_km: float = 3.0) -> int:
-    """Sites along the drive, one centre and every sector arm, for the web pies."""
-    from merge_and_analyze import _sites_near_drive, load_site_sectors
+    """Every site in the system dump, one centre and every sector arm.
 
+    The page draws a site only while its centre is inside the chart. radius_km
+    is unused; it remains so older calls keep working.
+    """
+    from merge_and_analyze import load_site_sectors
+
+    del radius_km
     text = DATA_JS.read_text().strip()
     if not text.startswith("const COVERAGE = "):
         raise SystemExit(f"{DATA_JS.name} is not a coverage page")
     payload = json.loads(text[len("const COVERAGE = "):-1])
-    lat: list[float] = []
-    lon: list[float] = []
-    for key in ("idle|all", "active|all"):
-        pack = payload["sets"][key]
-        lat.extend(pack["lat"])
-        lon.extend(pack["lon"])
-    drive = pd.DataFrame({"Latitude": lat, "Longitude": lon})
-    near = _sites_near_drive(load_site_sectors(), drive, radius_km=radius_km)
+    sectors = load_site_sectors()
     sites: list[list] = []
-    for _site, part in near.groupby("SiteName", sort=False):
+    for _site, part in sectors.groupby("SiteName", sort=False):
         part = part.drop_duplicates(subset=["Sector"]).dropna(subset=["azimuth"])
         if part.empty:
             continue
@@ -321,7 +322,7 @@ def add_site_pies(radius_km: float = 3.0) -> int:
         ])
     payload["sites"] = sites
     DATA_JS.write_text("const COVERAGE = " + json.dumps(payload, separators=(",", ":")) + ";\n")
-    print(f"Site pies {len(sites):,} along the drive", flush=True)
+    print(f"Site pies {len(sites):,} from the system dump", flush=True)
     return len(sites)
 
 
