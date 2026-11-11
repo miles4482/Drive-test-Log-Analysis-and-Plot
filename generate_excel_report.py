@@ -38,7 +38,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from merge_and_analyze import (
     ACTIVE_CELL_TYPE,
-    ACTIVE_CSV,
+    ACTIVE_ARCHIVE,
     ACTIVE_OPERATOR,
     OUTPUT_DIR,
     PLOTS_DIR,
@@ -85,7 +85,7 @@ from merge_and_analyze import (
     sinr_map_class,
 )
 
-REPORT_VERSION = "1.51"
+REPORT_VERSION = "1.52"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -1270,7 +1270,7 @@ def build_cover(
     voice = "VOICE" in campaign.upper()
     info_rows = [
         ["Mode", "Active (UE voice)" if voice else "Active (UE)"],
-        ["Archive", ACTIVE_CSV.name],
+        ["Archive", ACTIVE_ARCHIVE.name],
         ["Campaign", campaign or "—"],
         ["Home Operator", ACTIVE_OPERATOR],
         ["Type", ACTIVE_CELL_TYPE],
@@ -1282,8 +1282,8 @@ def build_cover(
         ["Unique Cell Ids", int(active["Cell Id"].nunique())],
     ]
     write_table(ws, 45, 1, ["Item", "Value"], info_rows, num_formats={1: "#,##0"})
-    ws.cell(54, 2).number_format = "hh:mm:ss"
-    ws.cell(55, 2).number_format = "hh:mm:ss"
+    ws.cell(54, 2).number_format = "yyyy-mm-dd hh:mm:ss"
+    ws.cell(55, 2).number_format = "yyyy-mm-dd hh:mm:ss"
     write_cell(ws, 44, 4, f"Radio KPIs ({ACTIVE_OPERATOR}, plotted rows)", size=14, bold=True)
     stats_headers = ["KPI", "Count", "Min", "P5", "Median", "Mean", "P95", "Max"]
     stats_rows = []
@@ -1302,8 +1302,8 @@ def build_cover(
         f"Maps and bad spots use Home Operator {ACTIVE_OPERATOR} and Type {ACTIVE_CELL_TYPE}. "
         f"Where several of those rows share a latitude and longitude, the strongest RSRP is kept. "
         "That row is one band, and its RSRQ and SINR are the values drawn. "
-        "Cell Id is the last number of the CGI. "
-        f"The file has clock time only, so the start and end above are the time of day.",
+        "Cell Id is the Cell Id column, or the last number of the CGI when that column is empty. "
+        f"The log is {ACTIVE_ARCHIVE.name}. Start and end are the timestamps in that log.",
         size=9, wrap=True,
     )
 
@@ -2025,14 +2025,14 @@ def add_active_cover_extras(cover, data_ws, blocks, route_path: Path, active: pd
     write_table(cover, 75, 1, ["Item", "Value"], detail_rows)
     cover.cell(80, 2).number_format = "#,##0.0"
     cover.cell(81, 2).number_format = "#,##0.0"
-    cover.cell(82, 2).number_format = "hh:mm:ss"
-    cover.cell(83, 2).number_format = "hh:mm:ss"
+    cover.cell(82, 2).number_format = "yyyy-mm-dd hh:mm:ss"
+    cover.cell(83, 2).number_format = "yyyy-mm-dd hh:mm:ss"
     cover.merge_cells(start_row=91, start_column=1, end_row=93, end_column=11)
     write_cell(
         cover, 91, 1,
         "The route is the plotted Robi M-PCell track: one band at each latitude and longitude, "
         "the strongest RSRP. RSRQ and SINR on the histograms are the values from that same row. "
-        "Borga_Active_mode.csv has clock time only, so start and end are the time of day. "
+        f"Source is {ACTIVE_ARCHIVE.name}. "
         f"Plotted band mix: {layer_bits}.",
         size=9, wrap=True,
     )
@@ -2509,7 +2509,7 @@ if __name__ == "__main__":
         print("Verified: transparent sector outlines on the bad-spot maps.")
         raise SystemExit(0)
     from merge_and_analyze import (
-        ACTIVE_CSV,
+        ACTIVE_ARCHIVE,
         ACTIVE_MERGED,
         MERGED_CSV,
         extract_archives,
@@ -2525,11 +2525,11 @@ if __name__ == "__main__":
         extract_archives()
         frame = merge_parts()
     source_newer = (
-        ACTIVE_CSV.exists()
+        ACTIVE_ARCHIVE.exists()
         and ACTIVE_MERGED.exists()
-        and ACTIVE_CSV.stat().st_mtime >= ACTIVE_MERGED.stat().st_mtime
+        and ACTIVE_ARCHIVE.stat().st_mtime >= ACTIVE_MERGED.stat().st_mtime
     )
-    if ACTIVE_CSV.exists() and (not ACTIVE_MERGED.exists() or source_newer):
+    if ACTIVE_ARCHIVE.exists() and (not ACTIVE_MERGED.exists() or source_newer):
         active_frame = merge_active()
     elif ACTIVE_MERGED.exists():
         active_frame = load_active_merged()

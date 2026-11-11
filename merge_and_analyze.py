@@ -33,9 +33,11 @@ SUMMARY_MD = OUTPUT_DIR / "analysis_summary.md"
 # Cell-level system dump. One site pie is built from its Sector column, not from the
 # old node-level Physical_Site_Database_V1.0.xlsb.
 SITE_DB_PATH = ROOT / "System DUMP.xlsb"
-# Active Mode UE log. One CSV replaces the old split zip. Robi, Grameenphone
-# and Banglalink are in the file; the report draws Robi only.
-ACTIVE_CSV = ROOT / "Borga_Active_mode.csv"
+# Active Mode UE log. The 11 Nov 2026 archive replaces Borga_Active_mode.csv.
+# It holds one CSV per collection, the same shape as the idle export. Robi,
+# Grameenphone and Banglalink are in the files; the report draws Robi only.
+ACTIVE_ARCHIVE = ROOT / "Borga_Active_mode_11Nov26.7z"
+ACTIVE_DIR = EXTRACT_DIR / "Borga_Active_mode_11Nov26"
 ACTIVE_MERGED = OUTPUT_DIR / "Bogura_active_merged.csv.gz"
 # The CSV stores a clock ("8:40:30 AM") and no calendar date. Pin that clock
 # so a later rebuild does not move the timestamp onto the day the script runs.
@@ -1247,7 +1249,7 @@ def min_consecutive_m(column: str) -> float:
 # a later edit that retunes a rule fails the report check instead of passing quietly.
 # Spot counts are circles and discrete areas per sheet.
 # Idle stays on the published Borga_Idle_V2.0 result. Active follows
-# Borga_Active_mode.csv: Robi only, strongest RSRP at each location.
+# Borga_Active_mode_11Nov26.7z: Robi M-PCell only, strongest RSRP at each location.
 LOGIC_LOCK = {
     "active_operator": "Robi",
     "sweep_s": 4.0,
@@ -1270,9 +1272,9 @@ LOGIC_LOCK = {
         "Bad Spot RSRP": (26, 0),
         "Bad Spot RSRQ": (45, 0),
         "Bad Spot SINR": (204, 0),
-        "Bad Spot RSRP_Active": (2, 0),
-        "Bad Spot RSRQ_Active": (0, 0),
-        "Bad Spot SINR_Active": (6, 0),
+        "Bad Spot RSRP_Active": (99, 0),
+        "Bad Spot RSRQ_Active": (41, 0),
+        "Bad Spot SINR_Active": (186, 0),
     },
 }
 
@@ -2434,10 +2436,18 @@ def extract_7z(archive: Path, dest: Path) -> None:
         zf.extractall(path=dest)
 
 
-def idle_csv_files() -> list[Path]:
-    if not IDLE_DIR.exists():
+def _numbered_csvs(directory: Path) -> list[Path]:
+    if not directory.exists():
         return []
-    return sorted(IDLE_DIR.glob("*.csv"), key=lambda p: int(p.stem) if p.stem.isdigit() else p.stem)
+    return sorted(directory.glob("*.csv"), key=lambda p: int(p.stem) if p.stem.isdigit() else p.stem)
+
+
+def idle_csv_files() -> list[Path]:
+    return _numbered_csvs(IDLE_DIR)
+
+
+def active_csv_files() -> list[Path]:
+    return _numbered_csvs(ACTIVE_DIR)
 
 
 def extract_archives() -> None:
@@ -2702,8 +2712,9 @@ def merge_parts() -> pd.DataFrame:
 def load_active_csv(path: Path) -> pd.DataFrame:
     """Active Mode UE export. KPIs are already named RSRP / RSRQ / SINR.
 
-    Borga_Active_mode.csv names the operator Home Operator and carries the cell
-    as CGI. Cell Id is the E-UTRAN cell identity, the last number of that CGI.
+    Older exports name the operator Home Operator and carry the cell as CGI.
+    Borga_Active_mode_11Nov26 already has Operator and Cell Id. Cell Id is the
+    E-UTRAN cell identity. When only a CGI is present, Cell Id is its last number.
     A secondary cell often has no CGI, so its Cell Id stays empty.
     """
     print(f"Loading active {path.name} ...")
@@ -2737,9 +2748,16 @@ def load_active_csv(path: Path) -> pd.DataFrame:
 
 
 def merge_active() -> pd.DataFrame:
-    if not ACTIVE_CSV.exists():
-        sys.exit(f"Missing active log: {ACTIVE_CSV.name}")
-    merged = load_active_csv(ACTIVE_CSV)
+    if not ACTIVE_ARCHIVE.exists():
+        sys.exit(f"Missing active log: {ACTIVE_ARCHIVE.name}")
+    print(f"Extracting {ACTIVE_ARCHIVE.name} -> {ACTIVE_DIR}")
+    extract_7z(ACTIVE_ARCHIVE, EXTRACT_DIR)
+    files = active_csv_files()
+    if not files:
+        sys.exit(f"Extraction finished but no CSV files were found in {ACTIVE_DIR}")
+    print(f"  {len(files)} active CSV files")
+    frames = [load_active_csv(path) for path in files]
+    merged = pd.concat(frames, ignore_index=True)
     merged = merged.drop_duplicates(subset=["Time", "Operator", "Cell Id", "DL EARFCN", "RSRP"], keep="first")
     sort_cols = ["Time", "Source"]
     if "Operator" in merged.columns:
