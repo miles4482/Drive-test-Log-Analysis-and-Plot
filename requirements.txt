@@ -1,0 +1,2 @@
+pyxlsb>=1.0.10
+cairosvg>=2.7
