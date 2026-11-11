@@ -213,6 +213,7 @@ SITE_PIE_EDGE = "#2B2B2B"
 SITE_PIE_ARM_WIDTH_FRAC = 0.16
 SITE_PIE_RADIUS_KM = 0.90
 _SITE_CELLS: pd.DataFrame | None = None
+_SERVING_INDEX: tuple[dict, dict] | None = None
 
 
 def _most_common_azimuth(series: pd.Series) -> float:
@@ -408,18 +409,251 @@ def _sector_wedges(part: pd.DataFrame) -> list[tuple[str, float, float, float]]:
 
 # Bad-spot site mark: the same unfilled Y as a planning widget. Cyan stroke only.
 BAD_SPOT_PIE_EDGE = "#00E5EE"
-# A distance line is drawn only when a sector azimuth points at the bad spot.
-# Half of a 65° sector beam. A three-sector site is always within 60° of some
-# arm, so a wider gate would put a line on every nearby site.
+# The serial bad-spot maps draw a yellow line from the serving cell to each red
+# bin. This gate is only the older azimuth line, used when those samples are
+# not passed in. Half of a 65° sector beam. A three-sector site is always
+# within 60° of some arm, so a wider gate would put a line on every nearby site.
 BAD_SPOT_AIM_DEG = 32.0
 
 
-def draw_bad_spot_sector_pies(ax, spot: pd.Series) -> None:
+def _serving_cell_index() -> tuple[dict, dict]:
+    """Serving cells on L900, L1800, L2100 and L2600, keyed by eNB, cell and EARFCN.
+
+    A cell with no eNB id or cell id is left out. The exact key prefers the
+    EARFCN of the sample. The pair key is the fallback when the log has a Cell Id
+    but the EARFCN is missing.
+    """
+    global _SERVING_INDEX
+    if _SERVING_INDEX is not None:
+        return _SERVING_INDEX
+    load_site_sectors()
+    cells = _SITE_CELLS if _SITE_CELLS is not None else pd.DataFrame()
+    exact: dict[tuple[int, int, int], dict] = {}
+    pair: dict[tuple[int, int], dict] = {}
+    if cells is not None and not cells.empty and {"eNBId", "cellId", "Lat", "Lon"}.issubset(cells.columns):
+        for _, row in cells.iterrows():
+            layer = str(row.get("layer") or "")
+            if layer not in REPORT_LAYERS:
+                continue
+            enb = pd.to_numeric(row.get("eNBId"), errors="coerce")
+            cid = pd.to_numeric(row.get("cellId"), errors="coerce")
+            lat = pd.to_numeric(row.get("Lat"), errors="coerce")
+            lon = pd.to_numeric(row.get("Lon"), errors="coerce")
+            if pd.isna(enb) or pd.isna(cid) or pd.isna(lat) or pd.isna(lon):
+                continue
+            rec = {
+                "lat": float(lat),
+                "lon": float(lon),
+                "sector": str(row.get("Sector") or "").strip(),
+                "layer": layer,
+            }
+            key = (int(enb), int(cid))
+            pair.setdefault(key, rec)
+            ear = pd.to_numeric(row.get("EARFCN"), errors="coerce")
+            if pd.notna(ear):
+                exact[(*key, int(ear))] = rec
+    _SERVING_INDEX = (exact, pair)
+    return _SERVING_INDEX
+
+
+def _resolve_serving_cell(eci: object, earfcn: object) -> dict | None:
+    """Site position of the cell that served this sample. Requires a Cell Id."""
+    exact, pair = _serving_cell_index()
+    number = pd.to_numeric(pd.Series([eci]), errors="coerce").iloc[0]
+    if pd.isna(number):
+        return None
+    enb, cid = divmod(int(number), 256)
+    ear = pd.to_numeric(pd.Series([earfcn]), errors="coerce").iloc[0]
+    if pd.notna(ear):
+        hit = exact.get((enb, cid, int(ear)))
+        if hit is not None:
+            return hit
+    return pair.get((enb, cid))
+
+
+def _samples_inside_outline(samples: pd.DataFrame, spot: pd.Series) -> pd.DataFrame:
+    """Rows that sit inside this bad spot's orange circle."""
+    if samples is None or samples.empty:
+        return samples
+    if "outline_width_km" not in spot.index or pd.isna(spot.get("outline_width_km")):
+        return samples
+    lon0 = float(spot["outline_lon"])
+    lat0 = float(spot["outline_lat"])
+    half_w = float(spot["outline_width_km"]) / _km_per_deg_lon(lat0) / 2.0
+    half_h = float(spot["outline_height_km"]) / 111.32 / 2.0
+    if half_w <= 0 or half_h <= 0:
+        return samples
+    lon = pd.to_numeric(samples["Longitude"], errors="coerce")
+    lat = pd.to_numeric(samples["Latitude"], errors="coerce")
+    inside = ((lon - lon0) / half_w) ** 2 + ((lat - lat0) / half_h) ** 2 <= 1.0
+    return samples.loc[inside.fillna(False)]
+
+
+def _red_bins_inside(samples: pd.DataFrame, column: str, spot: pd.Series) -> list[dict]:
+    """50 m bins inside the orange circle whose median is poor, with the serving Cell Id.
+
+    The colour on the map is that median, so the line ends on the red piece the
+    reader sees. A bin with no Cell Id is kept for the length label and gets no line.
+    """
+    work = _samples_inside_outline(samples, spot)
+    if work is None or work.empty or column not in work.columns or "Cell Id" not in work.columns:
+        return []
+    work = work.dropna(subset=["Longitude", "Latitude", column]).copy()
+    if work.empty:
+        return []
+    rule = BAD_SPOT_RULES[column]
+    threshold = float(rule["threshold"])
+    strict = bool(rule.get("strict_less"))
+    lat = pd.to_numeric(work["Latitude"], errors="coerce")
+    lon = pd.to_numeric(work["Longitude"], errors="coerce")
+    dlat, dlon = _bin_steps(lat, MAP_BIN_M)
+    work["_by"] = np.floor(lat / dlat).astype("int64")
+    work["_bx"] = np.floor(lon / dlon).astype("int64")
+    bins: list[dict] = []
+    for _, part in work.groupby(["_by", "_bx"], sort=False):
+        values = pd.to_numeric(part[column], errors="coerce")
+        if values.notna().sum() == 0:
+            continue
+        median = float(values.median())
+        poor_bin = median < threshold if strict else median <= threshold
+        if not poor_bin:
+            continue
+        poor_rows = part.loc[_poor_mask(part[column], threshold, strict_less=strict)]
+        use = poor_rows if not poor_rows.empty else part
+        cells = pd.to_numeric(use["Cell Id"], errors="coerce")
+        identified = use.loc[cells.notna()]
+        ends: list[dict] = []
+        if not identified.empty:
+            identified = identified.copy()
+            identified["_eci"] = cells.loc[identified.index].astype("int64")
+            for eci_val, grp in identified.groupby("_eci", sort=False):
+                earfcn = None
+                if "DL EARFCN" in grp.columns:
+                    ears = pd.to_numeric(grp["DL EARFCN"], errors="coerce").dropna()
+                    if not ears.empty:
+                        earfcn = int(ears.mode().iloc[0])
+                ends.append({
+                    "lat": float(pd.to_numeric(grp["Latitude"], errors="coerce").mean()),
+                    "lon": float(pd.to_numeric(grp["Longitude"], errors="coerce").mean()),
+                    "eci": int(eci_val),
+                    "earfcn": earfcn,
+                })
+        when = pd.to_datetime(part["Time"], errors="coerce").min() if "Time" in part.columns else pd.NaT
+        bins.append({
+            "lat": float(pd.to_numeric(part["Latitude"], errors="coerce").mean()),
+            "lon": float(pd.to_numeric(part["Longitude"], errors="coerce").mean()),
+            "eci": ends[0]["eci"] if ends else None,
+            "earfcn": ends[0]["earfcn"] if ends else None,
+            "ends": ends,
+            "time": when,
+        })
+    bins.sort(key=lambda item: (pd.Timestamp.min if pd.isna(item["time"]) else item["time"], item["lat"], item["lon"]))
+    return bins
+
+
+def _red_runs(bins: list[dict]) -> list[list[dict]]:
+    """Group red bins that touch the same stretch of road, whatever the time order."""
+    n = len(bins)
+    if n == 0:
+        return []
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    limit_m = MAP_BIN_M * 1.8
+    for i in range(n):
+        for j in range(i + 1, n):
+            gap_m = float(_equirect_km(bins[i]["lat"], bins[i]["lon"], bins[j]["lat"], bins[j]["lon"])) * 1000.0
+            if gap_m <= limit_m:
+                parent[find(j)] = find(i)
+    groups: dict[int, list[dict]] = {}
+    for i, item in enumerate(bins):
+        groups.setdefault(find(i), []).append(item)
+    return list(groups.values())
+
+
+def _run_length_m(run: list[dict]) -> float:
+    """Road length along the red bins, walking nearest neighbours so a bend is not a shortcut."""
+    if len(run) <= 1:
+        return float(MAP_BIN_M)
+    pending = list(run)
+    ordered = [pending.pop(0)]
+    while pending:
+        last = ordered[-1]
+        nxt = min(
+            pending,
+            key=lambda item: float(_equirect_km(last["lat"], last["lon"], item["lat"], item["lon"])),
+        )
+        pending.remove(nxt)
+        ordered.append(nxt)
+    total = 0.0
+    for left, right in zip(ordered, ordered[1:]):
+        total += float(_equirect_km(left["lat"], left["lon"], right["lat"], right["lon"])) * 1000.0
+    return max(total, float(MAP_BIN_M) * len(run) * 0.5)
+
+
+def _draw_serving_spider(ax, samples: pd.DataFrame, column: str, spot: pd.Series) -> None:
+    """Yellow line from the serving cell to each red bin inside the orange circle.
+
+    The cell is the Cell Id on those samples, limited to L900, L1800, L2100 and
+    L2600 in the system dump. The length of each red run is written on the road.
+    """
+    bins = _red_bins_inside(samples, column, spot)
+    segments = []
+    for item in bins:
+        for end in item.get("ends") or ():
+            cell = _resolve_serving_cell(end["eci"], end["earfcn"])
+            if cell is None:
+                continue
+            dist_km = float(_equirect_km(cell["lat"], cell["lon"], end["lat"], end["lon"]))
+            if dist_km < 0.05 or dist_km > 12.0:
+                continue
+            segments.append([(cell["lon"], cell["lat"]), (end["lon"], end["lat"])])
+    if segments:
+        # Under the coloured road, so the red samples stay visible and the
+        # lines still meet them.
+        ax.add_collection(LineCollection(
+            segments,
+            colors="#F5C400",
+            linewidths=0.8,
+            capstyle="round",
+            zorder=1,
+            alpha=0.95,
+        ))
+    for run in _red_runs(bins):
+        mid = run[len(run) // 2]
+        ax.text(
+            mid["lon"],
+            mid["lat"],
+            f"{_run_length_m(run):.0f} m",
+            ha="center",
+            va="bottom",
+            fontsize=7,
+            color="#9B1B1B",
+            fontweight="bold",
+            zorder=30,
+            clip_on=True,
+            bbox={"boxstyle": "square,pad=0.16", "fc": "white", "ec": "#C0392B", "lw": 0.7, "alpha": 0.94},
+        )
+
+
+def draw_bad_spot_sector_pies(
+    ax,
+    spot: pd.Series,
+    samples: pd.DataFrame | None = None,
+    column: str | None = None,
+) -> None:
     """Transparent sector marks for every site that touches this bad-spot view.
 
     One cyan line per sector, with no fill. If any sector of a site falls inside
-    the view, every sector of that site is drawn. A yellow distance line is
-    drawn only from a sector whose azimuth points at the bad spot.
+    the view, every sector of that site is drawn. When the samples under the map
+    are passed in, a yellow line runs from the serving cell to each red bin
+    inside the orange circle. Without those samples, the older azimuth line to
+    the middle of the spot is kept.
     """
     sectors = load_site_sectors()
     if sectors.empty:
@@ -429,6 +663,8 @@ def draw_bad_spot_sector_pies(ax, spot: pd.Series) -> None:
     spot_lon = float(spot["lon"])
     inside = sectors["lat"].between(ylim[0], ylim[1]) & sectors["lon"].between(xlim[0], xlim[1])
     if not inside.any():
+        if samples is not None and column:
+            _draw_serving_spider(ax, samples, column, spot)
         return
     present = sectors.loc[inside, "SiteName"].unique()
     chosen = sectors[sectors["SiteName"].isin(present)]
@@ -484,6 +720,8 @@ def draw_bad_spot_sector_pies(ax, spot: pd.Series) -> None:
                 clip_on=True,
                 bbox={"boxstyle": "round,pad=0.08", "fc": "white", "ec": "none", "alpha": 0.84},
             )
+        if samples is not None and column:
+            continue
         if not facing:
             continue
         dist_km = float(_equirect_km(lat, lon, spot_lat, spot_lon))
@@ -509,6 +747,8 @@ def draw_bad_spot_sector_pies(ax, spot: pd.Series) -> None:
                 fontweight="bold", zorder=28, clip_on=True,
                 bbox={"boxstyle": "round,pad=0.12", "fc": "#FFE14A", "ec": "none", "alpha": 0.92},
             )
+    if samples is not None and column:
+        _draw_serving_spider(ax, samples, column, spot)
 
 
 def _coverage_extent_from_geo(geo: pd.DataFrame) -> tuple[float, float, float, float]:
@@ -2296,7 +2536,7 @@ def plot_bad_spot_serial_maps(
             _add_boundary_basemap(ax)
         else:
             _add_basemap(ax)
-        draw_bad_spot_sector_pies(ax, spot)
+        draw_bad_spot_sector_pies(ax, spot, local, column)
         hide_map_axes(ax)
         kind = str(spot.get("kind", "consecutive"))
         if kind == "discrete":
