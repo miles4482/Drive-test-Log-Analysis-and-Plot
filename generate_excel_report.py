@@ -88,7 +88,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.55"
+REPORT_VERSION = "1.56"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -1448,15 +1448,14 @@ def _zoom_display_height(path: Path | None, spots: pd.DataFrame, width: int = 86
     return int(min(280 * rows, 1120))
 
 
-def place_bad_spot_advice(ws, header_row: int, finding: str, solution: str) -> None:
-    """Findings and E_tilt / M_tilt solutions on the right of one bad-spot map.
+def place_bad_spot_advice(ws, header_row: int, plan: dict) -> None:
+    """Suggestion table on the right of one bad-spot map.
 
-    The block keeps the default row height, so the movable circle on that map
-    stays where it was drawn.
+    Row heights stay at the default, so the movable circle on that map stays put.
     """
     title = header_row + 2
     find = header_row + 4
-    sol = header_row + 16
+    head = header_row + 10
     ws.merge_cells(start_row=title, start_column=9, end_row=title, end_column=16)
     write_cell(
         ws, title, 9, "Suggestions and solutions",
@@ -1466,18 +1465,35 @@ def place_bad_spot_advice(ws, header_row: int, finding: str, solution: str) -> N
         ws.cell(title, col).fill = fill(LIGHT)
         ws.cell(title, col).font = font(11, bold=True, color=NAVY)
         ws.cell(title, col).alignment = Alignment(horizontal="center", vertical="center")
-    ws.merge_cells(start_row=find, start_column=9, end_row=find + 10, end_column=9)
-    ws.merge_cells(start_row=find, start_column=10, end_row=find + 10, end_column=16)
-    write_cell(ws, find, 9, "Findings", size=11, bold=True, color=NAVY, align="left", wrap=True)
-    write_cell(ws, find, 10, finding, size=11, color=NAVY, align="left", wrap=True)
-    ws.cell(find, 9).alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+    ws.merge_cells(start_row=find, start_column=9, end_row=find + 4, end_column=9)
+    ws.merge_cells(start_row=find, start_column=10, end_row=find + 4, end_column=16)
+    write_cell(ws, find, 9, "Findings", size=11, bold=True, color=NAVY, align="center", wrap=True)
+    write_cell(ws, find, 10, plan.get("finding", ""), size=11, color=NAVY, align="left", wrap=True)
+    ws.cell(find, 9).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     ws.cell(find, 10).alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-    ws.merge_cells(start_row=sol, start_column=9, end_row=sol + 12, end_column=9)
-    ws.merge_cells(start_row=sol, start_column=10, end_row=sol + 12, end_column=16)
-    write_cell(ws, sol, 9, "Solutions", size=11, bold=True, color=NAVY, align="left", wrap=True)
-    write_cell(ws, sol, 10, solution, size=11, color=NAVY, align="left", wrap=True)
-    ws.cell(sol, 9).alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-    ws.cell(sol, 10).alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+    ws.merge_cells(start_row=head, start_column=10, end_row=head, end_column=11)
+    ws.merge_cells(start_row=head, start_column=12, end_row=head, end_column=16)
+    for col, text in ((9, "Step"), (10, "Action"), (12, "Proposal")):
+        write_cell(ws, head, col, text, size=11, bold=True, color=NAVY, fill_color=LIGHT, align="center")
+        ws.cell(head, col).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        ws.cell(head, col).border = THIN
+    for col in range(9, 17):
+        ws.cell(head, col).fill = fill(LIGHT)
+        ws.cell(head, col).border = THIN
+        ws.cell(head, col).font = font(11, bold=True, color=NAVY)
+    for index, step in enumerate(plan.get("steps") or []):
+        row = head + 1 + index * 4
+        ws.merge_cells(start_row=row, start_column=9, end_row=row + 3, end_column=9)
+        ws.merge_cells(start_row=row, start_column=10, end_row=row + 3, end_column=11)
+        ws.merge_cells(start_row=row, start_column=12, end_row=row + 3, end_column=16)
+        write_cell(ws, row, 9, step.get("step", ""), size=12, bold=True, color=NAVY, align="center", wrap=True)
+        write_cell(ws, row, 10, step.get("action", ""), size=11, bold=True, color=NAVY, align="center", wrap=True)
+        write_cell(ws, row, 12, step.get("proposal", ""), size=11, color=NAVY, align="left", wrap=True)
+        for col in (9, 10, 12):
+            ws.cell(row, col).alignment = Alignment(
+                horizontal="center" if col < 12 else "left", vertical="top", wrap_text=True,
+            )
+            ws.cell(row, col).border = THIN
 
 
 def build_kpi_bad_spot_sheet(
@@ -1529,7 +1545,9 @@ def build_kpi_bad_spot_sheet(
         "and runs to each red sample inside the orange circle. That cell is the Cell Id on the sample, "
         "on L900, L1800, L2100 or L2600, and it has to be in System DUMP.xlsb. Every serving cell is drawn. "
         "The length beside the red is the full red stretch, and a short gap of good coverage stays in that length. "
-        "The columns to the right of each map are the finding and the E_tilt and M_tilt change. "
+        "The columns to the right of each map are a suggestion table: E_tilt and M_tilt first, "
+        "then azimuth using population, then a 4th L900 sector, then a new 3-sector site. "
+        "A blank with no plot inside the circle is counted with that bad spot. "
         "Several circles can sit inside one 10 km neighbourhood when the poor "
         "road is not one stretch. A discrete patch of at least 1 km\u00b2 is a dotted circle. "
         + _detection_summary(kpi, spots)
@@ -1561,8 +1579,7 @@ def build_kpi_bad_spot_sheet(
     for i, path in enumerate(maps, start=1):
         section_bar(ws, cursor, f"Bad Spot {i}", 1, map_span)
         if samples is not None and spots is not None and i <= len(spots):
-            finding, solution = bad_spot_advice(samples, kpi, spots.iloc[i - 1])
-            place_bad_spot_advice(ws, cursor, finding, solution)
+            place_bad_spot_advice(ws, cursor, bad_spot_advice(samples, kpi, spots.iloc[i - 1]))
         _, spot_h = add_image(ws, path, f"A{cursor + 2}", width=780, height=720)
         cursor = cursor + 2 + max(spot_h, 360) // 20 + 3
     table_row = cursor if maps else cursor + 1
@@ -1625,7 +1642,8 @@ def build_kpi_bad_spot_sheet(
         combined_line
         + "Each bad spot above is one large map. Its orange circle is a separate shape with the same "
         "name as the Circle column, so it can be dragged on its own. The space to the right of each "
-        "map is the finding and the E_tilt and M_tilt suggestion. Poor share is the share of raw samples inside the spot box that are at or "
+        "map is that suggestion table. A blank with no plot inside the circle is counted with that bad spot. "
+        "Poor share is the share of raw samples inside the spot box that are at or "
         "below the threshold. Length is the poor road inside the circle, and a single 50 m bin is "
         "reported as 50 m. Map numbers are omitted.",
         size=9,
@@ -2548,12 +2566,12 @@ def refresh_bad_spot_pies(src: Path | None = None) -> Path:
 
 
 _ADVICE_NOTE_OLD = (
-    "The columns to the right of each map are left empty.",
-    "The space to the right of each map is left empty.",
-)
-_ADVICE_NOTE_NEW = (
     "The columns to the right of each map are the finding and the E_tilt and M_tilt change.",
     "The space to the right of each map is the finding and the E_tilt and M_tilt suggestion.",
+)
+_ADVICE_NOTE_NEW = (
+    "The columns to the right of each map are a suggestion table: E_tilt and M_tilt first, then azimuth using population, then a 4th L900 sector, then a new 3-sector site. A blank with no plot inside the circle is counted with that bad spot.",
+    "The space to the right of each map is that suggestion table. A blank with no plot inside the circle is counted with that bad spot.",
 )
 
 
@@ -2565,11 +2583,11 @@ def _xml_text(value: str) -> str:
     )
 
 
-def _advice_sheet_rows(header: int, finding: str, solution: str) -> tuple[dict[int, str], list[str]]:
-    """Inline cells for the suggestions table beside one bad-spot map."""
+def _advice_sheet_rows(header: int, plan: dict) -> tuple[dict[int, str], list[str]]:
+    """Inline cells for the suggestion table beside one bad-spot map."""
     title = header + 2
     find = header + 4
-    sol = header + 16
+    head = header + 10
 
     def cell(ref: str, style: int, text: str | None = None) -> str:
         if text is None:
@@ -2579,24 +2597,68 @@ def _advice_sheet_rows(header: int, finding: str, solution: str) -> tuple[dict[i
             f'<t xml:space="preserve">{_xml_text(text)}</t></is></c>'
         )
 
+    def styled_row(row: int, cells: list[str]) -> str:
+        return f'<row r="{row}">{"".join(cells)}</row>'
+
     rows = {
-        title: (
-            f'<row r="{title}">'
-            + cell(f"I{title}", 32, "Suggestions and solutions")
-            + "".join(cell(f"{get_column_letter(col)}{title}", 32) for col in range(10, 17))
-            + "</row>"
-        ),
-        find: f'<row r="{find}">{cell(f"I{find}", 33, "Findings")}{cell(f"J{find}", 34, finding)}</row>',
-        sol: f'<row r="{sol}">{cell(f"I{sol}", 33, "Solutions")}{cell(f"J{sol}", 34, solution)}</row>',
+        title: styled_row(title, [cell(f"I{title}", 32, "Suggestions and solutions")] + [
+            cell(f"{get_column_letter(col)}{title}", 32) for col in range(10, 17)
+        ]),
+        find: styled_row(find, [
+            cell(f"I{find}", 36, "Findings"),
+            cell(f"J{find}", 37, plan.get("finding", "")),
+        ]),
+        head: styled_row(head, [
+            cell(f"I{head}", 35, "Step"),
+            cell(f"J{head}", 35, "Action"),
+            cell(f"K{head}", 35),
+            cell(f"L{head}", 35, "Proposal"),
+            cell(f"M{head}", 35),
+            cell(f"N{head}", 35),
+            cell(f"O{head}", 35),
+            cell(f"P{head}", 35),
+        ]),
     }
     merges = [
         f"I{title}:P{title}",
-        f"I{find}:I{find + 10}",
-        f"J{find}:P{find + 10}",
-        f"I{sol}:I{sol + 12}",
-        f"J{sol}:P{sol + 12}",
+        f"I{find}:I{find + 4}",
+        f"J{find}:P{find + 4}",
+        f"J{head}:K{head}",
+        f"L{head}:P{head}",
     ]
+    for index, step in enumerate(plan.get("steps") or []):
+        row = head + 1 + index * 4
+        rows[row] = styled_row(row, [
+            cell(f"I{row}", 36, str(step.get("step", ""))),
+            cell(f"J{row}", 36, str(step.get("action", ""))),
+            cell(f"L{row}", 37, str(step.get("proposal", ""))),
+        ])
+        merges.extend((
+            f"I{row}:I{row + 3}",
+            f"J{row}:K{row + 3}",
+            f"L{row}:P{row + 3}",
+        ))
     return rows, merges
+
+
+def _strip_advice_rows(xml: str, headers: list[tuple[int, int]]) -> str:
+    """Remove a previous suggestion block so the new table can take its rows."""
+    drop = {row for header, _number in headers for row in range(header + 2, header + 32)}
+
+    def keep_row(match: re.Match) -> str:
+        number = int(re.search(r'\br="(\d+)"', match.group(0)).group(1))
+        return "" if number in drop else match.group(0)
+
+    xml = re.sub(r"<row\b.*?</row>", keep_row, xml, flags=re.S)
+
+    def keep_merge(match: re.Match) -> str:
+        rows = [int(value) for value in re.findall(r"\d+", match.group(0))]
+        return "" if any(row in drop for row in rows) else match.group(0)
+
+    xml = re.sub(r"<mergeCell\b[^>]*/>", keep_merge, xml)
+    count = len(re.findall(r"<mergeCell\b", xml))
+    xml = re.sub(r'<mergeCells count="\d+"', f'<mergeCells count="{count}"', xml, count=1)
+    return xml
 
 
 def _insert_sheet_rows(xml: str, rows: dict[int, str], merges: list[str]) -> str:
@@ -2625,23 +2687,36 @@ def _insert_sheet_rows(xml: str, rows: dict[int, str], merges: list[str]) -> str
 
 
 def _add_advice_styles(styles: str) -> str:
-    if 'fontId="8" fillId="5"' in styles and styles.count("<cellXfs") and 'count="35"' in styles:
+    if "<cellXfs count=\"38\">" in styles:
         return styles
-    if "<fonts count=\"8\">" not in styles or "<cellXfs count=\"32\">" not in styles:
-        raise SystemExit("Workbook styles are not the expected v1.53 set; refusing to append advice styles")
-    styles = styles.replace("<fonts count=\"8\">", "<fonts count=\"9\">", 1)
-    styles = styles.replace(
-        "</fonts>",
-        '<font><name val="Calibri"/><b val="1"/><color rgb="001B4F72"/><sz val="11"/></font></fonts>',
-        1,
-    )
-    styles = styles.replace("<cellXfs count=\"32\">", "<cellXfs count=\"35\">", 1)
+    if "<cellXfs count=\"35\">" not in styles:
+        if "<fonts count=\"8\">" not in styles or "<cellXfs count=\"32\">" not in styles:
+            raise SystemExit("Workbook styles are not the expected set; refusing to append advice styles")
+        styles = styles.replace("<fonts count=\"8\">", "<fonts count=\"9\">", 1)
+        styles = styles.replace(
+            "</fonts>",
+            '<font><name val="Calibri"/><b val="1"/><color rgb="001B4F72"/><sz val="11"/></font></fonts>',
+            1,
+        )
+        styles = styles.replace("<cellXfs count=\"32\">", "<cellXfs count=\"35\">", 1)
+        styles = styles.replace(
+            "</cellXfs>",
+            '<xf numFmtId="0" fontId="8" fillId="5" borderId="0" applyAlignment="1" xfId="0">'
+            '<alignment horizontal="center" vertical="center"/></xf>'
+            '<xf numFmtId="0" fontId="8" fillId="0" borderId="0" applyAlignment="1" xfId="0">'
+            '<alignment horizontal="left" vertical="top" wrapText="1"/></xf>'
+            '<xf numFmtId="0" fontId="6" fillId="0" borderId="0" applyAlignment="1" xfId="0">'
+            '<alignment horizontal="left" vertical="top" wrapText="1"/></xf>'
+            "</cellXfs>",
+            1,
+        )
+    styles = styles.replace("<cellXfs count=\"35\">", "<cellXfs count=\"38\">", 1)
     added = (
-        '<xf numFmtId="0" fontId="8" fillId="5" borderId="0" applyAlignment="1" xfId="0">'
-        '<alignment horizontal="center" vertical="center"/></xf>'
-        '<xf numFmtId="0" fontId="8" fillId="0" borderId="0" applyAlignment="1" xfId="0">'
-        '<alignment horizontal="left" vertical="top" wrapText="1"/></xf>'
-        '<xf numFmtId="0" fontId="6" fillId="0" borderId="0" applyAlignment="1" xfId="0">'
+        '<xf numFmtId="0" fontId="8" fillId="5" borderId="1" applyAlignment="1" xfId="0">'
+        '<alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
+        '<xf numFmtId="0" fontId="8" fillId="0" borderId="1" applyAlignment="1" xfId="0">'
+        '<alignment horizontal="center" vertical="top" wrapText="1"/></xf>'
+        '<xf numFmtId="0" fontId="6" fillId="0" borderId="1" applyAlignment="1" xfId="0">'
         '<alignment horizontal="left" vertical="top" wrapText="1"/></xf>'
     )
     return styles.replace("</cellXfs>", added + "</cellXfs>", 1)
@@ -2702,10 +2777,11 @@ def write_bad_spot_advice(src: Path | None = None) -> Path:
             raise SystemExit(f"{sheet}: {len(headers)} headers, {len(pairs)} advice rows")
         rows: dict[int, str] = {}
         merges: list[str] = []
-        for (header, number), (finding, solution) in zip(headers, pairs):
+        xml = _strip_advice_rows(xml, headers)
+        for (header, number), plan in zip(headers, pairs):
             if number < 1:
                 raise SystemExit(f"{sheet}: unexpected header {number}")
-            added_rows, added_merges = _advice_sheet_rows(header, finding, solution)
+            added_rows, added_merges = _advice_sheet_rows(header, plan)
             rows.update(added_rows)
             merges.extend(added_merges)
         xml = _insert_sheet_rows(xml, rows, merges)

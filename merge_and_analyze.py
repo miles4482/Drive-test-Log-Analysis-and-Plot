@@ -448,6 +448,7 @@ def _serving_cell_index() -> tuple[dict, dict]:
             az = pd.to_numeric(row.get("Azimuth"), errors="coerce")
             et = pd.to_numeric(row.get("E_tilt"), errors="coerce")
             mt = pd.to_numeric(row.get("M_tilt"), errors="coerce")
+            ht = pd.to_numeric(row.get("Height"), errors="coerce")
             rec = {
                 "lat": float(lat),
                 "lon": float(lon),
@@ -458,6 +459,7 @@ def _serving_cell_index() -> tuple[dict, dict]:
                 "azimuth": None if pd.isna(az) else float(az) % 360.0,
                 "etilt": None if pd.isna(et) else float(et),
                 "mtilt": None if pd.isna(mt) else float(mt),
+                "height": None if pd.isna(ht) else float(ht),
             }
             key = (int(enb), int(cid))
             previous = pair.get(key)
@@ -564,154 +566,424 @@ def _tilt_line(cell: dict, delta: float, action: str) -> str:
     )
 
 
-def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series) -> tuple[str, str]:
-    """Finding and E_tilt / M_tilt solution for one bad spot.
+# L900 planning reach. Higher bands shorten in proportion to frequency, which is
+# the free-space rule (distance for the same loss scales as 1/frequency).
+L900_REACH_KM = 8.0
+_LAYER_FREQ_MHZ = {"L900": 900.0, "L1800": 1800.0, "L2100": 2100.0, "L2600": 2600.0}
+_POP_GRID: tuple | None = None
 
-    The finding compares the cell on the red samples with the closest sector
-    whose azimuth faces that red road. Only electrical and mechanical tilt are
-    changed: downtilt when a neighbor overshoots, uptilt when the facing cell
-    is landing short.
-    """
-    bins = _red_bins_inside(samples, column, spot)
-    if not bins:
-        return (
-            "No dark-red 50 m bin inside this circle has a Cell Id, so the serving cell cannot be named.",
-            "No E_tilt or M_tilt change.",
+
+def _layer_reach_km(layer: str) -> float:
+    freq = _LAYER_FREQ_MHZ.get(layer or "", 1800.0)
+    return L900_REACH_KM * 900.0 / freq
+
+
+def _population_grid() -> tuple[np.ndarray, float, float, float, float]:
+    """WorldPop 2020 people per km² for the Bogura drive, about 1 km cells."""
+    global _POP_GRID
+    if _POP_GRID is None:
+        path = ROOT / "data" / "bogura_worldpop_2020_1km.npz"
+        loaded = np.load(path)
+        grid = loaded["pop"].astype(np.float32)
+        grid = np.where(np.isfinite(grid) & (grid < 1.0e6), grid, 0.0)
+        _POP_GRID = (
+            grid,
+            float(loaded["xmin"]),
+            float(loaded["ymin"]),
+            float(loaded["xmax"]),
+            float(loaded["ymax"]),
         )
-    red_lat = sum(item["lat"] for item in bins) / len(bins)
-    red_lon = sum(item["lon"] for item in bins) / len(bins)
+    return _POP_GRID
+
+
+def population_per_km2(lat: float, lon: float) -> float:
+    grid, xmin, ymin, xmax, ymax = _population_grid()
+    if not (xmin <= lon <= xmax and ymin <= lat <= ymax):
+        return 0.0
+    height, width = grid.shape
+    col = int(np.clip((lon - xmin) / (xmax - xmin) * (width - 1), 0, width - 1))
+    row = int(np.clip((ymax - lat) / (ymax - ymin) * (height - 1), 0, height - 1))
+    return float(grid[row, col])
+
+
+def _people(value: float) -> str:
+    return f"{value:,.0f}/km²"
+
+
+def _destination(lat: float, lon: float, bearing: float, dist_km: float) -> tuple[float, float]:
+    br = math.radians(bearing % 360.0)
+    lat2 = lat + (dist_km / 111.32) * math.cos(br)
+    lon2 = lon + (dist_km / max(_km_per_deg_lon(lat), 0.2)) * math.sin(br)
+    return lat2, lon2
+
+
+def _signed_deg(azimuth: float, bearing: float) -> float:
+    """Bearing relative to azimuth, degrees, negative to the left."""
+    return (float(bearing) - float(azimuth) + 180.0) % 360.0 - 180.0
+
+
+def _ground_tilt_deg(height_m: float | None, dist_km: float) -> float:
+    height = 30.0 if height_m is None else max(10.0, float(height_m))
+    return math.degrees(math.atan(height / max(dist_km, 0.05) / 1000.0))
+
+
+def _wedge_population(lat: float, lon: float, azimuth: float) -> float:
+    """People per km² along a sector bearing, averaged at 1.5, 3 and 4.5 km."""
+    values = []
+    for dist in (1.5, 3.0, 4.5):
+        lat2, lon2 = _destination(lat, lon, azimuth, dist)
+        values.append(population_per_km2(lat2, lon2))
+    return float(sum(values) / len(values))
+
+
+def _sectors_near(lat: float, lon: float, km: float = 8.5) -> list[dict]:
+    """One record per sector around a point. L900 is kept when the sector has it."""
+    rank = {"L900": 0, "L1800": 1, "L2100": 2, "L2600": 3}
+    best: dict[tuple, dict] = {}
+    for rec in _serving_cells_near(lat, lon, km):
+        if rec.get("azimuth") is None:
+            continue
+        away = float(_equirect_km(rec["lat"], rec["lon"], lat, lon))
+        if away > km:
+            continue
+        key = (rec.get("sector"), round(float(rec["lat"]), 4), round(float(rec["lon"]), 4))
+        current = best.get(key)
+        if current is None or rank.get(rec.get("layer"), 9) < rank.get(current.get("layer"), 9):
+            best[key] = rec
+    return list(best.values())
+
+
+def _blank_segments(samples: pd.DataFrame, spot: pd.Series) -> list[dict]:
+    """Driven stretches inside the circle where the map has no plot.
+
+    A normal sample is a few metres from the next one. A jump of 80 m to 1.6 km
+    at driving speed, on the same log, is a blank: the road was driven and
+    nothing was plotted. Those metres are part of this bad spot.
+    """
+    if samples is None or samples.empty or "outline_width_km" not in getattr(spot, "index", []):
+        return []
+    if pd.isna(spot.get("outline_width_km")):
+        return []
+    need = ["Latitude", "Longitude", "Time"]
+    if any(col not in samples.columns for col in need):
+        return []
+    work = samples.dropna(subset=need).sort_values("Time")
+    if len(work) < 2:
+        return []
+    lat = work["Latitude"].to_numpy(dtype=float)
+    lon = work["Longitude"].to_numpy(dtype=float)
+    time_s = pd.to_datetime(work["Time"]).to_numpy(dtype="datetime64[ns]").astype("int64") / 1e9
+    source = work["Source"].to_numpy() if "Source" in work.columns else np.zeros(len(work))
+    lat0 = float(spot["outline_lat"])
+    lon0 = float(spot["outline_lon"])
+    half_w = float(spot["outline_width_km"]) / _km_per_deg_lon(lat0) / 2.0
+    half_h = float(spot["outline_height_km"]) / 111.32 / 2.0
+    if half_w <= 0 or half_h <= 0:
+        return []
+    same = source[:-1] == source[1:]
+    dt = time_s[1:] - time_s[:-1]
+    dist_m = _equirect_km(lat[:-1], lon[:-1], lat[1:], lon[1:]) * 1000.0
+    speed = dist_m / np.maximum(dt, 1e-6) * 3.6
+    mid_lat = (lat[:-1] + lat[1:]) / 2.0
+    mid_lon = (lon[:-1] + lon[1:]) / 2.0
+    inside = ((mid_lon - lon0) / half_w) ** 2 + ((mid_lat - lat0) / half_h) ** 2 <= 1.0
+    keep = (
+        same
+        & (dt >= 8.0)
+        & (dt <= 150.0)
+        & (dist_m >= 80.0)
+        & (dist_m <= 1600.0)
+        & (speed >= 15.0)
+        & (speed <= 120.0)
+        & inside
+    )
+    idx = np.flatnonzero(keep)
+    order = idx[np.argsort(-dist_m[idx])]
+    return [
+        {
+            "lat": float(mid_lat[i]),
+            "lon": float(mid_lon[i]),
+            "lat1": float(lat[i]),
+            "lon1": float(lon[i]),
+            "lat2": float(lat[i + 1]),
+            "lon2": float(lon[i + 1]),
+            "length_m": float(dist_m[i]),
+        }
+        for i in order
+    ]
+
+
+def _not_required(reason: str) -> str:
+    return "Not required. " + reason
+
+
+def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series) -> dict:
+    """Finding and a four-step suggestion for one bad spot.
+
+    Blank stretches with no plot inside the circle are counted with the spot.
+    Step 1 changes E_tilt and M_tilt of cells around the spot, through 360°.
+    Step 2 turns one azimuth when the spot sits in the null between two sectors,
+    and only when WorldPop says that turn still serves the customers.
+    Step 3 adds one L900 sector when tilt and azimuth cannot fill the hole
+    without moving the coverage that is already there.
+    Step 4 proposes a new 3-sector site when no existing site can carry that sector.
+    """
+    blanks = _blank_segments(samples, spot)
+    blank_m = sum(item["length_m"] for item in blanks)
+    bins = _red_bins_inside(samples, column, spot)
+    if bins:
+        red_lat = sum(item["lat"] for item in bins) / len(bins)
+        red_lon = sum(item["lon"] for item in bins) / len(bins)
+    else:
+        red_lat = float(spot["lat"])
+        red_lon = float(spot["lon"])
+    if blanks:
+        nearest_blank = min(
+            blanks,
+            key=lambda gap: float(_equirect_km(gap["lat"], gap["lon"], red_lat, red_lon)),
+        )
+        target_lat = nearest_blank["lat"]
+        target_lon = nearest_blank["lon"]
+        target_name = "the blank beside the red road"
+    else:
+        target_lat, target_lon = red_lat, red_lon
+        target_name = "the red road"
+    spot_pop = population_per_km2(target_lat, target_lon)
+    sectors = _sectors_near(target_lat, target_lon, 8.5)
+    finding_lines = []
+    if blank_m >= 80:
+        finding_lines.append(
+            f"Blank, no plot, {blank_m:,.0f} m inside this circle is counted as part of this bad spot."
+        )
+    else:
+        finding_lines.append("No driven blank inside this circle. The poor road is the red plot.")
     served: dict[tuple, dict] = {}
     for item in bins:
         for end in item.get("ends") or ():
-            cell = _resolve_serving_cell(end["eci"], end["earfcn"])
-            if cell is None:
+            cell = _resolve_serving_cell(end.get("eci"), end.get("earfcn"))
+            if cell is None or cell.get("azimuth") is None:
                 continue
-            key = (cell.get("sector"), cell.get("layer"), round(cell["lat"], 5), round(cell["lon"], 5))
-            slot = served.setdefault(key, {"cell": cell, "n": 0, "dist": [], "elat": [], "elon": []})
+            key = (cell.get("sector"), cell.get("layer"))
+            slot = served.setdefault(key, {"cell": cell, "n": 0})
             slot["n"] += 1
-            slot["dist"].append(float(_equirect_km(cell["lat"], cell["lon"], end["lat"], end["lon"])))
-            slot["elat"].append(float(end["lat"]))
-            slot["elon"].append(float(end["lon"]))
-    if not served:
-        return (
-            "The red samples inside this circle have a Cell Id, but it is not an L900, L1800, L2100 or L2600 cell in System DUMP.xlsb.",
-            "No E_tilt or M_tilt change until that Cell Id is in the dump.",
+    if served:
+        dominant = max(served.values(), key=lambda slot: slot["n"])["cell"]
+        dom_dist = float(_equirect_km(dominant["lat"], dominant["lon"], red_lat, red_lon))
+        dom_off = abs(_signed_deg(dominant["azimuth"], _bearing_deg(dominant["lat"], dominant["lon"], red_lat, red_lon)))
+        who = f"{dominant.get('sector')} {dominant.get('layer')}".strip()
+        finding_lines.append(
+            f"{who} is on the red road from {dom_dist:.1f} km and is {dom_off:.0f}° off its azimuth."
         )
-    dominant = max(served.values(), key=lambda slot: (slot["n"], -sum(slot["dist"]) / len(slot["dist"])))
-    cell = dominant["cell"]
-    dist = sum(dominant["dist"]) / len(dominant["dist"])
-    bearing = _bearing_deg(cell["lat"], cell["lon"], red_lat, red_lon)
-    off = None if cell.get("azimuth") is None else _ang_diff(cell["azimuth"], bearing)
-    faces = off is not None and off <= 50.0
-    who = f"{cell.get('sector') or 'cell'} {cell.get('layer') or ''}".strip()
-    face_text = (
-        "azimuth is missing"
-        if off is None
-        else (f"faces the red road ({off:.0f}° off azimuth)" if faces else f"does not face the red road ({off:.0f}° off azimuth)")
+    finding_lines.append(
+        f"WorldPop 2020 on {target_name} is {_people(spot_pop)}. "
+        f"L900 reach is {L900_REACH_KM:.0f} km, L1800 {_layer_reach_km('L1800'):.1f} km, "
+        f"L2100 {_layer_reach_km('L2100'):.1f} km, L2600 {_layer_reach_km('L2600'):.1f} km."
     )
-    def _mean_dist(slot: dict) -> float:
-        return sum(slot["dist"]) / len(slot["dist"])
 
-    served_here = {
-        (slot["cell"].get("sector"), round(float(slot["cell"]["lat"]), 3))
-        for slot in served.values()
+    # Step 1. Tilt of the cells around the spot, not a far sector that only points this way.
+    near_dist = min(
+        (float(_equirect_km(rec["lat"], rec["lon"], target_lat, target_lon)) for rec in sectors),
+        default=8.0,
+    )
+    tilt_offers: list[tuple[float, float, str]] = []
+    for rec in sectors:
+        dist = float(_equirect_km(rec["lat"], rec["lon"], target_lat, target_lon))
+        reach = _layer_reach_km(rec.get("layer") or "")
+        if dist > reach + 0.4:
+            continue
+        bearing = _bearing_deg(rec["lat"], rec["lon"], target_lat, target_lon)
+        off = abs(_signed_deg(rec["azimuth"], bearing))
+        if off > 42.0:
+            continue
+        desired = _ground_tilt_deg(rec.get("height"), dist)
+        current = 0.0 if rec.get("etilt") is None else float(rec["etilt"])
+        delta = desired - current
+        if abs(delta) < 1.0:
+            local = dist <= near_dist + 1.2
+            if off <= 25.0 and local:
+                tilt_offers.append((
+                    dist, off,
+                    f"From {dist:.1f} km, {off:.0f}° off azimuth. "
+                    f"{rec.get('sector')} {rec.get('layer')} already aims here (E_tilt {_deg_text(current)}°).",
+                ))
+            continue
+        delta = math.copysign(min(abs(delta), 4.0), delta)
+        new_e = min(12.0, max(0.0, current + delta))
+        ground_km = (rec.get("height") or 30.0) / 1000.0 / max(math.tan(math.radians(max(new_e, 0.3))), 1e-4)
+        reaches = ground_km >= dist * 0.8 or new_e <= 0.6
+        action = "uptilt so the beam reaches the spot" if delta < 0 else "downtilt so the beam lands on the spot"
+        line = _tilt_line(rec, delta, action)
+        local = dist <= near_dist + 1.2
+        if off <= 28.0 and reaches and local:
+            tilt_offers.append((dist, off, f"From {dist:.1f} km, {off:.0f}° off azimuth. {line}"))
+        else:
+            tilt_offers.append((dist + 20.0, off, f"From {dist:.1f} km, {off:.0f}° off azimuth. {line}"))
+    tilt_offers.sort()
+    solving = [item for item in tilt_offers if item[0] < 20.0 and item[1] <= 28.0]
+    step1_solves = bool(solving)
+    if step1_solves:
+        step1 = " ".join(item[2] for item in solving[:2])
+    elif tilt_offers:
+        step1 = (
+            "Tilt was checked all around the spot. "
+            + tilt_offers[0][2]
+            + " The beam still does not land on the blank, so tilt alone does not fill it."
+        )
+    else:
+        step1 = (
+            "Tilt was checked through 360°. No sector within its band reach faces "
+            f"{target_name}, so an E_tilt or M_tilt change would not put coverage here."
+        )
+
+    # Step 2. Azimuth, only across a null, and only if population supports it.
+    step2 = _not_required("The spot is already inside a sector beam, so the azimuth stays.")
+    step2_solves = False
+    if not step1_solves:
+        best_turn = None
+        for rec in sectors:
+            dist = float(_equirect_km(rec["lat"], rec["lon"], target_lat, target_lon))
+            if dist > L900_REACH_KM or dist < 0.2:
+                continue
+            same_site = [
+                other for other in sectors
+                if other.get("site") == rec.get("site")
+                and abs(other["lat"] - rec["lat"]) < 0.002
+                and abs(other["lon"] - rec["lon"]) < 0.002
+            ]
+            azimuths = [float(other["azimuth"]) for other in same_site if other.get("azimuth") is not None]
+            if len(azimuths) < 2:
+                continue
+            bearing = _bearing_deg(rec["lat"], rec["lon"], target_lat, target_lon)
+            offset = _signed_deg(rec["azimuth"], bearing)
+            nearest = min(abs(_signed_deg(az, bearing)) for az in azimuths)
+            if nearest <= 30.0 or nearest > 70.0:
+                continue
+            if abs(offset) > nearest + 1.0:
+                continue
+            turn = math.copysign(min(max(abs(offset) - 25.0, 0.0), 30.0), offset)
+            if abs(turn) < 8.0:
+                continue
+            new_az = (float(rec["azimuth"]) + turn) % 360.0
+            left = abs(_signed_deg(new_az, bearing))
+            old_pop = _wedge_population(rec["lat"], rec["lon"], rec["azimuth"])
+            new_pop = _wedge_population(rec["lat"], rec["lon"], new_az)
+            keeps_customers = new_pop + 0.5 * spot_pop >= old_pop * 0.90
+            score = (0 if keeps_customers else 1, left, abs(turn), -new_pop)
+            candidate = (score, rec, new_az, turn, left, old_pop, new_pop, keeps_customers)
+            if best_turn is None or candidate[0] < best_turn[0]:
+                best_turn = candidate
+        if best_turn is None:
+            step2 = (
+                "The spot is not in a narrow null between two sectors, "
+                "or a turn of at most 30° would still miss it. Azimuth is left as it is."
+            )
+        else:
+            _, rec, new_az, turn, left, old_pop, new_pop, keeps = best_turn
+            name = f"{rec.get('sector')} {rec.get('layer')}".strip()
+            direction = "clockwise" if turn > 0 else "counter-clockwise"
+            pop_line = (
+                f"Population on the current bearing is {_people(old_pop)}, "
+                f"on the new bearing {_people(new_pop)}, and on the spot {_people(spot_pop)}."
+            )
+            if keeps and left <= 32.0:
+                step2_solves = True
+                step2 = (
+                    f"{name}: azimuth {float(rec['azimuth']):.0f}° to {new_az:.0f}° "
+                    f"({direction} {abs(turn):.0f}°), so the null is shared with the next sector. {pop_line}"
+                )
+            elif not keeps:
+                step2 = (
+                    f"Turning {name} would leave the busier side. {pop_line} "
+                    "Azimuth stays, so those customers keep the sector."
+                )
+            else:
+                step2 = (
+                    f"A {abs(turn):.0f}° turn of {name} still leaves the spot {left:.0f}° off the beam. "
+                    f"{pop_line} That is not enough, so the azimuth stays."
+                )
+
+    solved = step1_solves or step2_solves
+    # Step 3. One new L900 sector, existing sectors not moved.
+    step3 = _not_required("Tilt or azimuth already covers the spot, including the blank.")
+    step3_solves = False
+    if not solved:
+        hosts = []
+        for rec in sectors:
+            dist = float(_equirect_km(rec["lat"], rec["lon"], target_lat, target_lon))
+            if dist > L900_REACH_KM or dist < 0.15:
+                continue
+            same_site = [
+                other for other in sectors
+                if other.get("site") == rec.get("site") and abs(other["lat"] - rec["lat"]) < 0.002
+            ]
+            azimuths = [float(other["azimuth"]) for other in same_site if other.get("azimuth") is not None]
+            if not azimuths:
+                continue
+            bearing = _bearing_deg(rec["lat"], rec["lon"], target_lat, target_lon)
+            gap = min(abs(_signed_deg(az, bearing)) for az in azimuths)
+            if gap < 35.0:
+                continue
+            hosts.append((dist, gap, rec, bearing))
+        if not hosts:
+            step3 = (
+                f"No site within the {L900_REACH_KM:.0f} km L900 reach has a wide enough gap. "
+                "A 4th sector there would sit on an existing beam and take its coverage."
+            )
+        else:
+            dist, gap, rec, bearing = min(hosts, key=lambda item: item[0])
+            tilt = int(round(min(10.0, max(0.0, _ground_tilt_deg(rec.get("height"), dist)))))
+            l2100 = _layer_reach_km("L2100")
+            band_note = (
+                f"L2100 reach is only {l2100:.1f} km, so this sector is L900."
+                if dist > l2100
+                else "L900 is used so the blank and the red road are both inside one sector."
+            )
+            step3_solves = True
+            step3 = (
+                f"New L900 sector on {rec.get('site') or rec.get('sector')}, "
+                f"azimuth {bearing:.0f}°, E_tilt {tilt}°, M_tilt 0°. "
+                f"The site is {dist:.1f} km away, inside the {L900_REACH_KM:.0f} km L900 reach, "
+                f"and {gap:.0f}° clear of the nearest existing sector. "
+                f"Existing sectors are not moved. {band_note}"
+            )
+
+    # Step 4. New 3-sector site.
+    if step1_solves or step2_solves or step3_solves:
+        step4 = _not_required("An existing site can cover this spot without a new tower.")
+    else:
+        site_lat = target_lat + 0.18 / 111.32
+        site_lon = target_lon
+        face = _bearing_deg(site_lat, site_lon, red_lat, red_lon)
+        azimuths = [face % 360.0, (face + 120.0) % 360.0, (face + 240.0) % 360.0]
+        near_dist = min(
+            (float(_equirect_km(rec["lat"], rec["lon"], site_lat, site_lon)) for rec in sectors),
+            default=5.0,
+        )
+        face_tilt = int(round(min(10.0, max(2.0, _ground_tilt_deg(30.0, 0.25)))))
+        outer_tilt = int(round(min(8.0, max(2.0, _ground_tilt_deg(30.0, max(near_dist / 2.0, 0.6))))))
+        arms = ", ".join(
+            f"{az:.0f}° E_tilt {face_tilt if i == 0 else outer_tilt}° M_tilt 0°"
+            for i, az in enumerate(azimuths)
+        )
+        step4 = (
+            f"New 3-sector L900 site at {site_lat:.5f}, {site_lon:.5f}, "
+            f"on {_people(population_per_km2(site_lat, site_lon))}. "
+            f"Sector toward the poor road: {arms}. "
+            f"The nearest existing site is {near_dist:.1f} km away, and the outer tilts land short of it."
+        )
+
+    steps = [
+        {"step": "1", "action": "E-tilt / M-tilt", "proposal": step1},
+        {"step": "2", "action": "Azimuth", "proposal": step2},
+        {"step": "3", "action": "4th sector, L900", "proposal": step3},
+        {"step": "4", "action": "New 3-sector site", "proposal": step4},
+    ]
+    return {
+        "finding": " ".join(finding_lines),
+        "blank_m": blank_m,
+        "steps": steps,
     }
 
-    def _already_serves(rec: dict) -> bool:
-        return (rec.get("sector"), round(float(rec["lat"]), 3)) in served_here
-
-    def _take(rec: dict, away: float, current: dict | None, current_dist: float | None) -> bool:
-        if current is None or current_dist is None or away < current_dist - 0.05:
-            return True
-        if abs(away - current_dist) > 0.25:
-            return False
-        if _already_serves(rec) != _already_serves(current):
-            return _already_serves(rec)
-        return rec.get("layer") == cell.get("layer") and current.get("layer") != cell.get("layer")
-
-    intended = None
-    intended_dist = None
-    for rec in _serving_cells_near(red_lat, red_lon, 8.0):
-        if rec.get("azimuth") is None:
-            continue
-        away = float(_equirect_km(rec["lat"], rec["lon"], red_lat, red_lon))
-        if away < 0.15 or away > 8.0:
-            continue
-        if rec.get("sector") == cell.get("sector") and abs(rec["lat"] - cell["lat"]) < 0.001:
-            continue
-        aim = _bearing_deg(rec["lat"], rec["lon"], red_lat, red_lon)
-        if _ang_diff(rec["azimuth"], aim) > 50.0:
-            continue
-        if _take(rec, away, intended, intended_dist):
-            intended, intended_dist = rec, away
-    for slot in served.values():
-        if slot is dominant:
-            continue
-        sample_dist = _mean_dist(slot)
-        if sample_dist + 0.8 >= dist:
-            continue
-        rec = slot["cell"]
-        if rec.get("azimuth") is None:
-            continue
-        own_lat = sum(slot["elat"]) / len(slot["elat"])
-        own_lon = sum(slot["elon"]) / len(slot["elon"])
-        if float(_equirect_km(own_lat, own_lon, red_lat, red_lon)) > 1.2 and slot["n"] < 3:
-            continue
-        own_off = _ang_diff(rec["azimuth"], _bearing_deg(rec["lat"], rec["lon"], own_lat, own_lon))
-        if own_off > 60.0:
-            continue
-        if _take(rec, sample_dist, intended, intended_dist):
-            intended, intended_dist = rec, sample_dist
-    known_tilt = [value for value in (cell.get("etilt"), cell.get("mtilt")) if value is not None]
-    total_tilt = sum(known_tilt) if known_tilt else None
-    closer_faces = intended is not None and intended_dist + 0.6 < dist
-    low_for_range = dist >= 2.5 and total_tilt is not None and total_tilt <= 4.0
-    overshoot = (not faces) or (dist >= 1.8 and closer_faces) or (low_for_range and closer_faces)
-    if overshoot and intended is not None and closer_faces:
-        near = f"{intended.get('sector')} {intended.get('layer')}".strip()
-        if _already_serves(intended):
-            role = f"already serves part of the red road from {intended_dist:.1f} km"
-        else:
-            role = f"is {intended_dist:.1f} km away and is not on the red samples"
-        finding = (
-            f"{who} is the cell on most of the red road, from {dist:.1f} km, and {face_text}. "
-            f"{_tilt_now(cell)}. "
-            f"{near} faces this spot and {role}. "
-            f"The farther cell is overshooting, so the closer cell is not holding the whole spot."
-        )
-        solution = "\n".join((
-            _tilt_line(cell, 2.0, "downtilt the overshooting cell"),
-            _tilt_line(intended, -2.0, "uptilt the closer cell so it holds the spot"),
-        ))
-        return finding, solution
-    if overshoot:
-        finding = (
-            f"{who} serves the red road from {dist:.1f} km and {face_text}. "
-            f"No closer sector faces this spot, so this cell is reaching it from off its main beam."
-        )
-        return finding, _tilt_line(cell, 2.0, "downtilt so the beam drops off this spot")
-    if dist >= 1.5 and total_tilt is not None and total_tilt >= 6.0:
-        finding = (
-            f"{who} faces the red road and is the closest facing cell, at {dist:.1f} km. "
-            f"{_tilt_now(cell)}. "
-            f"The tilt is steep for that distance, so the beam is landing short of the poor road."
-        )
-        return finding, _tilt_line(cell, -2.0, "uptilt so the beam reaches the spot")
-    if dist < 1.3 and total_tilt is not None and total_tilt <= 3.0:
-        finding = (
-            f"{who} faces the red road from only {dist:.1f} km, with a low tilt "
-            f"({_tilt_now(cell)}). "
-            f"The beam is passing over the near road."
-        )
-        return finding, _tilt_line(cell, 2.0, "downtilt so the beam lands on the near road")
-    finding = (
-        f"{who} serves the red road from {dist:.1f} km and {face_text}. "
-        f"{_tilt_now(cell)}. "
-        f"The cell on the spot is the one that faces it, and the poor road sits in its main coverage."
-    )
-    delta = -2.0 if total_tilt is not None and total_tilt >= 5.0 else 2.0
-    action = "uptilt to open the near coverage" if delta < 0 else "downtilt to tighten the beam on this road"
-    return finding, _tilt_line(cell, delta, action)
 
 
 def _resolve_serving_cell(eci: object, earfcn: object) -> dict | None:
@@ -2816,13 +3088,36 @@ def plot_bad_spot_serial_maps(
         else:
             _add_basemap(ax)
         draw_bad_spot_sector_pies(ax, spot, local, column)
+        blanks = _blank_segments(df, spot)
+        for gap in blanks:
+            ax.plot(
+                [gap["lon1"], gap["lon2"]],
+                [gap["lat1"], gap["lat2"]],
+                color="#111111",
+                linewidth=3.2,
+                linestyle=(0, (1.2, 1.4)),
+                solid_capstyle="round",
+                zorder=24,
+            )
+            ax.plot(
+                [gap["lon1"], gap["lon2"]],
+                [gap["lat1"], gap["lat2"]],
+                color="#FFFFFF",
+                linewidth=1.5,
+                linestyle=(0, (1.2, 1.4)),
+                solid_capstyle="round",
+                zorder=25,
+            )
         hide_map_axes(ax)
         kind = str(spot.get("kind", "consecutive"))
+        blank_m = sum(gap["length_m"] for gap in blanks)
         if kind == "discrete":
             caption = f"Discrete {float(spot['area_km2']):.1f} km²"
         else:
             word = "Poor run" if min_consecutive_m(column) <= 0 else "Consecutive"
             caption = f"{word} {float(spot['length_m']):.0f} m"
+        if blank_m >= 80:
+            caption = f"{caption}  +  blank {blank_m:,.0f} m"
         ax.set_title(caption, fontsize=14, fontweight="bold")
         fig.tight_layout()
         one = work.iloc[[i - 1]].reset_index(drop=True)
