@@ -1062,23 +1062,21 @@ def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series) -> dict
     blanks = _blank_segments(samples, spot)
     blank_m = sum(item["length_m"] for item in blanks)
     bins = _red_bins_inside(samples, column, spot)
-    if bins:
+    runs = _red_runs(bins) if bins else []
+    main: list[dict] = []
+    if runs:
+        # The sector is aimed at the poor road, not at a blank that can sit on the other side of a site.
+        main = max(runs, key=_run_length_m)
+        red_lat = sum(item["lat"] for item in main) / len(main)
+        red_lon = sum(item["lon"] for item in main) / len(main)
+    elif bins:
         red_lat = sum(item["lat"] for item in bins) / len(bins)
         red_lon = sum(item["lon"] for item in bins) / len(bins)
     else:
         red_lat = float(spot["lat"])
         red_lon = float(spot["lon"])
-    if blanks:
-        nearest_blank = min(
-            blanks,
-            key=lambda gap: float(_equirect_km(gap["lat"], gap["lon"], red_lat, red_lon)),
-        )
-        target_lat = nearest_blank["lat"]
-        target_lon = nearest_blank["lon"]
-        target_name = "the blank beside the red road"
-    else:
-        target_lat, target_lon = red_lat, red_lon
-        target_name = "the red road"
+    target_lat, target_lon = red_lat, red_lon
+    target_name = "the red road"
     spot_pop = population_per_km2(target_lat, target_lon)
     sectors = _sectors_near(target_lat, target_lon, 8.5)
     finding_lines = []
@@ -1088,23 +1086,37 @@ def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series) -> dict
         )
     else:
         finding_lines.append("No driven blank inside this circle. The poor road is the red plot.")
-    served: dict[tuple, dict] = {}
-    for item in bins:
-        for end in item.get("ends") or ():
-            cell = _resolve_serving_cell(end.get("eci"), end.get("earfcn"))
-            if cell is None or cell.get("azimuth") is None:
-                continue
-            key = (cell.get("sector"), cell.get("layer"))
-            slot = served.setdefault(key, {"cell": cell, "n": 0})
-            slot["n"] += 1
-    if served:
-        dominant = max(served.values(), key=lambda slot: slot["n"])["cell"]
-        dom_dist = float(_equirect_km(dominant["lat"], dominant["lon"], red_lat, red_lon))
-        dom_off = abs(_signed_deg(dominant["azimuth"], _bearing_deg(dominant["lat"], dominant["lon"], red_lat, red_lon)))
-        who = f"{dominant.get('sector')} {dominant.get('layer')}".strip()
-        finding_lines.append(
-            f"{who} is on the red road from {dom_dist:.1f} km and is {dom_off:.0f}° off its azimuth."
-        )
+    def serving_bits(chosen: list[dict]) -> list[str]:
+        served: dict[tuple, dict] = {}
+        for item in chosen:
+            for end in item.get("ends") or ():
+                cell = _resolve_serving_cell(end.get("eci"), end.get("earfcn"))
+                if cell is None or cell.get("azimuth") is None:
+                    continue
+                key = (cell.get("sector"), cell.get("layer"))
+                slot = served.setdefault(key, {"cell": cell, "n": 0, "lat": 0.0, "lon": 0.0})
+                slot["n"] += 1
+                slot["lat"] += float(end["lat"])
+                slot["lon"] += float(end["lon"])
+        bits = []
+        for slot in sorted(served.values(), key=lambda item: -item["n"])[:4]:
+            cell = slot["cell"]
+            slat = slot["lat"] / slot["n"]
+            slon = slot["lon"] / slot["n"]
+            dist = float(_equirect_km(cell["lat"], cell["lon"], slat, slon))
+            off = abs(_signed_deg(cell["azimuth"], _bearing_deg(cell["lat"], cell["lon"], slat, slon)))
+            who = f"{cell.get('sector')} {cell.get('layer')}".strip()
+            noun = "bin" if slot["n"] == 1 else "bins"
+            bits.append(f"{who} ({slot['n']} {noun}, {dist:.1f} km, {off:.0f}° off)")
+        return bits
+
+    road_bits = serving_bits(main or bins)
+    if road_bits:
+        finding_lines.append("Serving cells on this red road: " + "; ".join(road_bits) + ".")
+    other = [item for item in bins if main and item not in main]
+    other_bits = serving_bits(other)
+    if other_bits:
+        finding_lines.append("Other red samples in this circle: " + "; ".join(other_bits) + ".")
     finding_lines.append(
         f"WorldPop 2020 on {target_name} is {_people(spot_pop)}. "
         f"L900 reach is {L900_REACH_KM:.0f} km, L1800 {_layer_reach_km('L1800'):.1f} km, "
@@ -2059,6 +2071,7 @@ def plot_discrete_coverage_map(
     )
     ax.set_aspect("equal", adjustable="box")
     _add_basemap(ax)
+    add_map_scale_bar(ax)
     ax.set_title(title)
     hide_map_axes(ax)
     fig.tight_layout()
@@ -2108,6 +2121,7 @@ def plot_road_map(
             ax.set_ylim(lat_min, lat_max)
     ax.set_aspect("equal", adjustable="box")
     _add_basemap(ax)
+    add_map_scale_bar(ax)
     hide_map_axes(ax)
     fig.tight_layout()
     fig.savefig(path, dpi=MAP_DPI, facecolor="white", bbox_inches="tight")
@@ -2912,14 +2926,37 @@ def _circle_from_bbox(lon_min: float, lon_max: float, lat_min: float, lat_max: f
     return lon0, lat0, diameter_km / _km_per_deg_lon(lat0), diameter_km / 111.32
 
 
-def add_map_scale_bar(ax, km: float = 4.0) -> None:
+def add_map_scale_bar(ax, km: float | None = None, corner: str = "upper left") -> None:
+    """Scale bar on a map. The length is a round fraction of the view."""
     xlim = ax.get_xlim()
     ylim = ax.get_ylim()
-    lat = ylim[1] - 0.06 * (ylim[1] - ylim[0])
-    lon0 = xlim[0] + 0.05 * (xlim[1] - xlim[0])
+    if xlim[1] <= xlim[0] or ylim[1] <= ylim[0]:
+        return
+    lat_mid = (ylim[0] + ylim[1]) / 2.0
+    span_km = (xlim[1] - xlim[0]) * _km_per_deg_lon(lat_mid)
+    if km is None:
+        raw = span_km / 5.0
+        km = 0.2
+        for choice in (0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 40.0):
+            if choice <= raw * 1.35:
+                km = choice
+    if corner == "lower left":
+        lat = ylim[0] + 0.08 * (ylim[1] - ylim[0])
+    else:
+        lat = ylim[1] - 0.09 * (ylim[1] - ylim[0])
+    lon0 = xlim[0] + 0.045 * (xlim[1] - xlim[0])
     width = km / _km_per_deg_lon(lat)
-    ax.plot([lon0, lon0 + width], [lat, lat], color="#1B1B1B", lw=2.8, solid_capstyle="butt", zorder=6)
-    ax.text(lon0 + width / 2, lat, f"  {km:.0f} km", ha="center", va="bottom", fontsize=8, color="#1B1B1B", zorder=6)
+    tick = 0.012 * (ylim[1] - ylim[0])
+    ax.plot([lon0, lon0 + width], [lat, lat], color="white", lw=5.5, solid_capstyle="butt", zorder=40, clip_on=True)
+    ax.plot([lon0, lon0 + width], [lat, lat], color="#1B1B1B", lw=2.2, solid_capstyle="butt", zorder=41, clip_on=True)
+    ax.plot([lon0, lon0], [lat - tick, lat + tick], color="#1B1B1B", lw=1.3, zorder=41, clip_on=True)
+    ax.plot([lon0 + width, lon0 + width], [lat - tick, lat + tick], color="#1B1B1B", lw=1.3, zorder=41, clip_on=True)
+    label = f"{km:g} km" if km >= 1 else f"{int(round(km * 1000))} m"
+    ax.text(
+        lon0 + width / 2.0, lat + tick, label,
+        ha="center", va="bottom", fontsize=8, color="#1B1B1B", fontweight="bold", zorder=42, clip_on=True,
+        bbox={"boxstyle": "round,pad=0.15", "fc": "white", "ec": "#1B1B1B", "lw": 0.6, "alpha": 0.94},
+    )
 
 
 def _spot_outline(spot: pd.Series) -> tuple[float, float, float, float, float, tuple]:
@@ -3084,6 +3121,8 @@ def plot_bad_spot_map(
         _add_boundary_basemap(ax)
     elif basemap:
         _add_basemap(ax)
+    if not vector:
+        add_map_scale_bar(ax, corner="lower left" if legend_inside else "upper left")
     if legend_inside:
         counts = legend_counts if legend_counts is not None else [0] * len(labels)
         legend = _place_count_legend(ax, _count_legend_handles(labels, colors, counts), legend_title)
@@ -3240,6 +3279,7 @@ def plot_bad_spot_zoom_grid(
         ax.set_aspect("equal", adjustable="box")
         if not vector:
             _add_basemap(ax)
+            add_map_scale_bar(ax)
         if not vector:
             draw_bad_spot_sector_pies(ax, spot)
         if shapes:
@@ -3348,6 +3388,7 @@ def plot_bad_spot_serial_maps(
                 solid_capstyle="round",
                 zorder=25,
             )
+        add_map_scale_bar(ax)
         hide_map_axes(ax)
         kind = str(spot.get("kind", "consecutive"))
         blank_m = sum(gap["length_m"] for gap in blanks)

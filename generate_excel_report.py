@@ -88,7 +88,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.58"
+REPORT_VERSION = "1.59"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -2590,6 +2590,154 @@ def refresh_bad_spot_pies(src: Path | None = None) -> Path:
     return VERSIONED_XLSX
 
 
+def _jpeg_bytes(path: Path) -> bytes:
+    import io
+    from PIL import Image
+
+    image = Image.open(path).convert("RGB")
+    buf = io.BytesIO()
+    image.save(buf, "JPEG", quality=74, optimize=True)
+    return buf.getvalue()
+
+
+def _sheet_pictures(parts: dict[str, bytes], sheet_name: str) -> list[tuple[int, int, str]]:
+    """Pictures on a sheet as (row, col, media path), top to bottom and left to right."""
+    drawings = _sheet_drawings(parts)
+    drawing_name = drawings[sheet_name]
+    rels_name = drawing_name.replace("drawings/", "drawings/_rels/") + ".rels"
+    rels = parts[rels_name].decode("utf-8")
+    rid_media = {}
+    for rel in re.findall(r"<Relationship\b[^>]*/>", rels):
+        rid = re.search(r'Id="([^"]+)"', rel).group(1)
+        target = re.search(r'Target="([^"]+)"', rel).group(1)
+        if target.startswith("/"):
+            media = target.lstrip("/")
+        elif target.startswith("../"):
+            media = "xl/" + target[3:]
+        else:
+            media = "xl/media/" + target.rsplit("/", 1)[-1]
+        rid_media[rid] = media
+    drawing = parts[drawing_name].decode("utf-8")
+    pics = []
+    for block in re.findall(r"<oneCellAnchor>.*?</oneCellAnchor>", drawing, flags=re.S):
+        if "<pic>" not in block:
+            continue
+        row = int(re.search(r"<row>(\d+)</row>", block).group(1))
+        col = int(re.search(r"<col>(\d+)</col>", block).group(1))
+        embed = re.search(r'r:embed="([^"]+)"', block).group(1)
+        pics.append((row, col, rid_media[embed]))
+    pics.sort()
+    return pics
+
+
+def refresh_sheet_maps(src: Path | None = None) -> Path:
+    """Redraw coverage maps, combined views and the DT route with a scale bar.
+
+    Serial bad-spot maps are left for refresh-pies. Pictures are swapped in the
+    zip so the movable circles stay.
+    """
+    from merge_and_analyze import ACTIVE_MERGED, MERGED_CSV, load_active_merged, load_merged_csv
+
+    src = src or REPORT_XLSX
+    if not src.exists():
+        raise SystemExit(f"Missing workbook: {src}")
+    print("Loading drive logs", flush=True)
+    idle_raw = load_merged_csv() if MERGED_CSV.exists() else None
+    active_raw = load_active_merged() if ACTIVE_MERGED.exists() else None
+    if idle_raw is None or active_raw is None:
+        raise SystemExit("Merged drive logs are missing.")
+    idle_raw = _with_layers(idle_raw)
+    active_raw = select_active_report(_with_layers(active_raw))
+    idle_fixed = strongest_fix(idle_raw)
+    idle_track = best_server(idle_fixed)
+    active_track = strongest_location(active_raw)
+    idle_extent = coverage_extent(idle_track)
+    active_extent = coverage_extent(active_track)
+    sheet_images: dict[str, list[Path]] = {}
+    combined: dict[tuple[str, str], Path] = {}
+    for kpi, plot_cov, plot_bad, labels in (
+        ("RSRP", plot_rsrp_coverage_map, plot_rsrp_bad_spot_map, MAP_RSRP_LABELS),
+        ("RSRQ", plot_rsrq_coverage_map, plot_rsrq_bad_spot_map, MAP_RSRQ_LABELS),
+        ("SINR", plot_sinr_coverage_map, plot_sinr_bad_spot_map, MAP_SINR_LABELS),
+    ):
+        del labels
+        ordered: list[Path] = []
+        for tag, base, track, extent, mode_label in (
+            ("", idle_fixed, idle_track, idle_extent, None),
+            ("active", active_raw, active_track, active_extent, "Active"),
+        ):
+            suffix = f"_{tag}" if tag else ""
+            print(f"Drawing {kpi} combined ({tag or 'idle'})", flush=True)
+            spots = find_bad_spots(track, kpi)
+            mode_name = "Active" if tag == "active" else "Idle"
+            title = f"Combined view — {kpi}" + (f" — {mode_label}" if mode_label else "")
+            bad_kwargs = {"extent": extent, "title": title, "shapes": False, "outlines": False}
+            if kpi != "SINR":
+                bad_kwargs["legend_title"] = f"{mode_name} by {kpi}"
+            path = plot_bad(
+                track, spots, PLOTS_DIR / f"excel_bad_spots_{kpi.lower()}{suffix}.png",
+                **bad_kwargs,
+            )
+            combined[(kpi, tag)] = path
+            ordered.append(path)
+            band_paths = []
+            for layer in REPORT_LAYERS:
+                print(f"Drawing {kpi} {layer} ({tag or 'idle'})", flush=True)
+                part = filter_by_layer(base, layer)
+                if tag != "active":
+                    part = best_server(part)
+                band_paths.append(plot_cov(
+                    part, PLOTS_DIR / f"excel_route_{kpi.lower()}_{layer}{suffix}.png",
+                    layer=layer, extent=extent, mode_label=mode_label,
+                ))
+            if tag == "":
+                idle_bands = band_paths
+            else:
+                for left, right in zip(idle_bands, band_paths):
+                    ordered.append(left)
+                    ordered.append(right)
+        sheet_images[kpi] = ordered
+        print(f"  {kpi}: {len(ordered)} maps", flush=True)
+
+    print("Drawing the DT route", flush=True)
+    route = plot_road_map(active_track, PLOTS_DIR / "excel_cover_active_route.png")
+
+    print("Updating the workbook", flush=True)
+    with zipfile.ZipFile(src) as zf:
+        names = zf.namelist()
+        parts = {name: zf.read(name) for name in names}
+    for sheet, paths in sheet_images.items():
+        pics = _sheet_pictures(parts, sheet)
+        if len(pics) != len(paths):
+            raise SystemExit(f"{sheet}: {len(pics)} pictures, {len(paths)} new maps")
+        for (_row, _col, media), path in zip(pics, paths):
+            parts[media] = _jpeg_bytes(path)
+        print(f"  {sheet}: replaced {len(paths)} maps", flush=True)
+    for sheet, key in (("Bad Spot RSRP", ("RSRP", "")), ("Bad Spot RSRP_Active", ("RSRP", "active"))):
+        pics = _sheet_pictures(parts, sheet)
+        if not pics:
+            raise SystemExit(f"{sheet}: no pictures")
+        _row, _col, media = pics[0]
+        parts[media] = _jpeg_bytes(combined[key])
+        print(f"  {sheet}: replaced the combined view", flush=True)
+    cover_pics = _sheet_pictures(parts, "Cover")
+    route_pics = [pic for pic in cover_pics if pic[0] >= 70]
+    if len(route_pics) != 1:
+        raise SystemExit(f"Cover: expected one DT route picture, found {len(cover_pics)}")
+    parts[route_pics[0][2]] = _jpeg_bytes(route)
+    print("  Cover: replaced the DT route", flush=True)
+
+    tmp = src.with_suffix(".tmp.xlsx")
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name in names:
+            zf.writestr(name, parts[name])
+    tmp.replace(VERSIONED_XLSX)
+    if VERSIONED_XLSX.resolve() != REPORT_XLSX.resolve():
+        shutil.copy2(VERSIONED_XLSX, REPORT_XLSX)
+    print(f"Wrote {VERSIONED_XLSX}", flush=True)
+    return VERSIONED_XLSX
+
+
 _ADVICE_NOTE_OLD = (
     "The columns to the right of each map are a suggestion table: E_tilt and M_tilt first, then azimuth using population, then a 4th L900 sector, then a new 3-sector site. A blank with no plot inside the circle is counted with that bad spot.",
     "The space to the right of each map is that suggestion table. A blank with no plot inside the circle is counted with that bad spot.",
@@ -2845,10 +2993,41 @@ def _shift_rows_down(xml: str, start: int, count: int) -> str:
     return re.sub(r'ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"', shift_ref, xml)
 
 
+def _replace_summary_counts(xml: str, counts: dict[str, int], total: int) -> str:
+    """Refresh the four count cells when the summary table is already on the sheet."""
+    values = {
+        "Tilt and azimuth": f"{counts['tune']:,}",
+        "4th sector, L900": f"{counts['fourth']:,}",
+        "New 3-sector site": f"{counts['new']:,}",
+        "All bad spots": f"{total:,}",
+    }
+
+    def repl_row(match: re.Match) -> str:
+        row = match.group(0)
+        for label, value in values.items():
+            if f">{label}<" not in row:
+                continue
+            return re.sub(
+                r'(<c r="B\d+"[^>]*>.*?<t[^>]*>)([^<]*)(</t>)',
+                lambda found: found.group(1) + value + found.group(3),
+                row,
+                count=1,
+                flags=re.S,
+            )
+        return row
+
+    return re.sub(r"<row r=\"\d+\"[^>]*>(?:(?!</row>).)*</row>", repl_row, xml)
+
+
 def _insert_solution_summary(xml: str, plans: list[dict]) -> str:
     """Put the solution counts between the last map and the identified-spots table."""
+    counts = {"tune": 0, "fourth": 0, "new": 0}
+    for plan in plans:
+        kind = str(plan.get("kind") or "")
+        if kind in counts:
+            counts[kind] += 1
     if "Summary of proposed solutions" in xml:
-        return xml
+        return _replace_summary_counts(xml, counts, len(plans))
     found = re.search(
         r'<row r="(\d+)"[^>]*>(?:(?!</row>).)*Identified [^<]*bad spots(?:(?!</row>).)*</row>',
         xml,
@@ -2858,11 +3037,6 @@ def _insert_solution_summary(xml: str, plans: list[dict]) -> str:
         raise SystemExit("Identified bad-spot title was not found")
     start = int(found.group(1))
     xml = _shift_rows_down(xml, start, 8)
-    counts = {"tune": 0, "fourth": 0, "new": 0}
-    for plan in plans:
-        kind = str(plan.get("kind") or "")
-        if kind in counts:
-            counts[kind] += 1
     lines = [
         (start, "Summary of proposed solutions", None, 6),
         (start + 2, "Solution", "Count", 7),
@@ -3056,6 +3230,14 @@ if __name__ == "__main__":
         if result["problems"]:
             raise SystemExit("Excel view checks failed: " + "; ".join(result["problems"]))
         print("Verified: findings table added and the movable circles are still present.")
+        raise SystemExit(0)
+    if len(sys.argv) > 1 and sys.argv[1] == "refresh-maps":
+        path = refresh_sheet_maps()
+        result = verify_report(path)
+        print(result["problems"], result.get("circle_shapes"))
+        if result["problems"]:
+            raise SystemExit("Excel view checks failed: " + "; ".join(result["problems"]))
+        print("Verified: scale bars on the sheet maps, and the movable circles are still present.")
         raise SystemExit(0)
     if len(sys.argv) > 1 and sys.argv[1] == "refresh-pies":
         path = refresh_bad_spot_pies()

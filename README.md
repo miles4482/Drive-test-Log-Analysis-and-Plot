@@ -117,7 +117,7 @@ Every coverage map and bad-spot map is drawn on Esri World Imagery. The combined
 
 ## Web coverage map (v1.56)
 
-Download, unzip, and open `Bogura_DriveTest_Web_v1.56.html`. The map is the v1.54 page, republished under v1.56. The Excel workbook is v1.58. This page stays v1.56.
+Download, unzip, and open `Bogura_DriveTest_Web_v1.56.html`. The map is the v1.54 page, republished under v1.56. The Excel workbook is v1.59. This page stays v1.56.
 
 **v1.56 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.56.zip
 
@@ -134,21 +134,25 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
-## Download Excel report (v1.58)
+## Download Excel report (v1.59)
 
-**v1.58 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.58.xlsx
+**v1.59 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.59.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.58.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.59.xlsx
 
-Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.57.xlsx
+Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.58.xlsx
 
 The web map stays at v1.56. This Excel update does not change it.
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.58.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.59.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+
+### Scale bar, and the solution aimed at the red road (v1.59)
+
+Every coverage map, the DT route, and every bad-spot map has a scale bar. The sector choice is aimed at the red samples. A blank inside the circle is still counted with that spot, and it no longer steers the tilt onto a sector that faces the blank instead of the red road. The findings name the serving cells on those red samples.
 
 ### Proposed site on the map, and a solution count (v1.58)
 
