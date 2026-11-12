@@ -88,7 +88,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.56"
+REPORT_VERSION = "1.57"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -1378,7 +1378,7 @@ BAD_SPOT_KPI_NOTES = {
 }
 
 
-def _bad_spot_table_rows(spots: pd.DataFrame, *, include_kpi: bool = True) -> list[list]:
+def _bad_spot_table_rows(spots: pd.DataFrame, *, include_kpi: bool = True, plans: list[dict] | None = None) -> list[list]:
     rows = []
     for n, (_, s) in enumerate(spots.iterrows(), start=1):
         top_cell = "" if pd.isna(s.get("top_cell", pd.NA)) else int(s["top_cell"])
@@ -1406,6 +1406,9 @@ def _bad_spot_table_rows(spots: pd.DataFrame, *, include_kpi: bool = True) -> li
                 top_cell,
             ]
         )
+        if plans is not None:
+            plan = plans[n - 1]
+            row.extend([plan.get("site", ""), plan.get("population", ""), plan.get("final", "")])
         rows.append(row)
     return rows
 
@@ -1507,7 +1510,7 @@ def build_kpi_bad_spot_sheet(
     samples: pd.DataFrame | None = None,
 ) -> None:
     """Combined route with no circles, then one large map per bad spot down the left side."""
-    last_col = 16
+    last_col = 17
     map_span = 8
     em = "\u2014"
     banner(
@@ -1519,6 +1522,9 @@ def build_kpi_bad_spot_sheet(
     set_widths(ws, {get_column_letter(i): 13 for i in range(1, last_col + 1)})
     ws.column_dimensions["A"].width = 16
     ws.column_dimensions["C"].width = 24
+    ws.column_dimensions["O"].width = 18
+    ws.column_dimensions["P"].width = 16
+    ws.column_dimensions["Q"].width = 64
     section_bar(ws, 3, mode, 1, last_col)
     ws.merge_cells(start_row=4, start_column=1, end_row=7, end_column=last_col)
     active_rule = ""
@@ -1545,9 +1551,12 @@ def build_kpi_bad_spot_sheet(
         "and runs to each red sample inside the orange circle. That cell is the Cell Id on the sample, "
         "on L900, L1800, L2100 or L2600, and it has to be in System DUMP.xlsb. Every serving cell is drawn. "
         "The length beside the red is the full red stretch, and a short gap of good coverage stays in that length. "
-        "The columns to the right of each map are a suggestion table: E_tilt and M_tilt first, "
-        "then azimuth using population, then a 4th L900 sector, then a new 3-sector site. "
-        "A blank with no plot inside the circle is counted with that bad spot. "
+        "The columns to the right of each map are a suggestion table. Azimuth and tilt are used "
+        "when a sector is within about 2.5 km. A 4th L900 sector is required when the spot is in "
+        "the null between sectors and within 1.5 km, and it is not used past 2 km. Otherwise the "
+        "table proposes a new 3-sector site. A blank with no plot inside the circle is counted "
+        "with that bad spot. The list at the bottom has every bad spot, with Site, Population "
+        "and Final solution on the right. "
         "Several circles can sit inside one 10 km neighbourhood when the poor "
         "road is not one stretch. A discrete patch of at least 1 km\u00b2 is a dotted circle. "
         + _detection_summary(kpi, spots)
@@ -1575,11 +1584,15 @@ def build_kpi_bad_spot_sheet(
         _, map_h = add_image(ws, combined_map, "A11", width=760, height=900)
 
     cursor = 11 + max(map_h, 660) // 20 + 3
+    listed = spots if spots is None or len(spots) <= BAD_SPOT_TABLE_MAX else spots.head(BAD_SPOT_TABLE_MAX)
+    plans = None
+    if samples is not None and listed is not None and not listed.empty:
+        plans = [bad_spot_advice(samples, kpi, listed.iloc[i]) for i in range(len(listed))]
     maps = [p for p in (serial_maps or []) if p is not None and p.exists()]
     for i, path in enumerate(maps, start=1):
         section_bar(ws, cursor, f"Bad Spot {i}", 1, map_span)
-        if samples is not None and spots is not None and i <= len(spots):
-            place_bad_spot_advice(ws, cursor, bad_spot_advice(samples, kpi, spots.iloc[i - 1]))
+        if plans is not None and i <= len(plans):
+            place_bad_spot_advice(ws, cursor, plans[i - 1])
         _, spot_h = add_image(ws, path, f"A{cursor + 2}", width=780, height=720)
         cursor = cursor + 2 + max(spot_h, 360) // 20 + 3
     table_row = cursor if maps else cursor + 1
@@ -1603,9 +1616,11 @@ def build_kpi_bad_spot_sheet(
         "Length (m)",
         "Area (km\u00b2)",
         "Top Cell Id",
+        "Site",
+        "Population",
+        "Final solution",
     ]
-    listed = spots if spots is None or len(spots) <= BAD_SPOT_TABLE_MAX else spots.head(BAD_SPOT_TABLE_MAX)
-    rows = _bad_spot_table_rows(listed, include_kpi=False)
+    rows = _bad_spot_table_rows(listed, include_kpi=False, plans=plans)
     write_table(
         ws,
         table_row + 1,
@@ -1626,6 +1641,11 @@ def build_kpi_bad_spot_sheet(
             12: "0.00",
         },
     )
+    if plans is not None:
+        for offset in range(len(rows)):
+            cell = ws.cell(table_row + 2 + offset, 17)
+            cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+            ws.row_dimensions[table_row + 2 + offset].height = 48
     note_row = table_row + 2 + len(rows)
     ws.merge_cells(start_row=note_row, start_column=1, end_row=note_row + 1, end_column=13)
     if kpi == "SINR":
@@ -1642,7 +1662,8 @@ def build_kpi_bad_spot_sheet(
         combined_line
         + "Each bad spot above is one large map. Its orange circle is a separate shape with the same "
         "name as the Circle column, so it can be dragged on its own. The space to the right of each "
-        "map is that suggestion table. A blank with no plot inside the circle is counted with that bad spot. "
+        "map is that suggestion table. Site, Population and Final solution are filled for every bad spot "
+        "in the table below. A blank with no plot inside the circle is counted with that bad spot. "
         "Poor share is the share of raw samples inside the spot box that are at or "
         "below the threshold. Length is the poor road inside the circle, and a single 50 m bin is "
         "reported as 50 m. Map numbers are omitted.",
@@ -1935,8 +1956,8 @@ def verify_report(path: Path) -> dict:
             if not y_title:
                 info["problems"].append(f"{name}/{title}: missing vertical axis title")
     for name in (
-        "Bad Spot RSRP", "Bad Spot RSRQ", "Bad Spot SINR",
-        "Bad Spot RSRP_Active", "Bad Spot RSRQ_Active", "Bad Spot SINR_Active",
+        "Bad Spot RSRP",
+        "Bad Spot RSRP_Active",
     ):
         if name not in info["sheets"]:
             info["problems"].append(f"missing {name} sheet")
@@ -2300,11 +2321,7 @@ def build_report(df: pd.DataFrame, active: pd.DataFrame | None = None, out_path:
     rsrq_ws = wb.create_sheet("RSRQ")
     sinr_ws = wb.create_sheet("SINR")
     bad_rsrp_ws = wb.create_sheet("Bad Spot RSRP")
-    bad_rsrq_ws = wb.create_sheet("Bad Spot RSRQ")
-    bad_sinr_ws = wb.create_sheet("Bad Spot SINR")
     bad_rsrp_a = wb.create_sheet("Bad Spot RSRP_Active")
-    bad_rsrq_a = wb.create_sheet("Bad Spot RSRQ_Active")
-    bad_sinr_a = wb.create_sheet("Bad Spot SINR_Active")
     time_ws = wb.create_sheet("RSRP vs KPIs")
     time_active_ws = wb.create_sheet("RSRP vs KPIs_Active")
     sample_ws = wb.create_sheet("Sample Log")
@@ -2348,25 +2365,9 @@ def build_report(df: pd.DataFrame, active: pd.DataFrame | None = None, out_path:
         bad_rsrp_ws, "RSRP", idle["rsrp_spots"], idle["rsrp_bad"], idle["rsrp_zooms"],
         samples=idle["map_df"],
     )
-    build_kpi_bad_spot_sheet(
-        bad_rsrq_ws, "RSRQ", idle["rsrq_spots"], idle["rsrq_bad"], idle["rsrq_zooms"],
-        samples=idle["map_df"],
-    )
-    build_kpi_bad_spot_sheet(
-        bad_sinr_ws, "SINR", idle["sinr_spots"], idle["sinr_bad"], idle["sinr_zooms"],
-        samples=idle["map_df"],
-    )
     if active_view is not None:
         build_kpi_bad_spot_sheet(
             bad_rsrp_a, "RSRP", active_view["rsrp_spots"], active_view["rsrp_bad"], active_view["rsrp_zooms"],
-            mode="Active Mode", samples=active_view["map_df"],
-        )
-        build_kpi_bad_spot_sheet(
-            bad_rsrq_a, "RSRQ", active_view["rsrq_spots"], active_view["rsrq_bad"], active_view["rsrq_zooms"],
-            mode="Active Mode", samples=active_view["map_df"],
-        )
-        build_kpi_bad_spot_sheet(
-            bad_sinr_a, "SINR", active_view["sinr_spots"], active_view["sinr_bad"], active_view["sinr_zooms"],
             mode="Active Mode", samples=active_view["map_df"],
         )
         build_rsrp_vs_sheet(
@@ -2460,8 +2461,6 @@ def refresh_bad_spot_pies(src: Path | None = None) -> Path:
         suffix = f"_{tag}" if tag else ""
         for kpi, classify, labels, colors in (
             ("RSRP", rsrp_map_class, MAP_RSRP_LABELS, MAP_RSRP_COLORS),
-            ("RSRQ", rsrq_map_class, MAP_RSRQ_LABELS, MAP_RSRQ_COLORS),
-            ("SINR", sinr_map_class, MAP_SINR_LABELS, MAP_SINR_COLORS),
         ):
             print(f"Drawing {kpi} bad spots ({tag or 'idle'})", flush=True)
             spots = find_bad_spots(frame, kpi)
@@ -2566,12 +2565,18 @@ def refresh_bad_spot_pies(src: Path | None = None) -> Path:
 
 
 _ADVICE_NOTE_OLD = (
-    "The columns to the right of each map are the finding and the E_tilt and M_tilt change.",
-    "The space to the right of each map is the finding and the E_tilt and M_tilt suggestion.",
-)
-_ADVICE_NOTE_NEW = (
     "The columns to the right of each map are a suggestion table: E_tilt and M_tilt first, then azimuth using population, then a 4th L900 sector, then a new 3-sector site. A blank with no plot inside the circle is counted with that bad spot.",
     "The space to the right of each map is that suggestion table. A blank with no plot inside the circle is counted with that bad spot.",
+)
+_ADVICE_NOTE_NEW = (
+    "The columns to the right of each map are a suggestion table. Azimuth and tilt are used when a sector is within about 2.5 km. A 4th L900 sector is required when the spot is in the null between sectors and within 1.5 km, and it is not used past 2 km. A new 3-sector site is the final step when those cannot cover the spot. A blank with no plot inside the circle is counted with that bad spot.",
+    "The space to the right of each map is that suggestion table. Site, Population and Final solution are filled for every bad spot in the table below. A blank with no plot inside the circle is counted with that bad spot.",
+)
+_DROP_BAD_SPOT_SHEETS = (
+    "Bad Spot RSRQ",
+    "Bad Spot SINR",
+    "Bad Spot RSRQ_Active",
+    "Bad Spot SINR_Active",
 )
 
 
@@ -2722,6 +2727,131 @@ def _add_advice_styles(styles: str) -> str:
     return styles.replace("</cellXfs>", added + "</cellXfs>", 1)
 
 
+def _inline_cell(ref: str, style: int, text: str) -> str:
+    return (
+        f'<c r="{ref}" s="{style}" t="inlineStr"><is>'
+        f'<t xml:space="preserve">{_xml_text(text)}</t></is></c>'
+    )
+
+
+def _add_solution_columns(xml: str, plans: list[dict]) -> str:
+    """Add Site, Population and Final solution to the right of the bad-spot table."""
+    header = re.search(
+        r'<row r="(\d+)"[^>]*>(?:(?!</row>).)*<t>Top Cell Id</t>(?:(?!</row>).)*</row>',
+        xml,
+        flags=re.S,
+    )
+    if header is None:
+        raise SystemExit("Bad-spot table header was not found")
+    header_row = header.group(1)
+    if "Final solution" not in header.group(0):
+        extra = (
+            _inline_cell(f"O{header_row}", 7, "Site")
+            + _inline_cell(f"P{header_row}", 7, "Population")
+            + _inline_cell(f"Q{header_row}", 7, "Final solution")
+        )
+        xml = xml.replace(header.group(0), header.group(0).replace("</row>", extra + "</row>"), 1)
+    found = []
+    for match in re.finditer(r'<row r="(\d+)"([^>]*)>(.*?)</row>', xml, flags=re.S):
+        row_n = match.group(1)
+        if re.search(rf'<c r="A{row_n}"[^>]*>\s*<is><t>Circle \d+</t>', match.group(0)):
+            found.append(match)
+    if len(found) != len(plans):
+        raise SystemExit(f"Bad-spot table has {len(found)} rows and {len(plans)} solutions")
+    pieces = []
+    last = 0
+    for match, plan in zip(found, plans):
+        row_n = match.group(1)
+        attrs = match.group(2)
+        body = match.group(3)
+        pieces.append(xml[last:match.start()])
+        if f'r="Q{row_n}"' not in body:
+            if "ht=" not in attrs:
+                attrs += ' ht="52" customHeight="1"'
+            body += (
+                _inline_cell(f"O{row_n}", 20, str(plan.get("site", "")))
+                + _inline_cell(f"P{row_n}", 20, str(plan.get("population", "")))
+                + _inline_cell(f"Q{row_n}", 37, str(plan.get("final", "")))
+            )
+        pieces.append(f'<row r="{row_n}"{attrs}>{body}</row>')
+        last = match.end()
+    pieces.append(xml[last:])
+    xml = "".join(pieces)
+    xml = re.sub(
+        r'<col width="13" customWidth="1" min="15" max="15" />',
+        '<col width="18" customWidth="1" min="15" max="15" />',
+        xml,
+        count=1,
+    )
+    xml = re.sub(
+        r'<col width="13" customWidth="1" min="16" max="16" />',
+        '<col width="16" customWidth="1" min="16" max="16" />',
+        xml,
+        count=1,
+    )
+    if 'min="17"' not in xml:
+        xml = xml.replace("</cols>", '<col width="64" customWidth="1" min="17" max="17" /></cols>', 1)
+    xml = re.sub(r'(<dimension ref="A1:)[A-Z]+(\d+")', r"\1Q\2", xml, count=1)
+    marker = "Site, Population and Final solution on the right are filled for every bad spot in this table."
+    if marker not in xml and "Map numbers are omitted." in xml:
+        xml = xml.replace("Map numbers are omitted.", "Map numbers are omitted. " + marker, 1)
+    return xml
+
+
+def _drop_workbook_sheets(parts: dict[str, bytes], sheet_names: tuple[str, ...]) -> None:
+    """Remove named sheets, their drawings, and pictures nothing else uses."""
+    wb_xml = parts["xl/workbook.xml"].decode("utf-8")
+    rels_xml = parts["xl/_rels/workbook.xml.rels"].decode("utf-8")
+    worksheets = []
+    for name in sheet_names:
+        match = re.search(
+            rf'<sheet name="{re.escape(name)}" sheetId="\d+" state="[^"]+" r:id="([^"]+)" />',
+            wb_xml,
+        )
+        if match is None:
+            continue
+        rid = match.group(1)
+        wb_xml = wb_xml.replace(match.group(0), "")
+        rel = re.search(rf'<Relationship\b[^>]*Id="{rid}"[^>]*/>', rels_xml)
+        if rel is None:
+            raise SystemExit(f"Workbook relationship {rid} for {name} was not found")
+        target = re.search(r'Target="([^"]+)"', rel.group(0)).group(1).lstrip("/")
+        rels_xml = rels_xml.replace(rel.group(0), "")
+        worksheets.append(target)
+    parts["xl/workbook.xml"] = wb_xml.encode("utf-8")
+    parts["xl/_rels/workbook.xml.rels"] = rels_xml.encode("utf-8")
+    if not worksheets:
+        return
+    drop = set(worksheets)
+    for sheet in worksheets:
+        rels_name = sheet.replace("worksheets/", "worksheets/_rels/") + ".rels"
+        rels = parts.get(rels_name, b"").decode("utf-8")
+        for target in re.findall(r'Target="([^"]+)"', rels):
+            path = target.lstrip("/")
+            if path.startswith("xl/"):
+                drop.add(path)
+                drawing_rels = path.replace("drawings/", "drawings/_rels/") + ".rels"
+                drawing = parts.get(drawing_rels, b"").decode("utf-8")
+                for media in re.findall(r'Target="([^"]+)"', drawing):
+                    drop.add(media.lstrip("/"))
+                drop.add(drawing_rels)
+        drop.add(rels_name)
+    kept_text = []
+    for name, body in parts.items():
+        if name in drop or not name.endswith(".rels"):
+            continue
+        kept_text.append(body.decode("utf-8"))
+    still_used = "\n".join(kept_text)
+    for path in list(drop):
+        if path.startswith("xl/media/") and path in still_used:
+            drop.remove(path)
+    content = parts["[Content_Types].xml"].decode("utf-8")
+    for path in drop:
+        content = re.sub(rf'<Override PartName="/{re.escape(path)}"[^>]*/>', "", content)
+        parts.pop(path, None)
+    parts["[Content_Types].xml"] = content.encode("utf-8")
+
+
 def write_bad_spot_advice(src: Path | None = None) -> Path:
     """Graft the findings table onto the six bad-spot sheets without rewriting the file.
 
@@ -2744,18 +2874,19 @@ def write_bad_spot_advice(src: Path | None = None) -> Path:
     active_track = best_carrier(active)
     tracks = {
         "Bad Spot RSRP": (idle_track, "RSRP"),
-        "Bad Spot RSRQ": (idle_track, "RSRQ"),
-        "Bad Spot SINR": (idle_track, "SINR"),
         "Bad Spot RSRP_Active": (active_track, "RSRP"),
-        "Bad Spot RSRQ_Active": (active_track, "RSRQ"),
-        "Bad Spot SINR_Active": (active_track, "SINR"),
     }
-    advice_for: dict[str, list[tuple[str, str]]] = {}
+    advice_for: dict[str, list[dict]] = {}
     for sheet, (frame, kpi) in tracks.items():
         print(f"Advice for {sheet}", flush=True)
-        spots = find_bad_spots(frame, kpi).head(BAD_SPOT_MAX_ZOOMS)
+        spots = find_bad_spots(frame, kpi)
+        if len(spots) > BAD_SPOT_TABLE_MAX:
+            spots = spots.head(BAD_SPOT_TABLE_MAX)
         advice_for[sheet] = [bad_spot_advice(frame, kpi, spots.iloc[i]) for i in range(len(spots))]
-        print(f"  {len(advice_for[sheet])} spots", flush=True)
+        kinds: dict[str, int] = {}
+        for plan in advice_for[sheet]:
+            kinds[plan["kind"]] = kinds.get(plan["kind"], 0) + 1
+        print(f"  {len(advice_for[sheet])} spots {kinds}", flush=True)
 
     with zipfile.ZipFile(src) as zf:
         names = zf.namelist()
@@ -2773,21 +2904,25 @@ def write_bad_spot_advice(src: Path | None = None) -> Path:
                 xml,
             )
         ]
-        if len(headers) != len(pairs):
-            raise SystemExit(f"{sheet}: {len(headers)} headers, {len(pairs)} advice rows")
+        map_plans = pairs[:BAD_SPOT_MAX_ZOOMS]
+        if len(headers) != len(map_plans):
+            raise SystemExit(f"{sheet}: {len(headers)} headers, {len(map_plans)} advice rows")
         rows: dict[int, str] = {}
         merges: list[str] = []
         xml = _strip_advice_rows(xml, headers)
-        for (header, number), plan in zip(headers, pairs):
+        for (header, number), plan in zip(headers, map_plans):
             if number < 1:
                 raise SystemExit(f"{sheet}: unexpected header {number}")
             added_rows, added_merges = _advice_sheet_rows(header, plan)
             rows.update(added_rows)
             merges.extend(added_merges)
         xml = _insert_sheet_rows(xml, rows, merges)
+        xml = _add_solution_columns(xml, pairs)
         for old, new in zip(_ADVICE_NOTE_OLD, _ADVICE_NOTE_NEW):
             if old not in xml:
-                raise SystemExit(f"{sheet}: missing note sentence {old!r}")
+                if new not in xml:
+                    raise SystemExit(f"{sheet}: missing note sentence {old!r}")
+                continue
             xml = xml.replace(old, new)
         sheet_xml[sheet] = xml.encode("utf-8")
     # write the updated sheet bytes back onto their zip paths
@@ -2802,12 +2937,14 @@ def write_bad_spot_advice(src: Path | None = None) -> Path:
             parts[rid_target[node.attrib[f"{rel_ns}id"]]] = sheet_xml[name]
     parts["xl/styles.xml"] = _add_advice_styles(parts["xl/styles.xml"].decode("utf-8")).encode("utf-8")
     for name, body in drawings_before.items():
-        if parts[name] != body:
+        if parts.get(name) != body:
             raise SystemExit(f"Drawing changed while adding advice: {name}")
+    _drop_workbook_sheets(parts, _DROP_BAD_SPOT_SHEETS)
     tmp = src.with_suffix(".tmp.xlsx")
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
         for name in names:
-            zf.writestr(name, parts[name])
+            if name in parts:
+                zf.writestr(name, parts[name])
     tmp.replace(VERSIONED_XLSX)
     if VERSIONED_XLSX.resolve() != REPORT_XLSX.resolve():
         shutil.copy2(VERSIONED_XLSX, REPORT_XLSX)

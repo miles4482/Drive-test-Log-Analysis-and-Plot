@@ -117,7 +117,7 @@ Every coverage map and bad-spot map is drawn on Esri World Imagery. The combined
 
 ## Web coverage map (v1.56)
 
-Download, unzip, and open `Bogura_DriveTest_Web_v1.56.html`. The map is the v1.54 page, republished under v1.56 so the web and the workbook stay on the same version.
+Download, unzip, and open `Bogura_DriveTest_Web_v1.56.html`. The map is the v1.54 page, republished under v1.56. The Excel workbook moved to v1.57 without changing this page.
 
 **v1.56 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.56.zip
 
@@ -134,23 +134,27 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
-## Download Excel report (v1.56)
+## Download Excel report (v1.57)
 
-**v1.56 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.56.xlsx
+**v1.57 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.57.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.56.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.57.xlsx
 
-Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.55.xlsx
+Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.56.xlsx
+
+The web map stays at v1.56. This Excel update does not change it.
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.56.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.57.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
 
-### Suggestion table beside each bad spot (v1.56)
+### RSRP bad spots only, with a final solution on every row (v1.57)
 
-A driven stretch with no plot inside the orange circle is counted with that bad spot. The table on the right has four steps, and it stops at the first one that covers the red road and the blank. Step 1 changes E_tilt and M_tilt of the cells around the spot, through 360°. Step 2 turns one azimuth when the spot sits in the null between two sectors, and only when WorldPop 2020 shows the turn still serves the customers. Step 3 adds one L900 sector on an existing site, aimed at the hole, without moving the sectors that are already there. The distance is checked against an 8 km L900 reach; L1800, L2100 and L2600 are shorter in proportion to frequency. Step 4 proposes a new 3-sector L900 site, with an azimuth and an E_tilt and M_tilt for each sector, when no existing site can carry that sector.
+The workbook no longer has Bad Spot RSRQ, Bad Spot SINR, Bad Spot RSRQ_Active, or Bad Spot SINR_Active. Idle and Active each keep the RSRP bad-spot sheet. Every bad spot is listed, not only the 16 maps. The table adds Site, Population, and Final solution on the right.
+
+A blank with no plot inside the circle is still part of that bad spot. The final step follows the distance. Inside about 2.5 km, azimuth and tilt of a facing sector can cover the spot, and the turn is kept only when WorldPop 2020 still serves the customers on the old bearing. A spot in the null between two sectors and within 1.5 km gets a new L900 sector aimed through that null. One or two sites inside 2.5 km use that 4th sector when the spot is in their null and the site is inside 2 km. Several nearby sites are tuned when one of them already faces the spot; otherwise a 4th sector inside 2 km is used. A 4th sector past 2 km is not proposed. If none of those cover the spot, the final step is a new 3-sector L900 site with an azimuth, E_tilt, and M_tilt for each sector.
 
 ### Serving-cell lines on the bad-spot maps (v1.53)
 
@@ -178,8 +182,8 @@ Sheet banners do not include the file version. The filename still carries the ve
 | --- | --- |
 | Cover | Idle dataset, KPI tables, and histograms on top. Active Mode dataset, RSRP / RSRQ / SINR histograms, DT route, and drive details below |
 | RSRP / RSRQ / SINR | Idle combined and L900 / L1800 / L2100 / L2600 maps on the left; Active Robi maps on the right |
-| Bad Spot RSRP / RSRQ / SINR | Idle bad spots, one sheet per KPI |
-| Bad Spot RSRP_Active / RSRQ_Active / SINR_Active | Active Robi bad spots, same rules, one sheet per KPI |
+| Bad Spot RSRP | Idle RSRP bad spots, with Site, Population and Final solution for every spot |
+| Bad Spot RSRP_Active | Active Robi RSRP bad spots, same columns |
 | RSRP vs KPIs | Idle: RSRP vs SINR, RSRP vs RSRQ, dual-axis chart, scatter with trend |
 | RSRP vs KPIs_Active | The same chart set for the Active Robi UE |
 | Sample Log | Evenly spaced subset of the Idle samples |

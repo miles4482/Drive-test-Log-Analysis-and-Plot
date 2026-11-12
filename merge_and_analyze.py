@@ -717,16 +717,324 @@ def _not_required(reason: str) -> str:
     return "Not required. " + reason
 
 
-def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series) -> dict:
-    """Finding and a four-step suggestion for one bad spot.
+# Azimuth and tilt are used when a sector is within about 2 to 2.5 km.
+# A 4th sector is required in the null inside 1.5 km, and it is not used past 2 km.
+TUNE_KM = 2.5
+FOURTH_MUST_KM = 1.5
+FOURTH_RISK_KM = 2.0
 
-    Blank stretches with no plot inside the circle are counted with the spot.
-    Step 1 changes E_tilt and M_tilt of cells around the spot, through 360°.
-    Step 2 turns one azimuth when the spot sits in the null between two sectors,
-    and only when WorldPop says that turn still serves the customers.
-    Step 3 adds one L900 sector when tilt and azimuth cannot fill the hole
-    without moving the coverage that is already there.
-    Step 4 proposes a new 3-sector site when no existing site can carry that sector.
+
+def _sites_around(sectors: list[dict], lat: float, lon: float) -> list[dict]:
+    """One record per site, with the distance and whether the spot sits in a null."""
+    groups: dict[tuple, list[dict]] = {}
+    for rec in sectors:
+        if rec.get("azimuth") is None:
+            continue
+        key = (
+            rec.get("site") or rec.get("sector") or "",
+            round(float(rec["lat"]), 4),
+            round(float(rec["lon"]), 4),
+        )
+        groups.setdefault(key, []).append(rec)
+    sites = []
+    for (name, _lat, _lon), recs in groups.items():
+        dist = float(_equirect_km(recs[0]["lat"], recs[0]["lon"], lat, lon))
+        bearing = _bearing_deg(recs[0]["lat"], recs[0]["lon"], lat, lon)
+        azimuths = [float(rec["azimuth"]) for rec in recs]
+        nearest_off = min(abs(_signed_deg(az, bearing)) for az in azimuths)
+        sites.append({
+            "name": name or str(recs[0].get("sector") or "site"),
+            "dist": dist,
+            "bearing": bearing,
+            "nearest_off": nearest_off,
+            "in_null": len(azimuths) >= 2 and 30.0 < nearest_off <= 70.0,
+            "recs": recs,
+            "height": next((rec.get("height") for rec in recs if rec.get("height")), None),
+        })
+    sites.sort(key=lambda item: item["dist"])
+    return sites
+
+
+def _tune_candidate(rec: dict, dist: float, bearing: float, spot_pop: float) -> dict | None:
+    """Azimuth and tilt for one sector within 2.5 km, or nothing if it cannot cover."""
+    reach = _layer_reach_km(rec.get("layer") or "")
+    if dist > min(TUNE_KM, reach + 0.3):
+        return None
+    signed = _signed_deg(float(rec["azimuth"]), bearing)
+    off = abs(signed)
+    if off > 50.0:
+        return None
+    desired = _ground_tilt_deg(rec.get("height"), dist)
+    current = 0.0 if rec.get("etilt") is None else float(rec["etilt"])
+    delta = math.copysign(min(abs(desired - current), 6.0), desired - current)
+    tilt_change = abs(delta) >= 0.8
+    turn = 0.0
+    old_pop = new_pop = None
+    if off > 12.0:
+        turn = math.copysign(min(max(off - 8.0, 0.0), 25.0), signed)
+    if abs(turn) >= 8.0:
+        new_az = (float(rec["azimuth"]) + turn) % 360.0
+        old_pop = _wedge_population(rec["lat"], rec["lon"], rec["azimuth"])
+        new_pop = _wedge_population(rec["lat"], rec["lon"], new_az)
+        if new_pop + 0.5 * spot_pop < old_pop * 0.90:
+            turn = 0.0
+            old_pop = new_pop = None
+    if off > 32.0 and abs(turn) < 8.0:
+        return None
+    if not tilt_change and abs(turn) < 8.0:
+        return None
+    return {
+        "rec": rec,
+        "dist": dist,
+        "off": off,
+        "delta": delta if tilt_change else 0.0,
+        "turn": turn,
+        "old_pop": old_pop,
+        "new_pop": new_pop,
+    }
+
+
+def _fourth_text(site: dict) -> str:
+    tilt = int(round(min(10.0, max(0.0, _ground_tilt_deg(site.get("height"), site["dist"])))))
+    return (
+        f"New L900 sector on {site['name']}, azimuth {site['bearing']:.0f}°, "
+        f"E_tilt {tilt}°, M_tilt 0°. The site is {site['dist']:.1f} km away and the spot "
+        f"is {site['nearest_off']:.0f}° off the nearest existing sector, so this sector "
+        f"sits in that null. Existing sectors are not moved."
+    )
+
+
+def _new_site_text(lat: float, lon: float, red_lat: float, red_lon: float, sectors: list[dict]) -> tuple[str, str]:
+    site_lat = lat + 0.18 / 111.32
+    site_lon = lon
+    face = _bearing_deg(site_lat, site_lon, red_lat, red_lon)
+    azimuths = [face % 360.0, (face + 120.0) % 360.0, (face + 240.0) % 360.0]
+    near = min(
+        (float(_equirect_km(rec["lat"], rec["lon"], site_lat, site_lon)) for rec in sectors),
+        default=5.0,
+    )
+    face_tilt = int(round(min(10.0, max(2.0, _ground_tilt_deg(30.0, 0.25)))))
+    outer_tilt = int(round(min(8.0, max(2.0, _ground_tilt_deg(30.0, max(near / 2.0, 0.6))))))
+    arms = ", ".join(
+        f"{az:.0f}° E_tilt {face_tilt if i == 0 else outer_tilt}° M_tilt 0°"
+        for i, az in enumerate(azimuths)
+    )
+    text = (
+        f"New 3-sector L900 site at {site_lat:.5f}, {site_lon:.5f}. "
+        f"Sectors {arms}. The nearest existing site is {near:.1f} km away, "
+        f"and the outer tilts land short of it."
+    )
+    return "New site", text
+
+
+def _choose_coverage_fix(
+    sites: list[dict],
+    sectors: list[dict],
+    spot_pop: float,
+    target_lat: float,
+    target_lon: float,
+    red_lat: float,
+    red_lon: float,
+) -> dict:
+    """Pick one final solution from the distance rules.
+
+    A null inside 1.5 km is always a 4th L900 sector. Inside 2.5 km, azimuth and
+    tilt can cover the spot, and one or two nearby sites prefer a 4th sector when
+    the spot is in their null. Past 2 km a 4th sector is not used. Anything those
+    three cannot cover is a new 3-sector site.
+    """
+    nearby = [site for site in sites if site["dist"] <= TUNE_KM]
+    nulls = [site for site in sites if site["in_null"]]
+    close_null = next((site for site in nulls if site["dist"] <= FOURTH_MUST_KM), None)
+    usable_null = next((site for site in nulls if site["dist"] <= FOURTH_RISK_KM), None)
+    nearest = sites[0] if sites else None
+
+    tunes = []
+    for site in nearby:
+        bearing = site["bearing"]
+        for rec in site["recs"]:
+            hit = _tune_candidate(rec, site["dist"], bearing, spot_pop)
+            if hit is not None:
+                hit["site"] = site["name"]
+                tunes.append(hit)
+    tunes.sort(key=lambda item: (
+        0 if item["rec"].get("layer") == "L900" else 1,
+        item["dist"],
+        item["off"],
+    ))
+
+    def pack(kind: str, site: str, final: str, steps: list[dict]) -> dict:
+        return {"kind": kind, "site": site, "final": final, "steps": steps}
+
+    def steps_for(tilt: str, azimuth: str, fourth: str, new_site: str) -> list[dict]:
+        return [
+            {"step": "1", "action": "E-tilt / M-tilt", "proposal": tilt},
+            {"step": "2", "action": "Azimuth", "proposal": azimuth},
+            {"step": "3", "action": "4th sector, L900", "proposal": fourth},
+            {"step": "4", "action": "New 3-sector site", "proposal": new_site},
+        ]
+
+    def tune_lines(chosen: list[dict]) -> tuple[str, str, str, str]:
+        tilt_bits = []
+        az_bits = []
+        for item in chosen:
+            rec = item["rec"]
+            name = f"{rec.get('sector')} {rec.get('layer')}".strip()
+            if abs(item["delta"]) >= 0.8:
+                action = "uptilt so the beam reaches the spot" if item["delta"] < 0 else "downtilt so the beam lands on the spot"
+                tilt_bits.append(f"From {item['dist']:.1f} km, {item['off']:.0f}° off azimuth. {_tilt_line(rec, item['delta'], action)}")
+            else:
+                tilt_bits.append(
+                    f"{name} already has the tilt for {item['dist']:.1f} km (E_tilt {_deg_text(rec.get('etilt'))}°)."
+                )
+            if abs(item["turn"]) >= 8.0:
+                new_az = (float(rec["azimuth"]) + item["turn"]) % 360.0
+                direction = "clockwise" if item["turn"] > 0 else "counter-clockwise"
+                pop_line = ""
+                if item["old_pop"] is not None:
+                    pop_line = (
+                        f" Population on the current bearing is {_people(item['old_pop'])}, "
+                        f"on the new bearing {_people(item['new_pop'])}, and on the spot {_people(spot_pop)}."
+                    )
+                az_bits.append(
+                    f"{name}: azimuth {float(rec['azimuth']):.0f}° to {new_az:.0f}° "
+                    f"({direction} {abs(item['turn']):.0f}°).{pop_line}"
+                )
+            else:
+                az_bits.append(f"{name}: azimuth stays {float(rec['azimuth']):.0f}°. It already faces the spot.")
+        site_names = []
+        for item in chosen:
+            if item["site"] not in site_names:
+                site_names.append(item["site"])
+        final_bits = []
+        for item in chosen:
+            rec = item["rec"]
+            name = f"{rec.get('sector')} {rec.get('layer')}".strip()
+            parts = [f"{name} at {item['dist']:.1f} km"]
+            if abs(item["delta"]) >= 0.8:
+                _old_e, _old_m, new_e, _new_m = _tilt_step(rec.get("etilt"), rec.get("mtilt"), item["delta"])
+                parts.append(f"E_tilt {_deg_text(rec.get('etilt'))}° to {_deg_text(new_e)}°")
+            if abs(item["turn"]) >= 8.0:
+                new_az = (float(rec["azimuth"]) + item["turn"]) % 360.0
+                parts.append(f"azimuth {float(rec['azimuth']):.0f}° to {new_az:.0f}°")
+            else:
+                parts.append(f"azimuth stays {float(rec['azimuth']):.0f}°")
+            final_bits.append(", ".join(parts))
+        return (
+            " ".join(tilt_bits),
+            " ".join(az_bits),
+            ", ".join(site_names),
+            "; ".join(final_bits) + ".",
+        )
+
+    if close_null is not None:
+        text = _fourth_text(close_null)
+        return pack("fourth", close_null["name"], text, steps_for(
+            _not_required(
+                f"The spot is in the null of {close_null['name']}, {close_null['dist']:.1f} km away, "
+                "inside 1.5 km. A 4th sector is required here, so the existing tilts stay."
+            ),
+            _not_required(
+                "Turning an existing azimuth would move that beam off the customers it already serves. "
+                f"Population on the spot is {_people(spot_pop)}."
+            ),
+            "Final. " + text,
+            _not_required("The 4th sector is inside 1.5 km, so a new site is not required."),
+        ))
+
+    few_sites = len(nearby) <= 2
+    if nearby and few_sites and usable_null is not None and usable_null["dist"] <= FOURTH_RISK_KM:
+        # One or two sites, and the spot is in their null inside 2 km.
+        if not tunes or tunes[0]["off"] > 25.0:
+            text = _fourth_text(usable_null)
+            return pack("fourth", usable_null["name"], text, steps_for(
+                _not_required(
+                    f"Only {len(nearby)} site(s) are inside 2.5 km. "
+                    "A tilt change on those few sectors would have to cover the null as well as their own roads."
+                ),
+                _not_required(
+                    f"Only {len(nearby)} site(s) are nearby, so a 4th sector is used instead of turning their only beams. "
+                    f"Population on the spot is {_people(spot_pop)}."
+                ),
+                "Final. " + text,
+                _not_required(f"The 4th sector is {usable_null['dist']:.1f} km away, inside 2 km."),
+            ))
+
+    if tunes:
+        chosen = []
+        seen = set()
+        for item in tunes:
+            if item["site"] in seen:
+                continue
+            chosen.append(item)
+            seen.add(item["site"])
+            if len(chosen) == 2:
+                break
+        # Several sites do not force a tune. Use it when a sector already faces the spot.
+        # Otherwise a 4th sector inside 2 km is the better fill for a null.
+        faces = chosen[0]["off"] <= 32.0
+        if not faces and usable_null is not None and not few_sites:
+            text = _fourth_text(usable_null)
+            return pack("fourth", usable_null["name"], text, steps_for(
+                _not_required(
+                    f"{len(nearby)} sites are inside 2.5 km, but none faces the spot. "
+                    "Tilting them would not put the beam on it."
+                ),
+                _not_required(
+                    "An azimuth turn was not the better change. "
+                    f"A 4th sector at {usable_null['name']} fills the null without moving the busier beams. "
+                    f"Population on the spot is {_people(spot_pop)}."
+                ),
+                "Final. " + text,
+                _not_required(f"The 4th sector is {usable_null['dist']:.1f} km away, inside 2 km."),
+            ))
+        tilt, azimuth, site, final = tune_lines(chosen)
+        return pack("tune", site, final, steps_for(
+            "Final. " + tilt,
+            "Final. " + azimuth,
+            _not_required(
+                "The spot is inside 2.5 km of a sector that can be tuned, and it is not in a null inside 1.5 km. "
+                "A 4th sector is not added on top of that beam."
+            ),
+            _not_required("Azimuth and tilt cover this spot, so a new site is not required."),
+        ))
+
+    new_site, new_text = _new_site_text(target_lat, target_lon, red_lat, red_lon, sectors)
+    if nearest is None:
+        far = "No sector was found inside the L900 reach."
+    elif nearest["dist"] > TUNE_KM:
+        far = (
+            f"The nearest sector is {nearest['name']} at {nearest['dist']:.1f} km. "
+            "Azimuth and tilt are used only inside about 2.5 km."
+        )
+    else:
+        far = (
+            f"{len(nearby)} site(s) are inside 2.5 km, and a tilt or azimuth change "
+            "would miss the spot or leave the busier side."
+        )
+    if usable_null is None:
+        fourth = (
+            "A 4th sector past 2 km is a risk and is not used. "
+            + (f"The nearest null is {nulls[0]['name']} at {nulls[0]['dist']:.1f} km." if nulls else "No site has this spot in a null inside 2 km.")
+        )
+    else:
+        fourth = f"A 4th sector was not the chosen step. {usable_null['name']} is {usable_null['dist']:.1f} km away."
+    return pack("new", new_site, new_text, steps_for(
+        _not_required(far),
+        _not_required(far + f" Population on the spot is {_people(spot_pop)}."),
+        _not_required(fourth),
+        "Final. " + new_text,
+    ))
+
+
+def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series) -> dict:
+    """Finding and one final solution for a bad spot, including a blank inside the circle.
+
+    Inside about 2.5 km the final step can retune azimuth and tilt. A spot in the
+    null between two sectors and within 1.5 km gets a new L900 sector. One or two
+    nearby sites also use that 4th sector when the spot is in their null and the
+    site is inside 2 km. A 4th sector past 2 km is not used. The rest is a new
+    3-sector site. The side table shows all four steps. The final one is marked.
     """
     blanks = _blank_segments(samples, spot)
     blank_m = sum(item["length_m"] for item in blanks)
@@ -780,210 +1088,27 @@ def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series) -> dict
         f"L2100 {_layer_reach_km('L2100'):.1f} km, L2600 {_layer_reach_km('L2600'):.1f} km."
     )
 
-    # Step 1. Tilt of the cells around the spot, not a far sector that only points this way.
-    near_dist = min(
-        (float(_equirect_km(rec["lat"], rec["lon"], target_lat, target_lon)) for rec in sectors),
-        default=8.0,
+    sites = _sites_around(sectors, target_lat, target_lon)
+    if sites:
+        finding_lines.append(
+            f"Nearest sector is {sites[0]['name']} at {sites[0]['dist']:.1f} km. "
+            f"{sum(site['dist'] <= TUNE_KM for site in sites)} site(s) are inside 2.5 km."
+        )
+    choice = _choose_coverage_fix(
+        sites, sectors, spot_pop, target_lat, target_lon, red_lat, red_lon,
     )
-    tilt_offers: list[tuple[float, float, str]] = []
-    for rec in sectors:
-        dist = float(_equirect_km(rec["lat"], rec["lon"], target_lat, target_lon))
-        reach = _layer_reach_km(rec.get("layer") or "")
-        if dist > reach + 0.4:
-            continue
-        bearing = _bearing_deg(rec["lat"], rec["lon"], target_lat, target_lon)
-        off = abs(_signed_deg(rec["azimuth"], bearing))
-        if off > 42.0:
-            continue
-        desired = _ground_tilt_deg(rec.get("height"), dist)
-        current = 0.0 if rec.get("etilt") is None else float(rec["etilt"])
-        delta = desired - current
-        if abs(delta) < 1.0:
-            local = dist <= near_dist + 1.2
-            if off <= 25.0 and local:
-                tilt_offers.append((
-                    dist, off,
-                    f"From {dist:.1f} km, {off:.0f}° off azimuth. "
-                    f"{rec.get('sector')} {rec.get('layer')} already aims here (E_tilt {_deg_text(current)}°).",
-                ))
-            continue
-        delta = math.copysign(min(abs(delta), 4.0), delta)
-        new_e = min(12.0, max(0.0, current + delta))
-        ground_km = (rec.get("height") or 30.0) / 1000.0 / max(math.tan(math.radians(max(new_e, 0.3))), 1e-4)
-        reaches = ground_km >= dist * 0.8 or new_e <= 0.6
-        action = "uptilt so the beam reaches the spot" if delta < 0 else "downtilt so the beam lands on the spot"
-        line = _tilt_line(rec, delta, action)
-        local = dist <= near_dist + 1.2
-        if off <= 28.0 and reaches and local:
-            tilt_offers.append((dist, off, f"From {dist:.1f} km, {off:.0f}° off azimuth. {line}"))
-        else:
-            tilt_offers.append((dist + 20.0, off, f"From {dist:.1f} km, {off:.0f}° off azimuth. {line}"))
-    tilt_offers.sort()
-    solving = [item for item in tilt_offers if item[0] < 20.0 and item[1] <= 28.0]
-    step1_solves = bool(solving)
-    if step1_solves:
-        step1 = " ".join(item[2] for item in solving[:2])
-    elif tilt_offers:
-        step1 = (
-            "Tilt was checked all around the spot. "
-            + tilt_offers[0][2]
-            + " The beam still does not land on the blank, so tilt alone does not fill it."
-        )
-    else:
-        step1 = (
-            "Tilt was checked through 360°. No sector within its band reach faces "
-            f"{target_name}, so an E_tilt or M_tilt change would not put coverage here."
-        )
-
-    # Step 2. Azimuth, only across a null, and only if population supports it.
-    step2 = _not_required("The spot is already inside a sector beam, so the azimuth stays.")
-    step2_solves = False
-    if not step1_solves:
-        best_turn = None
-        for rec in sectors:
-            dist = float(_equirect_km(rec["lat"], rec["lon"], target_lat, target_lon))
-            if dist > L900_REACH_KM or dist < 0.2:
-                continue
-            same_site = [
-                other for other in sectors
-                if other.get("site") == rec.get("site")
-                and abs(other["lat"] - rec["lat"]) < 0.002
-                and abs(other["lon"] - rec["lon"]) < 0.002
-            ]
-            azimuths = [float(other["azimuth"]) for other in same_site if other.get("azimuth") is not None]
-            if len(azimuths) < 2:
-                continue
-            bearing = _bearing_deg(rec["lat"], rec["lon"], target_lat, target_lon)
-            offset = _signed_deg(rec["azimuth"], bearing)
-            nearest = min(abs(_signed_deg(az, bearing)) for az in azimuths)
-            if nearest <= 30.0 or nearest > 70.0:
-                continue
-            if abs(offset) > nearest + 1.0:
-                continue
-            turn = math.copysign(min(max(abs(offset) - 25.0, 0.0), 30.0), offset)
-            if abs(turn) < 8.0:
-                continue
-            new_az = (float(rec["azimuth"]) + turn) % 360.0
-            left = abs(_signed_deg(new_az, bearing))
-            old_pop = _wedge_population(rec["lat"], rec["lon"], rec["azimuth"])
-            new_pop = _wedge_population(rec["lat"], rec["lon"], new_az)
-            keeps_customers = new_pop + 0.5 * spot_pop >= old_pop * 0.90
-            score = (0 if keeps_customers else 1, left, abs(turn), -new_pop)
-            candidate = (score, rec, new_az, turn, left, old_pop, new_pop, keeps_customers)
-            if best_turn is None or candidate[0] < best_turn[0]:
-                best_turn = candidate
-        if best_turn is None:
-            step2 = (
-                "The spot is not in a narrow null between two sectors, "
-                "or a turn of at most 30° would still miss it. Azimuth is left as it is."
-            )
-        else:
-            _, rec, new_az, turn, left, old_pop, new_pop, keeps = best_turn
-            name = f"{rec.get('sector')} {rec.get('layer')}".strip()
-            direction = "clockwise" if turn > 0 else "counter-clockwise"
-            pop_line = (
-                f"Population on the current bearing is {_people(old_pop)}, "
-                f"on the new bearing {_people(new_pop)}, and on the spot {_people(spot_pop)}."
-            )
-            if keeps and left <= 32.0:
-                step2_solves = True
-                step2 = (
-                    f"{name}: azimuth {float(rec['azimuth']):.0f}° to {new_az:.0f}° "
-                    f"({direction} {abs(turn):.0f}°), so the null is shared with the next sector. {pop_line}"
-                )
-            elif not keeps:
-                step2 = (
-                    f"Turning {name} would leave the busier side. {pop_line} "
-                    "Azimuth stays, so those customers keep the sector."
-                )
-            else:
-                step2 = (
-                    f"A {abs(turn):.0f}° turn of {name} still leaves the spot {left:.0f}° off the beam. "
-                    f"{pop_line} That is not enough, so the azimuth stays."
-                )
-
-    solved = step1_solves or step2_solves
-    # Step 3. One new L900 sector, existing sectors not moved.
-    step3 = _not_required("Tilt or azimuth already covers the spot, including the blank.")
-    step3_solves = False
-    if not solved:
-        hosts = []
-        for rec in sectors:
-            dist = float(_equirect_km(rec["lat"], rec["lon"], target_lat, target_lon))
-            if dist > L900_REACH_KM or dist < 0.15:
-                continue
-            same_site = [
-                other for other in sectors
-                if other.get("site") == rec.get("site") and abs(other["lat"] - rec["lat"]) < 0.002
-            ]
-            azimuths = [float(other["azimuth"]) for other in same_site if other.get("azimuth") is not None]
-            if not azimuths:
-                continue
-            bearing = _bearing_deg(rec["lat"], rec["lon"], target_lat, target_lon)
-            gap = min(abs(_signed_deg(az, bearing)) for az in azimuths)
-            if gap < 35.0:
-                continue
-            hosts.append((dist, gap, rec, bearing))
-        if not hosts:
-            step3 = (
-                f"No site within the {L900_REACH_KM:.0f} km L900 reach has a wide enough gap. "
-                "A 4th sector there would sit on an existing beam and take its coverage."
-            )
-        else:
-            dist, gap, rec, bearing = min(hosts, key=lambda item: item[0])
-            tilt = int(round(min(10.0, max(0.0, _ground_tilt_deg(rec.get("height"), dist)))))
-            l2100 = _layer_reach_km("L2100")
-            band_note = (
-                f"L2100 reach is only {l2100:.1f} km, so this sector is L900."
-                if dist > l2100
-                else "L900 is used so the blank and the red road are both inside one sector."
-            )
-            step3_solves = True
-            step3 = (
-                f"New L900 sector on {rec.get('site') or rec.get('sector')}, "
-                f"azimuth {bearing:.0f}°, E_tilt {tilt}°, M_tilt 0°. "
-                f"The site is {dist:.1f} km away, inside the {L900_REACH_KM:.0f} km L900 reach, "
-                f"and {gap:.0f}° clear of the nearest existing sector. "
-                f"Existing sectors are not moved. {band_note}"
-            )
-
-    # Step 4. New 3-sector site.
-    if step1_solves or step2_solves or step3_solves:
-        step4 = _not_required("An existing site can cover this spot without a new tower.")
-    else:
-        site_lat = target_lat + 0.18 / 111.32
-        site_lon = target_lon
-        face = _bearing_deg(site_lat, site_lon, red_lat, red_lon)
-        azimuths = [face % 360.0, (face + 120.0) % 360.0, (face + 240.0) % 360.0]
-        near_dist = min(
-            (float(_equirect_km(rec["lat"], rec["lon"], site_lat, site_lon)) for rec in sectors),
-            default=5.0,
-        )
-        face_tilt = int(round(min(10.0, max(2.0, _ground_tilt_deg(30.0, 0.25)))))
-        outer_tilt = int(round(min(8.0, max(2.0, _ground_tilt_deg(30.0, max(near_dist / 2.0, 0.6))))))
-        arms = ", ".join(
-            f"{az:.0f}° E_tilt {face_tilt if i == 0 else outer_tilt}° M_tilt 0°"
-            for i, az in enumerate(azimuths)
-        )
-        step4 = (
-            f"New 3-sector L900 site at {site_lat:.5f}, {site_lon:.5f}, "
-            f"on {_people(population_per_km2(site_lat, site_lon))}. "
-            f"Sector toward the poor road: {arms}. "
-            f"The nearest existing site is {near_dist:.1f} km away, and the outer tilts land short of it."
-        )
-
-    steps = [
-        {"step": "1", "action": "E-tilt / M-tilt", "proposal": step1},
-        {"step": "2", "action": "Azimuth", "proposal": step2},
-        {"step": "3", "action": "4th sector, L900", "proposal": step3},
-        {"step": "4", "action": "New 3-sector site", "proposal": step4},
-    ]
+    final = choice["final"]
+    if blank_m >= 80:
+        final = f"{final} This covers the red road and the {blank_m:,.0f} m blank."
     return {
         "finding": " ".join(finding_lines),
         "blank_m": blank_m,
-        "steps": steps,
+        "steps": choice["steps"],
+        "kind": choice["kind"],
+        "site": choice["site"],
+        "population": _people(spot_pop),
+        "final": final,
     }
-
 
 
 def _resolve_serving_cell(eci: object, earfcn: object) -> dict | None:
@@ -2059,13 +2184,11 @@ LOGIC_LOCK = {
     "min_consecutive_m": {"RSRP": 0.0, "RSRQ": 0.0, "SINR": 0.0},
     "rsrp_greens": ("#008000", "#00FF00"),
     "ring_tiers": ((40, 2.6, 2.15, True), (250, 1.4, 0.70, False), (10**9, 0.8, 0.50, False)),
+    # RSRQ and SINR bad-spot sheets are not in the workbook. The RSRP sheets
+    # keep these circle counts. RSRQ and SINR rules still colour the KPI maps.
     "counts": {
         "Bad Spot RSRP": (26, 0),
-        "Bad Spot RSRQ": (45, 0),
-        "Bad Spot SINR": (204, 0),
         "Bad Spot RSRP_Active": (99, 0),
-        "Bad Spot RSRQ_Active": (41, 0),
-        "Bad Spot SINR_Active": (186, 0),
     },
 }
 
