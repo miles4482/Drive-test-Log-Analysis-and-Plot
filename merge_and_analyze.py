@@ -214,6 +214,8 @@ SITE_PIE_ARM_WIDTH_FRAC = 0.16
 SITE_PIE_RADIUS_KM = 0.90
 _SITE_CELLS: pd.DataFrame | None = None
 _SERVING_INDEX: tuple[dict, dict] | None = None
+_SERVING_LIST: list[dict] | None = None
+_SERVING_GRID: dict[tuple[int, int], list[dict]] | None = None
 
 
 def _most_common_azimuth(series: pd.Series) -> float:
@@ -423,13 +425,15 @@ def _serving_cell_index() -> tuple[dict, dict]:
     EARFCN of the sample. The pair key is the fallback when the log has a Cell Id
     but the EARFCN is missing.
     """
-    global _SERVING_INDEX
+    global _SERVING_INDEX, _SERVING_LIST
     if _SERVING_INDEX is not None:
         return _SERVING_INDEX
     load_site_sectors()
     cells = _SITE_CELLS if _SITE_CELLS is not None else pd.DataFrame()
     exact: dict[tuple[int, int, int], dict] = {}
     pair: dict[tuple[int, int], dict] = {}
+    listed: list[dict] = []
+    listed_pairs: set[tuple[int, int]] = set()
     if cells is not None and not cells.empty and {"eNBId", "cellId", "Lat", "Lon"}.issubset(cells.columns):
         for _, row in cells.iterrows():
             layer = str(row.get("layer") or "")
@@ -442,12 +446,18 @@ def _serving_cell_index() -> tuple[dict, dict]:
             if pd.isna(enb) or pd.isna(cid) or pd.isna(lat) or pd.isna(lon):
                 continue
             az = pd.to_numeric(row.get("Azimuth"), errors="coerce")
+            et = pd.to_numeric(row.get("E_tilt"), errors="coerce")
+            mt = pd.to_numeric(row.get("M_tilt"), errors="coerce")
             rec = {
                 "lat": float(lat),
                 "lon": float(lon),
                 "sector": str(row.get("Sector") or "").strip(),
                 "layer": layer,
+                "site": str(row.get("SiteName") or "").strip(),
+                "name": str(row.get("EUtranCellId") or "").strip(),
                 "azimuth": None if pd.isna(az) else float(az) % 360.0,
+                "etilt": None if pd.isna(et) else float(et),
+                "mtilt": None if pd.isna(mt) else float(mt),
             }
             key = (int(enb), int(cid))
             previous = pair.get(key)
@@ -456,8 +466,252 @@ def _serving_cell_index() -> tuple[dict, dict]:
             ear = pd.to_numeric(row.get("EARFCN"), errors="coerce")
             if pd.notna(ear):
                 exact[(*key, int(ear))] = rec
+                listed.append(rec)
+                listed_pairs.add(key)
+    for key, rec in pair.items():
+        if key not in listed_pairs:
+            listed.append(rec)
     _SERVING_INDEX = (exact, pair)
+    _SERVING_LIST = listed
     return _SERVING_INDEX
+
+
+def _serving_cell_list() -> list[dict]:
+    """One record per L900/L1800/L2100/L2600 cell that has a Cell Id in the dump."""
+    _serving_cell_index()
+    return _SERVING_LIST or []
+
+
+def _serving_cells_near(lat: float, lon: float, km: float = 8.0) -> list[dict]:
+    """Dump cells whose site is inside a box around this point."""
+    global _SERVING_GRID
+    if _SERVING_GRID is None:
+        grid: dict[tuple[int, int], list[dict]] = {}
+        for rec in _serving_cell_list():
+            key = (int(rec["lat"] / 0.08), int(rec["lon"] / 0.08))
+            grid.setdefault(key, []).append(rec)
+        _SERVING_GRID = grid
+    reach = int(km / (0.08 * 111.32)) + 1
+    cy, cx = int(lat / 0.08), int(lon / 0.08)
+    found: list[dict] = []
+    for dy in range(-reach, reach + 1):
+        for dx in range(-reach, reach + 1):
+            found.extend(_SERVING_GRID.get((cy + dy, cx + dx), ()))
+    return found
+
+
+def _tilt_step(
+    etilt: float | None, mtilt: float | None, delta: float
+) -> tuple[float | None, float | None, float | None, float | None]:
+    """Apply a tilt change to E_tilt first. Leftover degrees move M_tilt.
+
+    Positive delta is downtilt. A blank tilt is not treated as 0°. E_tilt stays
+    within 0 to 12 degrees and M_tilt stays within 0 to 8 degrees.
+    """
+    spill = delta
+    new_e = etilt
+    if etilt is not None:
+        new_e = float(etilt) + delta
+        spill = 0.0
+        if new_e < 0.0:
+            spill = new_e
+            new_e = 0.0
+        elif new_e > 12.0:
+            spill = new_e - 12.0
+            new_e = 12.0
+    new_m = mtilt
+    if mtilt is not None and abs(spill) >= 0.05:
+        new_m = min(8.0, max(0.0, float(mtilt) + spill))
+    return etilt, mtilt, new_e, new_m
+
+
+def _deg_text(value: float | None) -> str:
+    if value is None:
+        return "blank"
+    if abs(value - round(value)) < 0.05:
+        return str(int(round(value)))
+    return f"{value:.1f}"
+
+
+def _tilt_now(cell: dict) -> str:
+    e = "E_tilt blank" if cell.get("etilt") is None else f"E_tilt {_deg_text(cell['etilt'])}°"
+    m = "M_tilt blank" if cell.get("mtilt") is None else f"M_tilt {_deg_text(cell['mtilt'])}°"
+    return f"{e} and {m}"
+
+
+def _tilt_bit(label: str, old: float | None, new: float | None) -> str:
+    if old is None:
+        return f"{label} is blank in the dump"
+    if new is None or abs(new - old) < 0.05:
+        return f"{label} stays {_deg_text(old)}°"
+    return f"{label} {_deg_text(old)}° to {_deg_text(new)}°"
+
+
+def _tilt_line(cell: dict, delta: float, action: str) -> str:
+    """One solution row. delta > 0 downtilt, delta < 0 uptilt."""
+    old_e, old_m, new_e, new_m = _tilt_step(cell.get("etilt"), cell.get("mtilt"), delta)
+    name = f"{cell.get('sector') or cell.get('name') or 'cell'} {cell.get('layer') or ''}".strip()
+    e_same = old_e is None or new_e is None or abs(new_e - old_e) < 0.05
+    m_same = old_m is None or new_m is None or abs(new_m - old_m) < 0.05
+    if e_same and m_same:
+        return (
+            f"{name}: {_tilt_bit('E_tilt', old_e, new_e)}. {_tilt_bit('M_tilt', old_m, new_m)}. "
+            f"There is no further {action} left inside 0–12° E_tilt and 0–8° M_tilt."
+        )
+    return (
+        f"{name}: {_tilt_bit('E_tilt', old_e, new_e)}. {_tilt_bit('M_tilt', old_m, new_m)}. "
+        f"{action.capitalize()}."
+    )
+
+
+def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series) -> tuple[str, str]:
+    """Finding and E_tilt / M_tilt solution for one bad spot.
+
+    The finding compares the cell on the red samples with the closest sector
+    whose azimuth faces that red road. Only electrical and mechanical tilt are
+    changed: downtilt when a neighbor overshoots, uptilt when the facing cell
+    is landing short.
+    """
+    bins = _red_bins_inside(samples, column, spot)
+    if not bins:
+        return (
+            "No dark-red 50 m bin inside this circle has a Cell Id, so the serving cell cannot be named.",
+            "No E_tilt or M_tilt change.",
+        )
+    red_lat = sum(item["lat"] for item in bins) / len(bins)
+    red_lon = sum(item["lon"] for item in bins) / len(bins)
+    served: dict[tuple, dict] = {}
+    for item in bins:
+        for end in item.get("ends") or ():
+            cell = _resolve_serving_cell(end["eci"], end["earfcn"])
+            if cell is None:
+                continue
+            key = (cell.get("sector"), cell.get("layer"), round(cell["lat"], 5), round(cell["lon"], 5))
+            slot = served.setdefault(key, {"cell": cell, "n": 0, "dist": [], "elat": [], "elon": []})
+            slot["n"] += 1
+            slot["dist"].append(float(_equirect_km(cell["lat"], cell["lon"], end["lat"], end["lon"])))
+            slot["elat"].append(float(end["lat"]))
+            slot["elon"].append(float(end["lon"]))
+    if not served:
+        return (
+            "The red samples inside this circle have a Cell Id, but it is not an L900, L1800, L2100 or L2600 cell in System DUMP.xlsb.",
+            "No E_tilt or M_tilt change until that Cell Id is in the dump.",
+        )
+    dominant = max(served.values(), key=lambda slot: (slot["n"], -sum(slot["dist"]) / len(slot["dist"])))
+    cell = dominant["cell"]
+    dist = sum(dominant["dist"]) / len(dominant["dist"])
+    bearing = _bearing_deg(cell["lat"], cell["lon"], red_lat, red_lon)
+    off = None if cell.get("azimuth") is None else _ang_diff(cell["azimuth"], bearing)
+    faces = off is not None and off <= 50.0
+    who = f"{cell.get('sector') or 'cell'} {cell.get('layer') or ''}".strip()
+    face_text = (
+        "azimuth is missing"
+        if off is None
+        else (f"faces the red road ({off:.0f}° off azimuth)" if faces else f"does not face the red road ({off:.0f}° off azimuth)")
+    )
+    def _mean_dist(slot: dict) -> float:
+        return sum(slot["dist"]) / len(slot["dist"])
+
+    served_here = {
+        (slot["cell"].get("sector"), round(float(slot["cell"]["lat"]), 3))
+        for slot in served.values()
+    }
+
+    def _already_serves(rec: dict) -> bool:
+        return (rec.get("sector"), round(float(rec["lat"]), 3)) in served_here
+
+    def _take(rec: dict, away: float, current: dict | None, current_dist: float | None) -> bool:
+        if current is None or current_dist is None or away < current_dist - 0.05:
+            return True
+        if abs(away - current_dist) > 0.25:
+            return False
+        if _already_serves(rec) != _already_serves(current):
+            return _already_serves(rec)
+        return rec.get("layer") == cell.get("layer") and current.get("layer") != cell.get("layer")
+
+    intended = None
+    intended_dist = None
+    for rec in _serving_cells_near(red_lat, red_lon, 8.0):
+        if rec.get("azimuth") is None:
+            continue
+        away = float(_equirect_km(rec["lat"], rec["lon"], red_lat, red_lon))
+        if away < 0.15 or away > 8.0:
+            continue
+        if rec.get("sector") == cell.get("sector") and abs(rec["lat"] - cell["lat"]) < 0.001:
+            continue
+        aim = _bearing_deg(rec["lat"], rec["lon"], red_lat, red_lon)
+        if _ang_diff(rec["azimuth"], aim) > 50.0:
+            continue
+        if _take(rec, away, intended, intended_dist):
+            intended, intended_dist = rec, away
+    for slot in served.values():
+        if slot is dominant:
+            continue
+        sample_dist = _mean_dist(slot)
+        if sample_dist + 0.8 >= dist:
+            continue
+        rec = slot["cell"]
+        if rec.get("azimuth") is None:
+            continue
+        own_lat = sum(slot["elat"]) / len(slot["elat"])
+        own_lon = sum(slot["elon"]) / len(slot["elon"])
+        if float(_equirect_km(own_lat, own_lon, red_lat, red_lon)) > 1.2 and slot["n"] < 3:
+            continue
+        own_off = _ang_diff(rec["azimuth"], _bearing_deg(rec["lat"], rec["lon"], own_lat, own_lon))
+        if own_off > 60.0:
+            continue
+        if _take(rec, sample_dist, intended, intended_dist):
+            intended, intended_dist = rec, sample_dist
+    known_tilt = [value for value in (cell.get("etilt"), cell.get("mtilt")) if value is not None]
+    total_tilt = sum(known_tilt) if known_tilt else None
+    closer_faces = intended is not None and intended_dist + 0.6 < dist
+    low_for_range = dist >= 2.5 and total_tilt is not None and total_tilt <= 4.0
+    overshoot = (not faces) or (dist >= 1.8 and closer_faces) or (low_for_range and closer_faces)
+    if overshoot and intended is not None and closer_faces:
+        near = f"{intended.get('sector')} {intended.get('layer')}".strip()
+        if _already_serves(intended):
+            role = f"already serves part of the red road from {intended_dist:.1f} km"
+        else:
+            role = f"is {intended_dist:.1f} km away and is not on the red samples"
+        finding = (
+            f"{who} is the cell on most of the red road, from {dist:.1f} km, and {face_text}. "
+            f"{_tilt_now(cell)}. "
+            f"{near} faces this spot and {role}. "
+            f"The farther cell is overshooting, so the closer cell is not holding the whole spot."
+        )
+        solution = "\n".join((
+            _tilt_line(cell, 2.0, "downtilt the overshooting cell"),
+            _tilt_line(intended, -2.0, "uptilt the closer cell so it holds the spot"),
+        ))
+        return finding, solution
+    if overshoot:
+        finding = (
+            f"{who} serves the red road from {dist:.1f} km and {face_text}. "
+            f"No closer sector faces this spot, so this cell is reaching it from off its main beam."
+        )
+        return finding, _tilt_line(cell, 2.0, "downtilt so the beam drops off this spot")
+    if dist >= 1.5 and total_tilt is not None and total_tilt >= 6.0:
+        finding = (
+            f"{who} faces the red road and is the closest facing cell, at {dist:.1f} km. "
+            f"{_tilt_now(cell)}. "
+            f"The tilt is steep for that distance, so the beam is landing short of the poor road."
+        )
+        return finding, _tilt_line(cell, -2.0, "uptilt so the beam reaches the spot")
+    if dist < 1.3 and total_tilt is not None and total_tilt <= 3.0:
+        finding = (
+            f"{who} faces the red road from only {dist:.1f} km, with a low tilt "
+            f"({_tilt_now(cell)}). "
+            f"The beam is passing over the near road."
+        )
+        return finding, _tilt_line(cell, 2.0, "downtilt so the beam lands on the near road")
+    finding = (
+        f"{who} serves the red road from {dist:.1f} km and {face_text}. "
+        f"{_tilt_now(cell)}. "
+        f"The cell on the spot is the one that faces it, and the poor road sits in its main coverage."
+    )
+    delta = -2.0 if total_tilt is not None and total_tilt >= 5.0 else 2.0
+    action = "uptilt to open the near coverage" if delta < 0 else "downtilt to tighten the beam on this road"
+    return finding, _tilt_line(cell, delta, action)
 
 
 def _resolve_serving_cell(eci: object, earfcn: object) -> dict | None:

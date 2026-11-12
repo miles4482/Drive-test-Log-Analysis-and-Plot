@@ -58,6 +58,7 @@ from merge_and_analyze import (
     BAD_SPOT_MAX_ZOOMS,
     BAD_SPOT_RULES,
     consecutive_label,
+    bad_spot_advice,
     find_bad_spots,
     logic_drift,
     LOGIC_LOCK,
@@ -87,7 +88,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.54"
+REPORT_VERSION = "1.55"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -1447,6 +1448,38 @@ def _zoom_display_height(path: Path | None, spots: pd.DataFrame, width: int = 86
     return int(min(280 * rows, 1120))
 
 
+def place_bad_spot_advice(ws, header_row: int, finding: str, solution: str) -> None:
+    """Findings and E_tilt / M_tilt solutions on the right of one bad-spot map.
+
+    The block keeps the default row height, so the movable circle on that map
+    stays where it was drawn.
+    """
+    title = header_row + 2
+    find = header_row + 4
+    sol = header_row + 16
+    ws.merge_cells(start_row=title, start_column=9, end_row=title, end_column=16)
+    write_cell(
+        ws, title, 9, "Suggestions and solutions",
+        size=11, bold=True, color=NAVY, fill_color=LIGHT, align="center",
+    )
+    for col in range(9, 17):
+        ws.cell(title, col).fill = fill(LIGHT)
+        ws.cell(title, col).font = font(11, bold=True, color=NAVY)
+        ws.cell(title, col).alignment = Alignment(horizontal="center", vertical="center")
+    ws.merge_cells(start_row=find, start_column=9, end_row=find + 10, end_column=9)
+    ws.merge_cells(start_row=find, start_column=10, end_row=find + 10, end_column=16)
+    write_cell(ws, find, 9, "Findings", size=11, bold=True, color=NAVY, align="left", wrap=True)
+    write_cell(ws, find, 10, finding, size=11, color=NAVY, align="left", wrap=True)
+    ws.cell(find, 9).alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+    ws.cell(find, 10).alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+    ws.merge_cells(start_row=sol, start_column=9, end_row=sol + 12, end_column=9)
+    ws.merge_cells(start_row=sol, start_column=10, end_row=sol + 12, end_column=16)
+    write_cell(ws, sol, 9, "Solutions", size=11, bold=True, color=NAVY, align="left", wrap=True)
+    write_cell(ws, sol, 10, solution, size=11, color=NAVY, align="left", wrap=True)
+    ws.cell(sol, 9).alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+    ws.cell(sol, 10).alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+
+
 def build_kpi_bad_spot_sheet(
     ws,
     kpi: str,
@@ -1455,6 +1488,7 @@ def build_kpi_bad_spot_sheet(
     serial_maps: list[Path] | None,
     *,
     mode: str = "IDLE Mode",
+    samples: pd.DataFrame | None = None,
 ) -> None:
     """Combined route with no circles, then one large map per bad spot down the left side."""
     last_col = 16
@@ -1495,8 +1529,8 @@ def build_kpi_bad_spot_sheet(
         "and runs to each red sample inside the orange circle. That cell is the Cell Id on the sample, "
         "on L900, L1800, L2100 or L2600, and it has to be in System DUMP.xlsb. Every serving cell is drawn. "
         "The length beside the red is the full red stretch, and a short gap of good coverage stays in that length. "
-        "The columns to the right of each "
-        "map are left empty. Several circles can sit inside one 10 km neighbourhood when the poor "
+        "The columns to the right of each map are the finding and the E_tilt and M_tilt change. "
+        "Several circles can sit inside one 10 km neighbourhood when the poor "
         "road is not one stretch. A discrete patch of at least 1 km\u00b2 is a dotted circle. "
         + _detection_summary(kpi, spots)
         + " Numbers are not drawn on the maps."
@@ -1526,6 +1560,9 @@ def build_kpi_bad_spot_sheet(
     maps = [p for p in (serial_maps or []) if p is not None and p.exists()]
     for i, path in enumerate(maps, start=1):
         section_bar(ws, cursor, f"Bad Spot {i}", 1, map_span)
+        if samples is not None and spots is not None and i <= len(spots):
+            finding, solution = bad_spot_advice(samples, kpi, spots.iloc[i - 1])
+            place_bad_spot_advice(ws, cursor, finding, solution)
         _, spot_h = add_image(ws, path, f"A{cursor + 2}", width=780, height=720)
         cursor = cursor + 2 + max(spot_h, 360) // 20 + 3
     table_row = cursor if maps else cursor + 1
@@ -1588,7 +1625,7 @@ def build_kpi_bad_spot_sheet(
         combined_line
         + "Each bad spot above is one large map. Its orange circle is a separate shape with the same "
         "name as the Circle column, so it can be dragged on its own. The space to the right of each "
-        "map is left empty. Poor share is the share of raw samples inside the spot box that are at or "
+        "map is the finding and the E_tilt and M_tilt suggestion. Poor share is the share of raw samples inside the spot box that are at or "
         "below the threshold. Length is the poor road inside the circle, and a single 50 m bin is "
         "reported as 50 m. Map numbers are omitted.",
         size=9,
@@ -2289,21 +2326,30 @@ def build_report(df: pd.DataFrame, active: pd.DataFrame | None = None, out_path:
         None if active_view is None else active_view["sinr_bad"],
         idle["sinr_band"], empty_bands if active_view is None else active_view["sinr_band"],
     )
-    build_kpi_bad_spot_sheet(bad_rsrp_ws, "RSRP", idle["rsrp_spots"], idle["rsrp_bad"], idle["rsrp_zooms"])
-    build_kpi_bad_spot_sheet(bad_rsrq_ws, "RSRQ", idle["rsrq_spots"], idle["rsrq_bad"], idle["rsrq_zooms"])
-    build_kpi_bad_spot_sheet(bad_sinr_ws, "SINR", idle["sinr_spots"], idle["sinr_bad"], idle["sinr_zooms"])
+    build_kpi_bad_spot_sheet(
+        bad_rsrp_ws, "RSRP", idle["rsrp_spots"], idle["rsrp_bad"], idle["rsrp_zooms"],
+        samples=idle["map_df"],
+    )
+    build_kpi_bad_spot_sheet(
+        bad_rsrq_ws, "RSRQ", idle["rsrq_spots"], idle["rsrq_bad"], idle["rsrq_zooms"],
+        samples=idle["map_df"],
+    )
+    build_kpi_bad_spot_sheet(
+        bad_sinr_ws, "SINR", idle["sinr_spots"], idle["sinr_bad"], idle["sinr_zooms"],
+        samples=idle["map_df"],
+    )
     if active_view is not None:
         build_kpi_bad_spot_sheet(
             bad_rsrp_a, "RSRP", active_view["rsrp_spots"], active_view["rsrp_bad"], active_view["rsrp_zooms"],
-            mode="Active Mode",
+            mode="Active Mode", samples=active_view["map_df"],
         )
         build_kpi_bad_spot_sheet(
             bad_rsrq_a, "RSRQ", active_view["rsrq_spots"], active_view["rsrq_bad"], active_view["rsrq_zooms"],
-            mode="Active Mode",
+            mode="Active Mode", samples=active_view["map_df"],
         )
         build_kpi_bad_spot_sheet(
             bad_sinr_a, "SINR", active_view["sinr_spots"], active_view["sinr_bad"], active_view["sinr_zooms"],
-            mode="Active Mode",
+            mode="Active Mode", samples=active_view["map_df"],
         )
         build_rsrp_vs_sheet(
             time_active_ws, data_ws, active_vs_n,
@@ -2501,6 +2547,198 @@ def refresh_bad_spot_pies(src: Path | None = None) -> Path:
     return VERSIONED_XLSX
 
 
+_ADVICE_NOTE_OLD = (
+    "The columns to the right of each map are left empty.",
+    "The space to the right of each map is left empty.",
+)
+_ADVICE_NOTE_NEW = (
+    "The columns to the right of each map are the finding and the E_tilt and M_tilt change.",
+    "The space to the right of each map is the finding and the E_tilt and M_tilt suggestion.",
+)
+
+
+def _xml_text(value: str) -> str:
+    return (
+        value.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+def _advice_sheet_rows(header: int, finding: str, solution: str) -> tuple[dict[int, str], list[str]]:
+    """Inline cells for the suggestions table beside one bad-spot map."""
+    title = header + 2
+    find = header + 4
+    sol = header + 16
+
+    def cell(ref: str, style: int, text: str | None = None) -> str:
+        if text is None:
+            return f'<c r="{ref}" s="{style}"/>'
+        return (
+            f'<c r="{ref}" s="{style}" t="inlineStr"><is>'
+            f'<t xml:space="preserve">{_xml_text(text)}</t></is></c>'
+        )
+
+    rows = {
+        title: (
+            f'<row r="{title}">'
+            + cell(f"I{title}", 32, "Suggestions and solutions")
+            + "".join(cell(f"{get_column_letter(col)}{title}", 32) for col in range(10, 17))
+            + "</row>"
+        ),
+        find: f'<row r="{find}">{cell(f"I{find}", 33, "Findings")}{cell(f"J{find}", 34, finding)}</row>',
+        sol: f'<row r="{sol}">{cell(f"I{sol}", 33, "Solutions")}{cell(f"J{sol}", 34, solution)}</row>',
+    }
+    merges = [
+        f"I{title}:P{title}",
+        f"I{find}:I{find + 10}",
+        f"J{find}:P{find + 10}",
+        f"I{sol}:I{sol + 12}",
+        f"J{sol}:P{sol + 12}",
+    ]
+    return rows, merges
+
+
+def _insert_sheet_rows(xml: str, rows: dict[int, str], merges: list[str]) -> str:
+    match = re.search(r"(<sheetData>)(.*?)(</sheetData>)", xml, flags=re.S)
+    if match is None:
+        raise SystemExit("Worksheet has no sheetData")
+    existing = re.findall(r"<row\b.*?</row>", match.group(2), flags=re.S)
+    by_row: dict[int, str] = {}
+    for row in existing:
+        number = int(re.search(r'\br="(\d+)"', row).group(1))
+        by_row[number] = row
+    for number, row in rows.items():
+        if number in by_row:
+            raise SystemExit(f"Row {number} already exists; the suggestions table would overwrite it")
+        by_row[number] = row
+    body = "".join(by_row[number] for number in sorted(by_row))
+    xml = xml[: match.start(2)] + body + xml[match.end(2) :]
+    merge = re.search(r'<mergeCells count="(\d+)">', xml)
+    if merge is None:
+        raise SystemExit("Worksheet has no mergeCells")
+    count = int(merge.group(1)) + len(merges)
+    extra = "".join(f'<mergeCell ref="{ref}"/>' for ref in merges)
+    xml = xml.replace(merge.group(0), f'<mergeCells count="{count}">', 1)
+    xml = xml.replace("</mergeCells>", extra + "</mergeCells>", 1)
+    return xml
+
+
+def _add_advice_styles(styles: str) -> str:
+    if 'fontId="8" fillId="5"' in styles and styles.count("<cellXfs") and 'count="35"' in styles:
+        return styles
+    if "<fonts count=\"8\">" not in styles or "<cellXfs count=\"32\">" not in styles:
+        raise SystemExit("Workbook styles are not the expected v1.53 set; refusing to append advice styles")
+    styles = styles.replace("<fonts count=\"8\">", "<fonts count=\"9\">", 1)
+    styles = styles.replace(
+        "</fonts>",
+        '<font><name val="Calibri"/><b val="1"/><color rgb="001B4F72"/><sz val="11"/></font></fonts>',
+        1,
+    )
+    styles = styles.replace("<cellXfs count=\"32\">", "<cellXfs count=\"35\">", 1)
+    added = (
+        '<xf numFmtId="0" fontId="8" fillId="5" borderId="0" applyAlignment="1" xfId="0">'
+        '<alignment horizontal="center" vertical="center"/></xf>'
+        '<xf numFmtId="0" fontId="8" fillId="0" borderId="0" applyAlignment="1" xfId="0">'
+        '<alignment horizontal="left" vertical="top" wrapText="1"/></xf>'
+        '<xf numFmtId="0" fontId="6" fillId="0" borderId="0" applyAlignment="1" xfId="0">'
+        '<alignment horizontal="left" vertical="top" wrapText="1"/></xf>'
+    )
+    return styles.replace("</cellXfs>", added + "</cellXfs>", 1)
+
+
+def write_bad_spot_advice(src: Path | None = None) -> Path:
+    """Graft the findings table onto the six bad-spot sheets without rewriting the file.
+
+    openpyxl save drops the movable circles, so the cells are inserted into the
+    worksheet XML. Row heights stay at the default, and the drawings are copied
+    through unchanged.
+    """
+    from merge_and_analyze import ACTIVE_MERGED, MERGED_CSV, load_active_merged, load_merged_csv
+
+    src = src or REPORT_XLSX
+    if not src.exists():
+        raise SystemExit(f"Missing workbook: {src}")
+    print("Loading drive logs", flush=True)
+    idle = load_merged_csv() if MERGED_CSV.exists() else None
+    active = load_active_merged() if ACTIVE_MERGED.exists() else None
+    if idle is None or active is None:
+        raise SystemExit("Merged drive logs are missing; a full report build is required.")
+    active = select_active_report(active)
+    idle_track = best_server(idle)
+    active_track = best_carrier(active)
+    tracks = {
+        "Bad Spot RSRP": (idle_track, "RSRP"),
+        "Bad Spot RSRQ": (idle_track, "RSRQ"),
+        "Bad Spot SINR": (idle_track, "SINR"),
+        "Bad Spot RSRP_Active": (active_track, "RSRP"),
+        "Bad Spot RSRQ_Active": (active_track, "RSRQ"),
+        "Bad Spot SINR_Active": (active_track, "SINR"),
+    }
+    advice_for: dict[str, list[tuple[str, str]]] = {}
+    for sheet, (frame, kpi) in tracks.items():
+        print(f"Advice for {sheet}", flush=True)
+        spots = find_bad_spots(frame, kpi).head(BAD_SPOT_MAX_ZOOMS)
+        advice_for[sheet] = [bad_spot_advice(frame, kpi, spots.iloc[i]) for i in range(len(spots))]
+        print(f"  {len(advice_for[sheet])} spots", flush=True)
+
+    with zipfile.ZipFile(src) as zf:
+        names = zf.namelist()
+        parts = {name: zf.read(name) for name in names}
+    drawings_before = {
+        name: parts[name] for name in names if name.startswith("xl/drawings/")
+    }
+    sheet_xml = _worksheet_xml(parts)
+    for sheet, pairs in advice_for.items():
+        xml = sheet_xml[sheet].decode("utf-8")
+        headers = [
+            (int(row), int(number))
+            for row, number in re.findall(
+                r'<c r="A(\d+)"[^>]*>\s*<is><t>Bad Spot (\d+)</t>',
+                xml,
+            )
+        ]
+        if len(headers) != len(pairs):
+            raise SystemExit(f"{sheet}: {len(headers)} headers, {len(pairs)} advice rows")
+        rows: dict[int, str] = {}
+        merges: list[str] = []
+        for (header, number), (finding, solution) in zip(headers, pairs):
+            if number < 1:
+                raise SystemExit(f"{sheet}: unexpected header {number}")
+            added_rows, added_merges = _advice_sheet_rows(header, finding, solution)
+            rows.update(added_rows)
+            merges.extend(added_merges)
+        xml = _insert_sheet_rows(xml, rows, merges)
+        for old, new in zip(_ADVICE_NOTE_OLD, _ADVICE_NOTE_NEW):
+            if old not in xml:
+                raise SystemExit(f"{sheet}: missing note sentence {old!r}")
+            xml = xml.replace(old, new)
+        sheet_xml[sheet] = xml.encode("utf-8")
+    # write the updated sheet bytes back onto their zip paths
+    main = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    rel_ns = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+    wb = ET.fromstring(parts["xl/workbook.xml"])
+    book_rels = ET.fromstring(parts["xl/_rels/workbook.xml.rels"])
+    rid_target = {rel.attrib["Id"]: rel.attrib["Target"].lstrip("/") for rel in book_rels}
+    for node in wb.find(f"{main}sheets"):
+        name = node.attrib["name"]
+        if name in sheet_xml and isinstance(sheet_xml[name], (bytes, bytearray)):
+            parts[rid_target[node.attrib[f"{rel_ns}id"]]] = sheet_xml[name]
+    parts["xl/styles.xml"] = _add_advice_styles(parts["xl/styles.xml"].decode("utf-8")).encode("utf-8")
+    for name, body in drawings_before.items():
+        if parts[name] != body:
+            raise SystemExit(f"Drawing changed while adding advice: {name}")
+    tmp = src.with_suffix(".tmp.xlsx")
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name in names:
+            zf.writestr(name, parts[name])
+    tmp.replace(VERSIONED_XLSX)
+    if VERSIONED_XLSX.resolve() != REPORT_XLSX.resolve():
+        shutil.copy2(VERSIONED_XLSX, REPORT_XLSX)
+    print(f"Wrote {VERSIONED_XLSX}", flush=True)
+    return VERSIONED_XLSX
+
+
 if __name__ == "__main__":
     import sys
 
@@ -2515,6 +2753,14 @@ if __name__ == "__main__":
             "A full rebuild (no arguments) writes the Cover histograms and DT route with every sheet. "
             "A Cover-only update has to be grafted into the xlsx zip."
         )
+    if len(sys.argv) > 1 and sys.argv[1] == "advise":
+        path = write_bad_spot_advice()
+        result = verify_report(path)
+        print(result["problems"], result.get("circle_shapes"))
+        if result["problems"]:
+            raise SystemExit("Excel view checks failed: " + "; ".join(result["problems"]))
+        print("Verified: findings table added and the movable circles are still present.")
+        raise SystemExit(0)
     if len(sys.argv) > 1 and sys.argv[1] == "refresh-pies":
         path = refresh_bad_spot_pies()
         result = verify_report(path)
