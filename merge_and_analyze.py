@@ -744,6 +744,8 @@ def _sites_around(sectors: list[dict], lat: float, lon: float) -> list[dict]:
         nearest_off = min(abs(_signed_deg(az, bearing)) for az in azimuths)
         sites.append({
             "name": name or str(recs[0].get("sector") or "site"),
+            "lat": float(recs[0]["lat"]),
+            "lon": float(recs[0]["lon"]),
             "dist": dist,
             "bearing": bearing,
             "nearest_off": nearest_off,
@@ -794,6 +796,19 @@ def _tune_candidate(rec: dict, dist: float, bearing: float, spot_pop: float) -> 
     }
 
 
+def _proposal_draw(kind: str, lat: float, lon: float, azimuths: list[float], target_lat: float, target_lon: float, label: str) -> dict:
+    """Where to draw a proposed site or 4th sector on the bad-spot map."""
+    return {
+        "kind": kind,
+        "lat": lat,
+        "lon": lon,
+        "azimuths": azimuths,
+        "target_lat": target_lat,
+        "target_lon": target_lon,
+        "label": label,
+    }
+
+
 def _fourth_text(site: dict) -> str:
     tilt = int(round(min(10.0, max(0.0, _ground_tilt_deg(site.get("height"), site["dist"])))))
     return (
@@ -824,7 +839,9 @@ def _new_site_text(lat: float, lon: float, red_lat: float, red_lon: float, secto
         f"Sectors {arms}. The nearest existing site is {near:.1f} km away, "
         f"and the outer tilts land short of it."
     )
-    return "New site", text
+    return "New site", text, _proposal_draw(
+        "new", site_lat, site_lon, azimuths, red_lat, red_lon, "New site",
+    )
 
 
 def _choose_coverage_fix(
@@ -863,8 +880,8 @@ def _choose_coverage_fix(
         item["off"],
     ))
 
-    def pack(kind: str, site: str, final: str, steps: list[dict]) -> dict:
-        return {"kind": kind, "site": site, "final": final, "steps": steps}
+    def pack(kind: str, site: str, final: str, steps: list[dict], draw: dict | None = None) -> dict:
+        return {"kind": kind, "site": site, "final": final, "steps": steps, "draw": draw}
 
     def steps_for(tilt: str, azimuth: str, fourth: str, new_site: str) -> list[dict]:
         return [
@@ -927,6 +944,12 @@ def _choose_coverage_fix(
             "; ".join(final_bits) + ".",
         )
 
+    def fourth_draw(site: dict) -> dict:
+        return _proposal_draw(
+            "fourth", site["lat"], site["lon"], [float(site["bearing"])],
+            target_lat, target_lon, "4th L900",
+        )
+
     if close_null is not None:
         text = _fourth_text(close_null)
         return pack("fourth", close_null["name"], text, steps_for(
@@ -940,7 +963,7 @@ def _choose_coverage_fix(
             ),
             "Final. " + text,
             _not_required("The 4th sector is inside 1.5 km, so a new site is not required."),
-        ))
+        ), fourth_draw(close_null))
 
     few_sites = len(nearby) <= 2
     if nearby and few_sites and usable_null is not None and usable_null["dist"] <= FOURTH_RISK_KM:
@@ -958,7 +981,7 @@ def _choose_coverage_fix(
                 ),
                 "Final. " + text,
                 _not_required(f"The 4th sector is {usable_null['dist']:.1f} km away, inside 2 km."),
-            ))
+            ), fourth_draw(usable_null))
 
     if tunes:
         chosen = []
@@ -987,7 +1010,7 @@ def _choose_coverage_fix(
                 ),
                 "Final. " + text,
                 _not_required(f"The 4th sector is {usable_null['dist']:.1f} km away, inside 2 km."),
-            ))
+            ), fourth_draw(usable_null))
         tilt, azimuth, site, final = tune_lines(chosen)
         return pack("tune", site, final, steps_for(
             "Final. " + tilt,
@@ -999,7 +1022,7 @@ def _choose_coverage_fix(
             _not_required("Azimuth and tilt cover this spot, so a new site is not required."),
         ))
 
-    new_site, new_text = _new_site_text(target_lat, target_lon, red_lat, red_lon, sectors)
+    new_site, new_text, new_draw = _new_site_text(target_lat, target_lon, red_lat, red_lon, sectors)
     if nearest is None:
         far = "No sector was found inside the L900 reach."
     elif nearest["dist"] > TUNE_KM:
@@ -1024,7 +1047,7 @@ def _choose_coverage_fix(
         _not_required(far + f" Population on the spot is {_people(spot_pop)}."),
         _not_required(fourth),
         "Final. " + new_text,
-    ))
+    ), new_draw)
 
 
 def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series) -> dict:
@@ -1108,6 +1131,7 @@ def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series) -> dict
         "site": choice["site"],
         "population": _people(spot_pop),
         "final": final,
+        "draw": choice.get("draw"),
     }
 
 
@@ -1274,6 +1298,7 @@ def _draw_serving_spider(ax, samples: pd.DataFrame, column: str, spot: pd.Series
     bins = _red_bins_inside(samples, column, spot)
     arm = _view_arm_deg(ax, float(spot["lat"]))
     segments = []
+    labeled: dict[tuple, dict] = {}
     for item in bins:
         for end in item.get("ends") or ():
             cell = _resolve_serving_cell(end["eci"], end["earfcn"])
@@ -1290,6 +1315,16 @@ def _draw_serving_spider(ax, samples: pd.DataFrame, column: str, spot: pd.Series
                 lon0 = lon0 + arm * np.sin(rad)
                 lat0 = lat0 + arm * np.cos(rad)
             segments.append([(lon0, lat0), (end["lon"], end["lat"])])
+            key = (cell.get("sector"), cell.get("layer"), round(float(cell["lat"]), 4), round(float(cell["lon"]), 4))
+            # The number on the line is the length of that line, from the sector arm to the red bin.
+            dist_m = float(_equirect_km(lat0, lon0, end["lat"], end["lon"])) * 1000.0
+            current = labeled.get(key)
+            if current is None or dist_m > current["dist_m"]:
+                labeled[key] = {
+                    "lon0": lon0, "lat0": lat0,
+                    "lon1": float(end["lon"]), "lat1": float(end["lat"]),
+                    "dist_m": dist_m,
+                }
     if segments:
         ax.add_collection(LineCollection(
             segments,
@@ -1300,6 +1335,17 @@ def _draw_serving_spider(ax, samples: pd.DataFrame, column: str, spot: pd.Series
             zorder=23,
             alpha=0.95,
         ))
+    for item in labeled.values():
+        if item["dist_m"] < 80:
+            continue
+        mx = item["lon0"] + 0.55 * (item["lon1"] - item["lon0"])
+        my = item["lat0"] + 0.55 * (item["lat1"] - item["lat0"])
+        ax.text(
+            mx, my, f"{item['dist_m']:,.0f} m",
+            ha="center", va="center", fontsize=8, color="#4A235A", fontweight="bold",
+            zorder=34, clip_on=True,
+            bbox={"boxstyle": "round,pad=0.16", "fc": "#F5EEF8", "ec": "#6C3483", "lw": 0.7, "alpha": 0.94},
+        )
     for run in _red_runs(bins):
         mid = run[len(run) // 2]
         ax.text(
@@ -1315,6 +1361,73 @@ def _draw_serving_spider(ax, samples: pd.DataFrame, column: str, spot: pd.Series
             clip_on=True,
             bbox={"boxstyle": "square,pad=0.16", "fc": "white", "ec": "#C0392B", "lw": 0.7, "alpha": 0.94},
         )
+
+
+def _proposal_arm_km(ax, lat: float, draw: dict, azimuth: float, facing: bool) -> float:
+    """Arm length for a proposed sector. The arm toward the bad spot reaches past it."""
+    del ax, lat, azimuth
+    side_km = 1.35 if draw.get("kind") == "new" else 0.9
+    if not facing:
+        return side_km
+    reach = float(_equirect_km(draw["lat"], draw["lon"], draw["target_lat"], draw["target_lon"]))
+    # A new site sits on the spot, so the facing arm is drawn long enough to cross it.
+    # A 4th sector starts at the existing site, so its arm lands on the spot and a little past it.
+    return max(side_km, reach * 1.25)
+
+
+def _extent_with_proposal(extent: tuple[float, float, float, float], draw: dict) -> tuple[float, float, float, float]:
+    """Widen a bad-spot view just enough to keep the proposed site and its arms."""
+    lat = float(draw["lat"])
+    reach = float(_equirect_km(draw["lat"], draw["lon"], draw["target_lat"], draw["target_lon"]))
+    # New site: three arms of 1.35 km. 4th sector: one arm back toward the spot, so only a small margin past the site.
+    margin_km = 1.7 if draw.get("kind") == "new" else 0.55
+    if draw.get("kind") != "new":
+        margin_km = max(margin_km, 0.35)
+    pad_lon = margin_km / _km_per_deg_lon(lat)
+    pad_lat = margin_km / 111.32
+    # The facing arm may extend past the target. Keep that tip inside the frame.
+    overshoot_km = max(0.0, max(1.35, reach * 1.25) - reach) if draw.get("kind") == "new" else max(0.0, reach * 0.25)
+    tip_pad_lon = overshoot_km / _km_per_deg_lon(lat)
+    tip_pad_lat = overshoot_km / 111.32
+    lons = [float(draw["lon"]), float(draw["target_lon"])]
+    lats = [lat, float(draw["target_lat"])]
+    return (
+        min(extent[0], min(lons) - pad_lon, min(lons) - tip_pad_lon),
+        max(extent[1], max(lons) + pad_lon, max(lons) + tip_pad_lon),
+        min(extent[2], min(lats) - pad_lat, min(lats) - tip_pad_lat),
+        max(extent[3], max(lats) + pad_lat, max(lats) + tip_pad_lat),
+    )
+
+
+def _draw_proposal(ax, draw: dict | None) -> None:
+    """Draw a proposed new site, or one new 4th sector, long enough to reach the spot."""
+    if not draw:
+        return
+    lat = float(draw["lat"])
+    lon = float(draw["lon"])
+    color = "#6C3483" if draw.get("kind") == "new" else "#D35400"
+    azimuths = [float(az) for az in draw.get("azimuths") or []]
+    for index, az in enumerate(azimuths):
+        length = _proposal_arm_km(ax, lat, draw, az, index == 0)
+        rad = np.radians(az % 360.0)
+        x1 = lon + (length / _km_per_deg_lon(lat)) * np.sin(rad)
+        y1 = lat + (length / 111.32) * np.cos(rad)
+        ax.plot([lon, x1], [lat, y1], color="white", linewidth=6.0, solid_capstyle="round", zorder=31, clip_on=True)
+        ax.plot([lon, x1], [lat, y1], color=color, linewidth=3.2, solid_capstyle="round", zorder=32, clip_on=True)
+        if index == 0:
+            ax.text(
+                x1, y1, f"{az:.0f}°",
+                ha="center", va="center", fontsize=7, color=color, fontweight="bold",
+                zorder=35, clip_on=True,
+                bbox={"boxstyle": "round,pad=0.12", "fc": "white", "ec": color, "lw": 0.6, "alpha": 0.94},
+            )
+    ax.scatter([lon], [lat], s=42, c=color, marker="o", zorder=36, edgecolors="white", linewidths=0.9)
+    ax.text(
+        lon, lat, str(draw.get("label") or "Proposed"),
+        ha="center", va="bottom", fontsize=8, color=color, fontweight="bold",
+        zorder=37, clip_on=False,
+        bbox={"boxstyle": "round,pad=0.18", "fc": "white", "ec": color, "lw": 0.8, "alpha": 0.95},
+    )
 
 
 def draw_bad_spot_sector_pies(
@@ -3187,6 +3300,9 @@ def plot_bad_spot_serial_maps(
         arm_lon = arm_km / _km_per_deg_lon(mid_lat)
         arm_lat = arm_km / 111.32
         zext = (zext[0] - arm_lon, zext[1] + arm_lon, zext[2] - arm_lat, zext[3] + arm_lat)
+        proposal = bad_spot_advice(df, column, spot).get("draw")
+        if proposal:
+            zext = _extent_with_proposal(zext, proposal)
         local = geo[
             geo["Longitude"].between(zext[0], zext[1])
             & geo["Latitude"].between(zext[2], zext[3])
@@ -3211,6 +3327,7 @@ def plot_bad_spot_serial_maps(
         else:
             _add_basemap(ax)
         draw_bad_spot_sector_pies(ax, spot, local, column)
+        _draw_proposal(ax, proposal)
         blanks = _blank_segments(df, spot)
         for gap in blanks:
             ax.plot(

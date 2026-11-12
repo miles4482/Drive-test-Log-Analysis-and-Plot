@@ -117,7 +117,7 @@ Every coverage map and bad-spot map is drawn on Esri World Imagery. The combined
 
 ## Web coverage map (v1.56)
 
-Download, unzip, and open `Bogura_DriveTest_Web_v1.56.html`. The map is the v1.54 page, republished under v1.56. The Excel workbook moved to v1.57 without changing this page.
+Download, unzip, and open `Bogura_DriveTest_Web_v1.56.html`. The map is the v1.54 page, republished under v1.56. The Excel workbook is v1.58. This page stays v1.56.
 
 **v1.56 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.56.zip
 
@@ -134,21 +134,25 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
-## Download Excel report (v1.57)
+## Download Excel report (v1.58)
 
-**v1.57 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.57.xlsx
+**v1.58 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.58.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.57.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.58.xlsx
 
-Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.56.xlsx
+Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.57.xlsx
 
 The web map stays at v1.56. This Excel update does not change it.
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.57.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.58.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+
+### Proposed site on the map, and a solution count (v1.58)
+
+Each RSRP bad-spot map labels the yellow dashed line from a serving sector to the bad spot with that distance in metres. When the final solution is a new 3-sector site, that site is drawn in purple, and the sector toward the bad spot is long enough to reach it. When the final solution is a 4th L900 sector, that sector is drawn in orange from the existing site to the bad spot. Above the identified-spots table, one summary counts tilt and azimuth, 4th sector, and new site.
 
 ### RSRP bad spots only, with a final solution on every row (v1.57)
 

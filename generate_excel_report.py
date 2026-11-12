@@ -88,7 +88,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.57"
+REPORT_VERSION = "1.58"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -1378,6 +1378,30 @@ BAD_SPOT_KPI_NOTES = {
 }
 
 
+def place_solution_summary(ws, row: int, plans: list[dict]) -> int:
+    """Count of tilt, 4th sector, and new site, just above the bad-spot table."""
+    counts = {"tune": 0, "fourth": 0, "new": 0}
+    for plan in plans:
+        kind = str(plan.get("kind") or "")
+        if kind in counts:
+            counts[kind] += 1
+    write_cell(ws, row, 1, "Summary of proposed solutions", size=14, bold=True, color=NAVY)
+    write_table(
+        ws,
+        row + 2,
+        1,
+        ["Solution", "Count"],
+        [
+            ["Tilt and azimuth", counts["tune"]],
+            ["4th sector, L900", counts["fourth"]],
+            ["New 3-sector site", counts["new"]],
+            ["All bad spots", len(plans)],
+        ],
+        num_formats={1: "#,##0"},
+    )
+    return row + 8
+
+
 def _bad_spot_table_rows(spots: pd.DataFrame, *, include_kpi: bool = True, plans: list[dict] | None = None) -> list[list]:
     rows = []
     for n, (_, s) in enumerate(spots.iterrows(), start=1):
@@ -1596,6 +1620,8 @@ def build_kpi_bad_spot_sheet(
         _, spot_h = add_image(ws, path, f"A{cursor + 2}", width=780, height=720)
         cursor = cursor + 2 + max(spot_h, 360) // 20 + 3
     table_row = cursor if maps else cursor + 1
+    if plans:
+        table_row = place_solution_summary(ws, table_row, plans)
 
     table_title = f"Identified {kpi} bad spots"
     if spots is not None and len(spots) > BAD_SPOT_TABLE_MAX:
@@ -2798,6 +2824,62 @@ def _add_solution_columns(xml: str, plans: list[dict]) -> str:
     return xml
 
 
+def _shift_rows_down(xml: str, start: int, count: int) -> str:
+    """Move every row at or below start down by count. Drawings are left as they are."""
+    def shift_r(match: re.Match) -> str:
+        row = int(match.group(2))
+        if row >= start:
+            row += count
+        return f'r="{match.group(1)}{row}"'
+
+    def shift_ref(match: re.Match) -> str:
+        r1 = int(match.group(2))
+        r2 = int(match.group(4))
+        if r1 >= start:
+            r1 += count
+        if r2 >= start:
+            r2 += count
+        return f'ref="{match.group(1)}{r1}:{match.group(3)}{r2}"'
+
+    xml = re.sub(r'\br="([A-Z]*)(\d+)"', shift_r, xml)
+    return re.sub(r'ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"', shift_ref, xml)
+
+
+def _insert_solution_summary(xml: str, plans: list[dict]) -> str:
+    """Put the solution counts between the last map and the identified-spots table."""
+    if "Summary of proposed solutions" in xml:
+        return xml
+    found = re.search(
+        r'<row r="(\d+)"[^>]*>(?:(?!</row>).)*Identified [^<]*bad spots(?:(?!</row>).)*</row>',
+        xml,
+        flags=re.S,
+    )
+    if found is None:
+        raise SystemExit("Identified bad-spot title was not found")
+    start = int(found.group(1))
+    xml = _shift_rows_down(xml, start, 8)
+    counts = {"tune": 0, "fourth": 0, "new": 0}
+    for plan in plans:
+        kind = str(plan.get("kind") or "")
+        if kind in counts:
+            counts[kind] += 1
+    lines = [
+        (start, "Summary of proposed solutions", None, 6),
+        (start + 2, "Solution", "Count", 7),
+        (start + 3, "Tilt and azimuth", f"{counts['tune']:,}", 20),
+        (start + 4, "4th sector, L900", f"{counts['fourth']:,}", 20),
+        (start + 5, "New 3-sector site", f"{counts['new']:,}", 20),
+        (start + 6, "All bad spots", f"{len(plans):,}", 7),
+    ]
+    rows = {}
+    for row, left, right, style in lines:
+        cells = [_inline_cell(f"A{row}", style, left)]
+        if right is not None:
+            cells.append(_inline_cell(f"B{row}", style, right))
+        rows[row] = f'<row r="{row}" ht="20" customHeight="1">{"".join(cells)}</row>'
+    return _insert_sheet_rows(xml, rows, [])
+
+
 def _drop_workbook_sheets(parts: dict[str, bytes], sheet_names: tuple[str, ...]) -> None:
     """Remove named sheets, their drawings, and pictures nothing else uses."""
     wb_xml = parts["xl/workbook.xml"].decode("utf-8")
@@ -2918,6 +3000,7 @@ def write_bad_spot_advice(src: Path | None = None) -> Path:
             merges.extend(added_merges)
         xml = _insert_sheet_rows(xml, rows, merges)
         xml = _add_solution_columns(xml, pairs)
+        xml = _insert_solution_summary(xml, pairs)
         for old, new in zip(_ADVICE_NOTE_OLD, _ADVICE_NOTE_NEW):
             if old not in xml:
                 if new not in xml:
