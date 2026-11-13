@@ -115,15 +115,15 @@ The Cover sheet keeps the Idle dataset, KPI table, and Idle histograms. Under Ac
 
 Every coverage map and bad-spot map is drawn on Esri World Imagery. The combined view is the satellite route only: no circle is painted into it and no circle shape is placed on it. Bad Spot 1, Bad Spot 2, and the rest follow down the left side of the sheet, each a larger map with one movable circle. A site that falls in that view is drawn as a transparent cyan outline, one arm per sector, with the Sector name at the end of the arm and no fill. A circle is at most 10 km across. Where the poor road is in separate pockets, several circles sit inside that 10 km neighbourhood.
 
-## Web coverage map (v1.56)
+## Web coverage map (v1.60)
 
-Download, unzip, and open `Bogura_DriveTest_Web_v1.56.html`. The map is the v1.54 page, republished under v1.56. The Excel workbook is v1.59. This page stays v1.56.
+Download, unzip, and open `Bogura_DriveTest_Web_v1.60.html`. The map adds a basemap choice and smaller plot marks. The Excel workbook is v1.60.
 
-**v1.56 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.56.zip
+**v1.60 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.60.zip
 
-Previous web: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.55.zip
+Previous web: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.56.zip
 
-The page opens as one window. Windows can be 1, 2, 3 or 4. One, two and three windows sit in a single row, each with its own controls. Four windows are two by two. The top row keeps the full control bar. The bottom row keeps a smaller bar with KPI, Mode and Band only, so those maps can be set for the comparison. For now the comparison is RSRP; a window can still show RSRQ. Pan and zoom stay together. A spot click marks that place in every window and does not open a popup. Turn on Info, then click a spot, and that window alone shows a small Field and Value table. The table includes E_tilt, M_tilt, BW (dlChannelBandwidth, shown in MHz), Tx (noOfTxAntennas) and Rx (noOfRxAntennas). KPI can be Blank, which leaves the satellite map clear for general use. It has Idle and Active, all bands, and L900 / L1800 / L2100 / L2600. SINR and the bad-spot sheets are not on this page. It needs a network connection: the satellite picture is Esri World Imagery, and the zoom buttons come from Leaflet. Zooming moves the satellite picture and the coloured drive together. Click a spot and the popup shows **CellID** and **CellName** for that spot, plus the RSRP and RSRQ of its 50 m bin. A CellName that is not in the system dump is left blank. The Layer control is a dropdown. Tick more than one band, for example L900 and L1800, and the map draws one coverage trace for those bands, keeping the stronger RSRP in each 50 m bin. Pie widget draws every site from `System DUMP.xlsb` whose centre is inside the chart. Sector level shows the sector name as plain light text at the end of each arm, with no filled background. Site level shows the site name, in a smaller size, at the centre. Ruler follows the pointer after each click. A double-click ends that line and leaves the distances on the map, so the next line does not erase it. Click Ruler to clear every line, or double-click one line to remove only that line. Search finds a site or sector name and moves the map to it. Lat-long, beside Search, moves the map to a typed latitude and longitude, and the box shows the position after each move. A click also shows Azimuth, Height, E_tilt, M_tilt, BW, Tx, Rx and RS Power(dBm) from the system dump for that cell.
+The page opens as one window. Windows can be 1, 2, 3 or 4. One, two and three windows sit in a single row, each with its own controls. Four windows are two by two. The top row keeps the full control bar. The bottom row keeps Map, KPI, Mode and Band, so those maps can be set for the comparison. Map chooses Satellite, Google map, Google satellite, Terrain, Topographic or Street. The coloured plot marks are smaller than on v1.56. For now the comparison is RSRP; a window can still show RSRQ. Pan and zoom stay together. A spot click marks that place in every window and does not open a popup. Turn on Info, then click a spot, and that window alone shows a small Field and Value table. The table includes E_tilt, M_tilt, BW (dlChannelBandwidth, shown in MHz), Tx (noOfTxAntennas) and Rx (noOfRxAntennas). KPI can be Blank, which leaves the satellite map clear for general use. It has Idle and Active, all bands, and L900 / L1800 / L2100 / L2600. SINR and the bad-spot sheets are not on this page. It needs a network connection: the default picture is Esri World Imagery, the other map choices come from Google, OpenTopoMap and OpenStreetMap, and the zoom buttons come from Leaflet. Zooming moves the satellite picture and the coloured drive together. Click a spot and the popup shows **CellID** and **CellName** for that spot, plus the RSRP and RSRQ of its 50 m bin. A CellName that is not in the system dump is left blank. The Layer control is a dropdown. Tick more than one band, for example L900 and L1800, and the map draws one coverage trace for those bands, keeping the stronger RSRP in each 50 m bin. Pie widget draws every site from `System DUMP.xlsb` whose centre is inside the chart. Sector level shows the sector name as plain light text at the end of each arm, with no filled background. Site level shows the site name, in a smaller size, at the centre. Ruler follows the pointer after each click. A double-click ends that line and leaves the distances on the map, so the next line does not erase it. Click Ruler to clear every line, or double-click one line to remove only that line. Search finds a site or sector name and moves the map to it. Lat-long, beside Search, moves the map to a typed latitude and longitude, and the box shows the position after each move. A click also shows Azimuth, Height, E_tilt, M_tilt, BW, Tx, Rx and RS Power(dBm) from the system dump for that cell.
 
 CellID and CellName come from the drive log and `System DUMP.xlsb`:
 
@@ -134,21 +134,25 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
-## Download Excel report (v1.59)
+## Download Excel report (v1.60)
 
-**v1.59 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.59.xlsx
+**v1.60 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.60.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.59.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.60.xlsx
 
-Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.58.xlsx
+Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.59.xlsx
 
-The web map stays at v1.56. This Excel update does not change it.
+The web map is v1.60 as well.
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.59.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.60.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+
+### Fewer new sites, and downtilt limited to 2° (v1.60)
+
+A new 3-sector site is kept only when the nearest existing site is farther than 4 km. Inside 4 km, a 4th L900 sector is aimed at the bad spot instead. Downtilt of an existing sector is limited to 2°. When the spot needs more downtilt, the final step is a 4th sector on a site within 1 km. Uptilt is unchanged. The web map adds Satellite, Google map, Google satellite, Terrain, Topographic and Street, and the plot marks are smaller.
 
 ### Scale bar, and the solution aimed at the red road (v1.59)
 

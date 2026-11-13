@@ -88,7 +88,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.59"
+REPORT_VERSION = "1.60"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -1576,9 +1576,10 @@ def build_kpi_bad_spot_sheet(
         "on L900, L1800, L2100 or L2600, and it has to be in System DUMP.xlsb. Every serving cell is drawn. "
         "The length beside the red is the full red stretch, and a short gap of good coverage stays in that length. "
         "The columns to the right of each map are a suggestion table. Azimuth and tilt are used "
-        "when a sector is within about 2.5 km. A 4th L900 sector is required when the spot is in "
-        "the null between sectors and within 1.5 km, and it is not used past 2 km. Otherwise the "
-        "table proposes a new 3-sector site. A blank with no plot inside the circle is counted "
+        "when a sector is within about 2.5 km, and downtilt is limited to 2°. A larger downtilt "
+        "becomes a 4th L900 sector on a site within 1 km. A 4th sector also replaces a new site "
+        "when a host inside 4 km can aim at the bad spot. A new 3-sector site is kept only past that. "
+        "A blank with no plot inside the circle is counted "
         "with that bad spot. The list at the bottom has every bad spot, with Site, Population "
         "and Final solution on the right. "
         "Several circles can sit inside one 10 km neighbourhood when the poor "
@@ -2739,11 +2740,11 @@ def refresh_sheet_maps(src: Path | None = None) -> Path:
 
 
 _ADVICE_NOTE_OLD = (
-    "The columns to the right of each map are a suggestion table: E_tilt and M_tilt first, then azimuth using population, then a 4th L900 sector, then a new 3-sector site. A blank with no plot inside the circle is counted with that bad spot.",
-    "The space to the right of each map is that suggestion table. A blank with no plot inside the circle is counted with that bad spot.",
+    "The columns to the right of each map are a suggestion table. Azimuth and tilt are used when a sector is within about 2.5 km. A 4th L900 sector is required when the spot is in the null between sectors and within 1.5 km, and it is not used past 2 km. A new 3-sector site is the final step when those cannot cover the spot. A blank with no plot inside the circle is counted with that bad spot.",
+    "The space to the right of each map is that suggestion table. Site, Population and Final solution are filled for every bad spot in the table below. A blank with no plot inside the circle is counted with that bad spot.",
 )
 _ADVICE_NOTE_NEW = (
-    "The columns to the right of each map are a suggestion table. Azimuth and tilt are used when a sector is within about 2.5 km. A 4th L900 sector is required when the spot is in the null between sectors and within 1.5 km, and it is not used past 2 km. A new 3-sector site is the final step when those cannot cover the spot. A blank with no plot inside the circle is counted with that bad spot.",
+    "The columns to the right of each map are a suggestion table. Azimuth and tilt are used when a sector is within about 2.5 km, and downtilt is limited to 2°. A larger downtilt becomes a 4th L900 sector on a site within 1 km. A 4th sector also replaces a new site when a host inside 4 km can aim at the bad spot. A new 3-sector site is kept only when the nearest site is farther than that. A blank with no plot inside the circle is counted with that bad spot.",
     "The space to the right of each map is that suggestion table. Site, Population and Final solution are filled for every bad spot in the table below. A blank with no plot inside the circle is counted with that bad spot.",
 )
 _DROP_BAD_SPOT_SHEETS = (
@@ -2939,14 +2940,24 @@ def _add_solution_columns(xml: str, plans: list[dict]) -> str:
         attrs = match.group(2)
         body = match.group(3)
         pieces.append(xml[last:match.start()])
+        updates = (
+            (f"O{row_n}", 20, str(plan.get("site", ""))),
+            (f"P{row_n}", 20, str(plan.get("population", ""))),
+            (f"Q{row_n}", 37, str(plan.get("final", ""))),
+        )
         if f'r="Q{row_n}"' not in body:
             if "ht=" not in attrs:
                 attrs += ' ht="52" customHeight="1"'
-            body += (
-                _inline_cell(f"O{row_n}", 20, str(plan.get("site", "")))
-                + _inline_cell(f"P{row_n}", 20, str(plan.get("population", "")))
-                + _inline_cell(f"Q{row_n}", 37, str(plan.get("final", "")))
-            )
+            body += "".join(_inline_cell(ref, style, text) for ref, style, text in updates)
+        else:
+            for ref, style, text in updates:
+                body = re.sub(
+                    rf'<c r="{ref}"[^>]*>.*?</c>',
+                    _inline_cell(ref, style, text),
+                    body,
+                    count=1,
+                    flags=re.S,
+                )
         pieces.append(f'<row r="{row_n}"{attrs}>{body}</row>')
         last = match.end()
     pieces.append(xml[last:])

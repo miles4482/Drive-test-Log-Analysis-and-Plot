@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bogura Drive Test Web v1.56</title>
+<title>Bogura Drive Test Web v1.60</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   html, body { margin: 0; height: 100%; font-family: "Segoe UI", Calibri, sans-serif; color: #1a1a1a; }
@@ -47,7 +47,7 @@
   .board.second-row .bar {
     display: flex; font-size: 10px; padding: 1px 4px; gap: 2px 5px;
   }
-  .board.second-row .bar > :not(.ctl-kpi):not(.ctl-mode):not(.ctl-band):not(.win) { display: none; }
+  .board.second-row .bar > :not(.ctl-map):not(.ctl-kpi):not(.ctl-mode):not(.ctl-band):not(.win) { display: none; }
   .board.second-row .bar select,
   .board.second-row .bar .layer-btn { padding: 0 3px; }
   .board.second-row .layer-btn { min-width: 64px; font-size: 10px; }
@@ -102,7 +102,7 @@
 <body>
 <div id="app">
   <header>
-    <h1>Bogura coverage v1.56</h1>
+    <h1>Bogura coverage v1.60</h1>
     <label>Windows
       <select id="split">
         <option value="1" selected>1</option>
@@ -195,10 +195,10 @@ const SpotCanvas = L.Layer.extend({
   },
   _radius: function () {
     const z = this._map.getZoom();
-    if (z >= 16) return 7;
-    if (z >= 14) return 5.5;
-    if (z >= 12) return 4.5;
-    return 3.6;
+    if (z >= 16) return 4.2;
+    if (z >= 14) return 3.4;
+    if (z >= 12) return 2.8;
+    return 2.2;
   },
   _reset: function () {
     const map = this._map;
@@ -252,8 +252,8 @@ const SpotCanvas = L.Layer.extend({
     }
     ctx.beginPath();
     for (let n = 0; n < placed.length; n++) {
-      ctx.moveTo(placed[n].x + radius + 1.6, placed[n].y);
-      ctx.arc(placed[n].x, placed[n].y, radius + 1.6, 0, Math.PI * 2);
+      ctx.moveTo(placed[n].x + radius + 0.8, placed[n].y);
+      ctx.arc(placed[n].x, placed[n].y, radius + 0.8, 0, Math.PI * 2);
     }
     ctx.fillStyle = "#ffffff";
     ctx.fill();
@@ -605,6 +605,14 @@ function shareSpot(latlng) {
 function boardHtml(number) {
   return '<div class="bar">' +
     '<span class="win">Window ' + number + '</span>' +
+    '<label class="ctl-map">Map <select class="basemap">' +
+      '<option value="satellite" selected>Satellite</option>' +
+      '<option value="google">Google map</option>' +
+      '<option value="gsat">Google satellite</option>' +
+      '<option value="terrain">Terrain</option>' +
+      '<option value="topo">Topographic</option>' +
+      '<option value="street">Street</option>' +
+    '</select></label>' +
     '<label class="ctl-kpi">KPI <select class="kpi"><option value="">Blank</option><option value="RSRP" selected>RSRP</option><option value="RSRQ">RSRQ</option></select></label>' +
     '<label class="ctl-mode">Mode <select class="mode"><option value="idle">Idle</option><option value="active">Active</option></select></label>' +
     '<label class="ctl-band"><span class="layer-name">Layer</span> <span class="dropdown">' +
@@ -632,10 +640,21 @@ function createView(host, preset) {
   host.innerHTML = boardHtml(views.length + 1);
   const q = function (sel) { return host.querySelector(sel); };
   const map = L.map(q(".map"), { zoomControl: true, worldCopyJump: false });
-  L.tileLayer(
-    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    { attribution: "Satellite © Esri", maxZoom: 19 }
-  ).addTo(map);
+  const basemaps = {
+    satellite: { url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", attribution: "Satellite © Esri", maxZoom: 19 },
+    google: { url: "https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}", attribution: "© Google", maxZoom: 20 },
+    gsat: { url: "https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}", attribution: "© Google", maxZoom: 20 },
+    terrain: { url: "https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}", attribution: "© Google", maxZoom: 20 },
+    topo: { url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", attribution: "© OpenTopoMap", maxZoom: 17, subdomains: "abc" },
+    street: { url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", attribution: "© OpenStreetMap", maxZoom: 19, subdomains: "abc" }
+  };
+  let baseLayer = L.tileLayer(basemaps.satellite.url, basemaps.satellite).addTo(map);
+  q(".basemap").addEventListener("change", function () {
+    const spec = basemaps[q(".basemap").value] || basemaps.satellite;
+    map.removeLayer(baseLayer);
+    baseLayer = L.tileLayer(spec.url, spec).addTo(map);
+    baseLayer.bringToBack();
+  });
   const legend = L.control({ position: "topleft" });
   let legendDiv = null;
   legend.onAdd = function () {
