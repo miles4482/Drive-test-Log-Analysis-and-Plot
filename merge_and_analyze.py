@@ -1626,24 +1626,21 @@ def draw_bad_spot_sector_pies(
             rad = np.radians(az)
             if _ang_diff(az, bearing) <= BAD_SPOT_AIM_DEG:
                 facing.append(az)
-            gap = 0.36
             ax.plot(
-                [lon + r_deg * gap * np.sin(rad), lon + r_deg * np.sin(rad)],
-                [lat + r_deg * gap * np.cos(rad), lat + r_deg * np.cos(rad)],
+                [lon, lon + r_deg * np.sin(rad)],
+                [lat, lat + r_deg * np.cos(rad)],
                 color="#8FD8E0",
                 linewidth=3.0,
-                alpha=0.4,
-                solid_capstyle="butt",
+                solid_capstyle="round",
                 zorder=24,
                 clip_on=True,
             )
             ax.plot(
-                [lon + r_deg * gap * np.sin(rad), lon + r_deg * np.sin(rad)],
-                [lat + r_deg * gap * np.cos(rad), lat + r_deg * np.cos(rad)],
+                [lon, lon + r_deg * np.sin(rad)],
+                [lat, lat + r_deg * np.cos(rad)],
                 color="#E7FBFD",
                 linewidth=1.5,
-                alpha=0.5,
-                solid_capstyle="butt",
+                solid_capstyle="round",
                 zorder=25,
                 clip_on=True,
             )

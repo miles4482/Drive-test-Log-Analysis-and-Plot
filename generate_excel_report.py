@@ -88,7 +88,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.62"
+REPORT_VERSION = "1.63"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -3150,6 +3150,39 @@ def _replace_summary_counts(xml: str, counts: dict[str, int], total: int) -> str
     return re.sub(r"<row r=\"\d+\"[^>]*>(?:(?!</row>).)*</row>", repl_row, xml)
 
 
+def _drop_on_sheet_summary(xml: str) -> str:
+    """Take the count table off the bad-spot sheet. The Cover sheet holds it."""
+    found = re.search(
+        r'<row r="(\d+)"[^>]*>(?:(?!</row>).)*Summary of proposed solutions',
+        xml,
+        flags=re.S,
+    )
+    if found is None:
+        return xml
+    start = int(found.group(1))
+    ident = re.search(
+        r'<row r="(\d+)"[^>]*>(?:(?!</row>).)*Identified ',
+        xml,
+        flags=re.S,
+    )
+    end = int(ident.group(1)) - 1 if ident is not None else start + 7
+    span = end - start + 1
+
+    def keep_row(match: re.Match) -> str:
+        row = int(match.group(1))
+        return "" if start <= row <= end else match.group(0)
+
+    def keep_merge(match: re.Match) -> str:
+        rows = [int(number) for number in re.findall(r"\d+", match.group(1))]
+        return "" if rows and any(start <= row <= end for row in rows) else match.group(0)
+
+    xml = re.sub(r'<row r="(\d+)"[^>]*>.*?</row>', keep_row, xml, flags=re.S)
+    xml = re.sub(r'<mergeCell ref="([^"]+)" />', keep_merge, xml)
+    xml = _shift_rows_down(xml, end + 1, -span)
+    count = len(re.findall(r"<mergeCell ", xml))
+    return re.sub(r'<mergeCells count="\d+">', f'<mergeCells count="{count}">', xml, count=1)
+
+
 def _insert_solution_summary(xml: str, plans: list[dict]) -> str:
     """Put the solution counts between the last map and the identified-spots table."""
     counts = {"tune": 0, "fourth": 0, "new": 0}
@@ -3353,6 +3386,74 @@ def _graft_cover_summary(xml: str, idle_plans: list[dict], active_plans: list[di
     )
     xml = xml.replace("</mergeCells>", "".join(f'<mergeCell ref="{ref}"/>' for ref in merges) + "</mergeCells>", 1)
     xml = re.sub(r'<dimension ref="A1:[A-Z]+\d+"', f'<dimension ref="A1:T{last}"', xml, count=1)
+    xml = _place_cover_summary_beside_route(xml, idle_plans, active_plans)
+    return xml
+
+
+def _place_cover_summary_beside_route(xml: str, idle_plans: list[dict], active_plans: list[dict]) -> str:
+    """Put the Idle and Active counts to the right of the DT route."""
+    counts = {"tune": 0, "fourth": 0, "new": 0}
+    idle_counts = dict(counts)
+    active_counts = dict(counts)
+    for plan in idle_plans:
+        kind = str(plan.get("kind") or "")
+        if kind in idle_counts:
+            idle_counts[kind] += 1
+    for plan in active_plans:
+        kind = str(plan.get("kind") or "")
+        if kind in active_counts:
+            active_counts[kind] += 1
+    xml = xml.replace(
+        '<col width="14" customWidth="1" min="16" max="16" />',
+        '<col width="22" customWidth="1" min="16" max="16" />',
+        1,
+    )
+
+    def write(row: int, cells: dict[str, str]) -> None:
+        nonlocal xml
+        match = re.search(rf'(<row r="{row}"[^>]*>)(.*?)(</row>)', xml, flags=re.S)
+        if match is None:
+            raise SystemExit(f"Cover row {row} was not found for the summary")
+        body = match.group(2)
+        for col in cells:
+            body = re.sub(
+                rf'<c r="{col}{row}"[^>]*(?:/>|>.*?</c>)',
+                "",
+                body,
+                count=1,
+                flags=re.S,
+            )
+        body += "".join(cells[col] for col in ("P", "Q", "R", "S", "T") if col in cells)
+        xml = xml[: match.start()] + match.group(1) + body + match.group(3) + xml[match.end() :]
+
+    title = {col: f'<c r="{col}74" s="5" t="n" />' for col in "QRST"}
+    title["P"] = _inline_cell("P74", 5, "Bad Spot Summary across Mode")
+    write(74, title)
+    write(76, {
+        "P": _inline_cell("P76", 7, "Solution"),
+        "Q": _inline_cell("Q76", 7, "Idle"),
+        "R": _inline_cell("R76", 7, "Active"),
+    })
+    data_rows = (
+        (77, "Tilt and azimuth", idle_counts["tune"], active_counts["tune"], 20),
+        (78, "4th sector, L900", idle_counts["fourth"], active_counts["fourth"], 20),
+        (79, "New 3-sector site", idle_counts["new"], active_counts["new"], 20),
+        (80, "All bad spots", len(idle_plans), len(active_plans), 7),
+    )
+    for row, label, idle_n, active_n, style in data_rows:
+        write(row, {
+            "P": _inline_cell(f"P{row}", style, label),
+            "Q": _inline_cell(f"Q{row}", style, str(idle_n)),
+            "R": _inline_cell(f"R{row}", style, str(active_n)),
+        })
+    if 'ref="P74:T74"' not in xml:
+        xml = re.sub(
+            r'(<mergeCells count=")(\d+)(">)',
+            lambda match: match.group(1) + str(int(match.group(2)) + 1) + match.group(3),
+            xml,
+            count=1,
+        )
+        xml = xml.replace("</mergeCells>", '<mergeCell ref="P74:T74"/></mergeCells>', 1)
     return xml
 
 
@@ -3586,7 +3687,7 @@ def write_bad_spot_advice(src: Path | None = None) -> Path:
             merges.extend(added_merges)
         xml = _insert_sheet_rows(xml, rows, merges)
         xml = _add_solution_columns(xml, pairs)
-        xml = _insert_solution_summary(xml, pairs)
+        xml = _drop_on_sheet_summary(xml)
         for old, new in zip(_ADVICE_NOTE_OLD, _ADVICE_NOTE_NEW):
             if old not in xml:
                 if new not in xml:
