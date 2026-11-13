@@ -11,3 +11,5 @@ output/*.xlsx
 !output/Bogura_DriveTest_Report_v*.xlsx
 output/*.parquet
 output/*.csv.gz
+# One PNG per bad spot. The workbook embeds these; they are not published on their own.
+output/plots/*_spot_*.png
