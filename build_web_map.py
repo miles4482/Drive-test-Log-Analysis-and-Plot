@@ -14,6 +14,8 @@ rounded down. Cell Name is the dump EUtranCellId for that pair.
 from __future__ import annotations
 
 import json
+import math
+import re
 import sys
 import zipfile
 from pathlib import Path
@@ -284,6 +286,91 @@ def add_cell_params() -> int:
     return filled
 
 
+_SECTOR_CELLS: dict[tuple[str, str], list] | None = None
+
+
+def _grab(value, digits: int):
+    if value is None:
+        return None
+    try:
+        if math.isnan(value):
+            return None
+    except TypeError:
+        return None
+    if digits == 0:
+        return int(value)
+    return float(value)
+
+
+def _sector_cell_index() -> dict[tuple[str, str], list]:
+    """Cell parameters for each site and sector, from the system dump."""
+    global _SECTOR_CELLS
+    if _SECTOR_CELLS is not None:
+        return _SECTOR_CELLS
+    from merge_and_analyze import _SITE_CELLS
+
+    buckets: dict[tuple[str, str], list] = {}
+    frame = _SITE_CELLS
+    if frame is None or frame.empty:
+        _SECTOR_CELLS = buckets
+        return buckets
+    work = frame.loc[:, [
+        "SiteName", "Sector", "EUtranCellId", "cellId",
+        "Azimuth", "Height", "E_tilt", "M_tilt", "RS Power(dBm)",
+        "dlChannelBandwidth", "noOfTxAntennas", "noOfRxAntennas",
+    ]].copy()
+    for col in ("SiteName", "Sector", "EUtranCellId"):
+        work[col] = work[col].map(lambda value: "" if value is None else str(value).strip())
+    work = work[
+        work["SiteName"].ne("")
+        & work["Sector"].ne("")
+        & work["EUtranCellId"].ne("")
+        & work["EUtranCellId"].str.lower().ne("nan")
+    ]
+    work = work.drop_duplicates(["SiteName", "Sector", "EUtranCellId"], keep="first")
+    work = work.rename(columns={
+        "SiteName": "site",
+        "Sector": "sector",
+        "EUtranCellId": "name",
+        "cellId": "cid",
+        "Azimuth": "az",
+        "Height": "ht",
+        "E_tilt": "et",
+        "M_tilt": "mt",
+        "RS Power(dBm)": "pwr",
+        "dlChannelBandwidth": "bw",
+        "noOfTxAntennas": "tx",
+        "noOfRxAntennas": "rx",
+    })
+    for col, digits in (
+        ("cid", 0), ("az", 1), ("ht", 1), ("et", 1), ("mt", 1),
+        ("pwr", 2), ("bw", 0), ("tx", 0), ("rx", 0),
+    ):
+        work[col] = pd.to_numeric(work[col], errors="coerce").round(digits)
+    for row in work.itertuples(index=False):
+        key = (row.site, row.sector)
+        buckets.setdefault(key, []).append([
+            row.name,
+            _grab(row.cid, 0),
+            _grab(row.az, 1),
+            _grab(row.ht, 1),
+            _grab(row.et, 1),
+            _grab(row.mt, 1),
+            _grab(row.pwr, 2),
+            _grab(row.bw, 0),
+            _grab(row.tx, 0),
+            _grab(row.rx, 0),
+        ])
+    for rows in buckets.values():
+        rows.sort(key=lambda item: item[0])
+    _SECTOR_CELLS = buckets
+    return buckets
+
+
+def _cells_for_sector(site: str, sector: str) -> list:
+    return _sector_cell_index().get((site, sector), [])
+
+
 def add_site_pies(radius_km: float = 3.0) -> int:
     """Every site in the system dump, one centre and every sector arm.
 
@@ -304,16 +391,20 @@ def add_site_pies(radius_km: float = 3.0) -> int:
         if part.empty:
             continue
         arms = []
+        site_name = str(_site).strip()
+        if site_name.lower() == "nan":
+            site_name = ""
         for _, row in part.iterrows():
             name = str(row["Sector"]).strip()
             if not name or name.lower() == "nan":
                 continue
-            arms.append([name, round(float(row["azimuth"]) % 360.0, 1)])
+            arms.append([
+                name,
+                round(float(row["azimuth"]) % 360.0, 1),
+                _cells_for_sector(site_name, name),
+            ])
         if not arms:
             continue
-        site_name = str(_site).strip()
-        if site_name.lower() == "nan":
-            site_name = ""
         sites.append([
             round(float(part["lat"].median()), 5),
             round(float(part["lon"].median()), 5),
@@ -326,14 +417,22 @@ def add_site_pies(radius_km: float = 3.0) -> int:
     return len(sites)
 
 
+def _web_version(html_text: str) -> str:
+    match = re.search(r"<h1>Bogura coverage v(\d+(?:\.\d+)+)</h1>", html_text)
+    if not match:
+        raise SystemExit("web/index.html has no Bogura coverage version")
+    return match.group(1)
+
+
 def package_web() -> Path:
-    """One download named with the same version as the Excel report."""
-    from generate_excel_report import OUTPUT_DIR, REPORT_VERSION
+    """One download named with the version in the page title."""
+    from generate_excel_report import OUTPUT_DIR
 
     html_text = (WEB_DIR / "index.html").read_text()
-    marker = f"v{REPORT_VERSION}"
+    version = _web_version(html_text)
+    marker = f"v{version}"
     if marker not in html_text:
-        raise SystemExit(f"web/index.html is not labelled {marker}, which is the Excel report version")
+        raise SystemExit(f"web/index.html is not labelled {marker}")
     if not DATA_JS.exists():
         raise SystemExit(f"Missing {DATA_JS.name}; build the coverage data first")
     page = html_text.replace(
@@ -341,8 +440,8 @@ def package_web() -> Path:
         "<script>\n" + DATA_JS.read_text() + "</script>",
     )
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    dest = OUTPUT_DIR / f"Bogura_DriveTest_Web_v{REPORT_VERSION}.zip"
-    inner = f"Bogura_DriveTest_Web_v{REPORT_VERSION}.html"
+    dest = OUTPUT_DIR / f"Bogura_DriveTest_Web_v{version}.zip"
+    inner = f"Bogura_DriveTest_Web_v{version}.html"
     with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(inner, page)
     print(f"Wrote {dest} ({dest.stat().st_size / 1e6:.1f} MB) containing {inner}", flush=True)

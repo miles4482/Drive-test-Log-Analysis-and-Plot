@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bogura Drive Test Web v1.63</title>
+<title>Bogura Drive Test Web v1.64</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   html, body { margin: 0; height: 100%; font-family: "Segoe UI", Calibri, sans-serif; color: #1a1a1a; }
@@ -69,6 +69,7 @@
     position: absolute; z-index: 30; top: 8px; right: 8px;
     background: #fff; color: #111; border: 1px solid #222;
     box-shadow: 0 1px 4px rgba(0,0,0,.28); font-size: 11px; min-width: 190px;
+    max-height: calc(100% - 16px); overflow: auto;
   }
   .info-panel[hidden] { display: none; }
   .info-panel header {
@@ -102,7 +103,7 @@
 <body>
 <div id="app">
   <header>
-    <h1>Bogura coverage v1.63</h1>
+    <h1>Bogura coverage v1.64</h1>
     <label>Windows
       <select id="split">
         <option value="1" selected>1</option>
@@ -388,7 +389,7 @@ const PieCanvas = L.Layer.extend({
     const showNames = this.showSector !== false;
     const showSites = this.showSite !== false;
     ctx.lineCap = "round";
-    ctx.font = "9px Segoe UI, Calibri, sans-serif";
+    ctx.font = "8px Segoe UI, Calibri, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     const labels = [];
@@ -426,8 +427,46 @@ const PieCanvas = L.Layer.extend({
         }
       }
     }
-    paintLabels(ctx, labels, "9px Segoe UI, Calibri, sans-serif", "#FFFFFF", false);
-    paintLabels(ctx, siteLabels, "8px Segoe UI, Calibri, sans-serif", "#7A1F6D", false);
+    paintLabels(ctx, labels, "8px Segoe UI, Calibri, sans-serif", "#FFFFFF", false);
+    paintLabels(ctx, siteLabels, "8px Segoe UI, Calibri, sans-serif", "#FFFFFF", "#14202B");
+  },
+  pick: function (latlng) {
+    const map = this._map;
+    if (!map) return null;
+    const click = map.latLngToContainerPoint(latlng);
+    const sites = (typeof COVERAGE === "undefined" ? [] : COVERAGE.sites) || [];
+    const bounds = map.getBounds();
+    const km = this._armKm();
+    let hubHit = null;
+    let hubDist = 16;
+    let armHit = null;
+    let armDist = 12;
+    for (let s = 0; s < sites.length; s++) {
+      const lat = sites[s][0];
+      const lon = sites[s][1];
+      if (!bounds.contains([lat, lon])) continue;
+      const centre = map.latLngToContainerPoint([lat, lon]);
+      const hub = Math.hypot(centre.x - click.x, centre.y - click.y);
+      if (hub <= hubDist) {
+        hubDist = hub;
+        hubHit = sites[s];
+      }
+      const arms = sites[s][3] || [];
+      for (let a = 0; a < arms.length; a++) {
+        const tip = map.latLngToContainerPoint(offsetKm(lat, lon, arms[a][1], km));
+        const nameAt = map.latLngToContainerPoint(offsetKm(lat, lon, arms[a][1], km * 1.28));
+        const along = pointSegmentDistance(click.x, click.y, centre.x, centre.y, tip.x, tip.y);
+        const label = Math.hypot(nameAt.x - click.x, nameAt.y - click.y);
+        const dist = Math.min(along, label);
+        if (dist <= armDist && hub > 16) {
+          armDist = dist;
+          armHit = { site: sites[s], arm: arms[a] };
+        }
+      }
+    }
+    if (hubHit) return { kind: "site", site: hubHit };
+    if (armHit) return { kind: "sector", site: armHit.site, arm: armHit.arm };
+    return null;
   }
 });
 
@@ -435,15 +474,26 @@ function paintLabels(ctx, items, font, color, halo) {
   if (!items.length) return;
   ctx.font = font;
   ctx.fillStyle = color;
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = "#ffffff";
+  ctx.lineJoin = "round";
+  ctx.miterLimit = 2;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = typeof halo === "string" ? halo : "#ffffff";
   for (let i = 0; i < items.length; i++) {
     const x = items[i][0];
     const y = items[i][1];
     const text = items[i][2];
-    if (halo !== false) ctx.strokeText(text, x, y);
+    if (halo) ctx.strokeText(text, x, y);
     ctx.fillText(text, x, y);
   }
+}
+
+function pointSegmentDistance(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 ? ((px - x1) * dx + (py - y1) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
 }
 
 function offsetKm(lat, lon, azimuthDeg, km) {
@@ -552,6 +602,83 @@ function infoTable(rows) {
   }).join("");
   return "<header>Identify <button type=\"button\" class=\"info-close\" aria-label=\"Close\">×</button></header>" +
     "<table><tr><th>Field</th><th>Value</th></tr>" + body + "</table>";
+}
+
+function sectorCellsFromNames(sectorName) {
+  if (!sectorCellsFromNames.cache) {
+    const cache = new Map();
+    const names = (typeof COVERAGE === "undefined" ? [] : COVERAGE.names) || [];
+    const cells = (typeof COVERAGE === "undefined" ? [] : COVERAGE.cells) || [];
+    names.forEach(function (name, id) {
+      const match = /^(.*)L\d+([A-Z])\d*$/.exec(name || "");
+      if (!match) return;
+      const sector = match[1] + match[2];
+      const rf = cells[id] || [];
+      let list = cache.get(sector);
+      if (!list) {
+        list = [];
+        cache.set(sector, list);
+      }
+      list.push([name, "", rf[0], rf[1], rf[2], rf[3], rf[4], rf[5], rf[6], rf[7]]);
+    });
+    sectorCellsFromNames.cache = cache;
+  }
+  return sectorCellsFromNames.cache.get(sectorName) || [];
+}
+
+function armCells(arm) {
+  if (arm && arm.length >= 3 && Array.isArray(arm[2])) return arm[2];
+  return sectorCellsFromNames(arm && arm[0]);
+}
+
+function cellsForHit(hit) {
+  const seen = {};
+  const out = [];
+  function take(list) {
+    (list || []).forEach(function (cell) {
+      const name = cell[0] || "";
+      if (!name || seen[name]) return;
+      seen[name] = true;
+      out.push(cell);
+    });
+  }
+  if (!hit) return out;
+  if (hit.kind === "sector") take(armCells(hit.arm));
+  else (hit.site[3] || []).forEach(function (arm) { take(armCells(arm)); });
+  out.sort(function (a, b) { return String(a[0]).localeCompare(String(b[0])); });
+  return out;
+}
+
+function dumpCellRows(cell) {
+  return [
+    ["CellID", cell[1] === null || cell[1] === undefined ? "" : String(cell[1])],
+    ["CellName", cell[0] || ""],
+    ["Azimuth", formatNum(cell[2])],
+    ["Height", formatNum(cell[3])],
+    ["E_tilt", formatNum(cell[4])],
+    ["M_tilt", formatNum(cell[5])],
+    ["BW", bandwidthText(cell[7])],
+    ["Tx", formatNum(cell[8])],
+    ["Rx", formatNum(cell[9])],
+    ["RS Power(dBm)", formatNum(cell[6])],
+    ["RSRP", ""],
+    ["RSRQ", ""]
+  ];
+}
+
+function dumpInfoTable(title, cells) {
+  let body = "<tr><th>Field</th><th>Value</th></tr>";
+  if (!cells.length) {
+    body += "<tr><td colspan=\"2\">No cell in the system dump</td></tr>";
+  }
+  cells.forEach(function (cell) {
+    body += "<tr><th colspan=\"2\">" + esc(cell[0] || "") + "</th></tr>";
+    dumpCellRows(cell).forEach(function (row) {
+      body += "<tr><td>" + esc(row[0]) + "</td><td>" + esc(row[1]) + "</td></tr>";
+    });
+  });
+  return "<header>Identify · " + esc(title) + " <button type=\"button\" class=\"info-close\" aria-label=\"Close\">×</button></header>" +
+    "<table>" + body + "</table>";
 }
 
 function nearestIndex(pack, latlng, maxMetres) {
@@ -869,6 +996,13 @@ function createView(host, preset) {
     panel.hidden = false;
     panel.querySelector(".info-close").addEventListener("click", clearInfo);
   }
+  function showDumpInfo(hit) {
+    const panel = q(".info-panel");
+    const title = hit.kind === "sector" ? (hit.arm[0] || hit.site[2] || "Sector") : (hit.site[2] || "Site");
+    panel.innerHTML = dumpInfoTable(title, cellsForHit(hit));
+    panel.hidden = false;
+    panel.querySelector(".info-close").addEventListener("click", clearInfo);
+  }
 
   function syncPies() {
     const on = q(".pies").checked;
@@ -906,7 +1040,7 @@ function createView(host, preset) {
     }
     const pack = currentPack();
     if (!kpi) {
-      setStatus("Map only");
+      setStatus(infoOn ? "Map only · click a sector or the site centre" : "Map only");
       if (pinned) renderPin();
       if (pies) pies.bringFront();
       return;
@@ -1062,6 +1196,12 @@ function createView(host, preset) {
     if (ev.key === "Enter") runLatLong();
   });
   map.on("click", onMapClick);
+  map.on("click", function (ev) {
+    if (rulerOn || q(".kpi").value || !infoOn || !pies) return;
+    const hit = pies.pick(ev.latlng);
+    views.forEach(function (view) { view.clearInfo(); });
+    if (hit) showDumpInfo(hit);
+  });
   map.on("dblclick", onMapDblClick);
   map.on("mousemove", onMapMove);
 
@@ -1159,7 +1299,10 @@ document.getElementById("split").addEventListener("change", function () {
 document.getElementById("info").addEventListener("click", function () {
   infoOn = !infoOn;
   this.classList.toggle("on", infoOn);
-  if (!infoOn) views.forEach(function (view) { view.clearInfo(); });
+  views.forEach(function (view) {
+    if (!infoOn) view.clearInfo();
+    view.draw();
+  });
 });
 document.addEventListener("click", function (ev) {
   views.forEach(function (view) { view.closeMenu(ev.target); });
