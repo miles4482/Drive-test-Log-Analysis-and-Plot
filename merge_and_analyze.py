@@ -719,11 +719,11 @@ def _not_required(reason: str) -> str:
 
 # Azimuth and tilt are used when a sector is within about 2 to 2.5 km.
 # A 4th sector is required in the null inside 1.5 km. It also replaces a new site
-# when a host inside 4 km can aim at the bad spot. Downtilt is limited to 2°.
+# when a host inside 3 km can aim at the bad spot. Downtilt is limited to 2°.
 TUNE_KM = 2.5
 FOURTH_MUST_KM = 1.5
 FOURTH_RISK_KM = 2.0
-FOURTH_SAVE_KM = 4.0
+FOURTH_SAVE_KM = 3.0
 DOWNTILT_MAX_DEG = 2.0
 
 
@@ -843,6 +843,62 @@ def _fourth_text(site: dict, reason: str = "null") -> str:
     return base + why
 
 
+def _ep_num(value: float | None) -> float | None:
+    if value is None:
+        return None
+    number = float(value)
+    if abs(number - round(number)) < 0.05:
+        return float(int(round(number)))
+    return round(number, 1)
+
+
+def _fourth_action(site: dict) -> dict:
+    """One new L900 sector on an existing site, for the engineering-parameter sheet."""
+    tilt = int(round(min(10.0, max(0.0, _ground_tilt_deg(site.get("height"), site["dist"])))))
+    height = site.get("height")
+    return {
+        "site": site["name"],
+        "sector": "New L900",
+        "cell": "New L900",
+        "height": None,
+        "azimuth": None,
+        "et": None,
+        "mt": None,
+        "p_height": _ep_num(height if height else 30.0),
+        "p_azimuth": _ep_num(float(site["bearing"])),
+        "p_et": float(tilt),
+        "p_mt": 0.0,
+        "action": "4th sector, L900",
+    }
+
+
+def _tune_action(item: dict) -> dict:
+    """Existing cell, with the proposed azimuth and tilt beside the current values."""
+    rec = item["rec"]
+    azimuth = float(rec["azimuth"])
+    new_az = azimuth
+    if abs(item["turn"]) >= 8.0:
+        new_az = (azimuth + item["turn"]) % 360.0
+    _old_e, _old_m, new_e, new_m = _tilt_step(rec.get("etilt"), rec.get("mtilt"), item["delta"])
+    if abs(item["delta"]) < 0.8:
+        new_e, new_m = rec.get("etilt"), rec.get("mtilt")
+    cell = str(rec.get("name") or "").strip() or f"{rec.get('sector')} {rec.get('layer')}".strip()
+    return {
+        "site": item["site"],
+        "sector": str(rec.get("sector") or "").strip(),
+        "cell": cell,
+        "height": _ep_num(rec.get("height")),
+        "azimuth": _ep_num(azimuth),
+        "et": _ep_num(rec.get("etilt")),
+        "mt": _ep_num(rec.get("mtilt")),
+        "p_height": _ep_num(rec.get("height")),
+        "p_azimuth": _ep_num(new_az),
+        "p_et": _ep_num(new_e),
+        "p_mt": _ep_num(new_m),
+        "action": "Tilt and azimuth",
+    }
+
+
 def _new_site_text(lat: float, lon: float, red_lat: float, red_lon: float, sectors: list[dict]) -> tuple[str, str]:
     site_lat = lat + 0.18 / 111.32
     site_lon = lon
@@ -863,9 +919,26 @@ def _new_site_text(lat: float, lon: float, red_lat: float, red_lon: float, secto
         f"Sectors {arms}. The nearest existing site is {near:.1f} km away, "
         f"and the outer tilts land short of it."
     )
+    where = f"New site {site_lat:.5f}, {site_lon:.5f}"
+    actions = []
+    for index, az in enumerate(azimuths):
+        actions.append({
+            "site": where,
+            "sector": f"S{index + 1}",
+            "cell": "New L900",
+            "height": None,
+            "azimuth": None,
+            "et": None,
+            "mt": None,
+            "p_height": 30.0,
+            "p_azimuth": _ep_num(az),
+            "p_et": float(face_tilt if index == 0 else outer_tilt),
+            "p_mt": 0.0,
+            "action": "New 3-sector site",
+        })
     return "New site", text, _proposal_draw(
         "new", site_lat, site_lon, azimuths, red_lat, red_lon, "New site",
-    )
+    ), actions
 
 
 def _choose_coverage_fix(
@@ -881,7 +954,7 @@ def _choose_coverage_fix(
 
     A null inside 1.5 km is always a 4th L900 sector. Downtilt is limited to 2°.
     When the spot needs more downtilt, a 4th sector within 1 km is used instead.
-    A 4th sector also replaces a new site when a host inside 4 km can aim at the
+    A 4th sector also replaces a new site when a host inside 3 km can aim at the
     bad spot. A new 3-sector site is kept only when no such host exists.
     """
     nearby = [site for site in sites if site["dist"] <= TUNE_KM]
@@ -904,8 +977,8 @@ def _choose_coverage_fix(
         item["off"],
     ))
 
-    def pack(kind: str, site: str, final: str, steps: list[dict], draw: dict | None = None) -> dict:
-        return {"kind": kind, "site": site, "final": final, "steps": steps, "draw": draw}
+    def pack(kind: str, site: str, final: str, steps: list[dict], draw: dict | None = None, actions: list[dict] | None = None) -> dict:
+        return {"kind": kind, "site": site, "final": final, "steps": steps, "draw": draw, "actions": actions or []}
 
     def steps_for(tilt: str, azimuth: str, fourth: str, new_site: str) -> list[dict]:
         return [
@@ -984,7 +1057,7 @@ def _choose_coverage_fix(
             _not_required(azimuth_why),
             "Final. " + text,
             _not_required(new_why),
-        ), fourth_draw(site))
+        ), fourth_draw(site), [_fourth_action(site)])
 
     def near_fourth_host() -> dict | None:
         """A site close enough that a 4th sector can replace a heavy downtilt."""
@@ -1006,7 +1079,7 @@ def _choose_coverage_fix(
             ),
             "Final. " + text,
             _not_required("The 4th sector is inside 1.5 km, so a new site is not required."),
-        ), fourth_draw(close_null))
+        ), fourth_draw(close_null), [_fourth_action(close_null)])
 
     few_sites = len(nearby) <= 2
     if nearby and few_sites and usable_null is not None and usable_null["dist"] <= FOURTH_RISK_KM:
@@ -1024,7 +1097,7 @@ def _choose_coverage_fix(
                 ),
                 "Final. " + text,
                 _not_required(f"The 4th sector is {usable_null['dist']:.1f} km away, inside 2 km."),
-            ), fourth_draw(usable_null))
+            ), fourth_draw(usable_null), [_fourth_action(usable_null)])
 
     if tunes:
         chosen = []
@@ -1063,7 +1136,7 @@ def _choose_coverage_fix(
                 ),
                 "Final. " + text,
                 _not_required(f"The 4th sector is {usable_null['dist']:.1f} km away, inside 2 km."),
-            ), fourth_draw(usable_null))
+            ), fourth_draw(usable_null), [_fourth_action(usable_null)])
         tilt, azimuth, site, final = tune_lines(chosen)
         return pack("tune", site, final, steps_for(
             "Final. " + tilt,
@@ -1073,7 +1146,7 @@ def _choose_coverage_fix(
                 "A 4th sector is not added on top of that beam."
             ),
             _not_required("Azimuth and tilt cover this spot, so a new site is not required."),
-        ))
+        ), None, [_tune_action(item) for item in chosen])
 
     saver = next((site for site in sites if site["dist"] <= FOURTH_SAVE_KM), None)
     if saver is not None:
@@ -1083,10 +1156,10 @@ def _choose_coverage_fix(
             "Azimuth and tilt of the existing sectors are not used for this spot. "
             "A 4th sector aimed at the bad spot is used instead of a new site.",
             f"Population on the spot is {_people(spot_pop)}. The new sector takes the bearing, so existing azimuths stay.",
-            f"{saver['name']} is inside 4 km, so a new 3-sector site is not added.",
+            f"{saver['name']} is inside 3 km, so a new 3-sector site is not added.",
         )
 
-    new_site, new_text, new_draw = _new_site_text(target_lat, target_lon, red_lat, red_lon, sectors)
+    new_site, new_text, new_draw, new_actions = _new_site_text(target_lat, target_lon, red_lat, red_lon, sectors)
     if nearest is None:
         far = "No sector was found inside the L900 reach."
     elif nearest["dist"] > TUNE_KM:
@@ -1101,7 +1174,7 @@ def _choose_coverage_fix(
         )
     if usable_null is None:
         fourth = (
-            "No existing site inside 4 km can take a sector aimed at this spot. "
+            "No existing site inside 3 km can take a sector aimed at this spot. "
             + (f"The nearest site is {nearest['name']} at {nearest['dist']:.1f} km." if nearest else "No site was found inside the L900 reach.")
         )
     else:
@@ -1111,7 +1184,7 @@ def _choose_coverage_fix(
         _not_required(far + f" Population on the spot is {_people(spot_pop)}."),
         _not_required(fourth),
         "Final. " + new_text,
-    ), new_draw)
+    ), new_draw, new_actions)
 
 
 def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series) -> dict:
@@ -1119,7 +1192,7 @@ def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series) -> dict
 
     Inside about 2.5 km the final step can retune azimuth and tilt. Downtilt is
     limited to 2°. A larger downtilt becomes a 4th L900 sector on a site within
-    1 km. A 4th sector also replaces a new site when a host inside 4 km can aim
+    1 km. A 4th sector also replaces a new site when a host inside 3 km can aim
     at the bad spot. A new 3-sector site is kept only past that. The side table
     shows all four steps. The final one is marked.
     """
@@ -1208,6 +1281,7 @@ def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series) -> dict
         "population": _people(spot_pop),
         "final": final,
         "draw": choice.get("draw"),
+        "actions": choice.get("actions") or [],
     }
 
 
@@ -1555,8 +1629,8 @@ def draw_bad_spot_sector_pies(
             ax.plot(
                 [lon, lon + r_deg * np.sin(rad)],
                 [lat, lat + r_deg * np.cos(rad)],
-                color="#08343A",
-                linewidth=4.2,
+                color="#8FD8E0",
+                linewidth=3.0,
                 solid_capstyle="round",
                 zorder=24,
                 clip_on=True,
@@ -1564,8 +1638,8 @@ def draw_bad_spot_sector_pies(
             ax.plot(
                 [lon, lon + r_deg * np.sin(rad)],
                 [lat, lat + r_deg * np.cos(rad)],
-                color=BAD_SPOT_PIE_EDGE,
-                linewidth=2.4,
+                color="#E7FBFD",
+                linewidth=1.5,
                 solid_capstyle="round",
                 zorder=25,
                 clip_on=True,
@@ -1579,11 +1653,10 @@ def draw_bad_spot_sector_pies(
                 name,
                 ha="center",
                 va="center",
-                fontsize=5.4,
-                color="#04282C",
+                fontsize=4.8,
+                color="#F7FEFF",
                 zorder=29,
                 clip_on=True,
-                bbox={"boxstyle": "round,pad=0.08", "fc": "white", "ec": "none", "alpha": 0.84},
             )
         if samples is not None and column:
             continue
