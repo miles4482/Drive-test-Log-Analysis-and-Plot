@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bogura Drive Test Web v1.61</title>
+<title>Bogura Drive Test Web v1.62</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   html, body { margin: 0; height: 100%; font-family: "Segoe UI", Calibri, sans-serif; color: #1a1a1a; }
@@ -102,7 +102,7 @@
 <body>
 <div id="app">
   <header>
-    <h1>Bogura coverage v1.61</h1>
+    <h1>Bogura coverage v1.62</h1>
     <label>Windows
       <select id="split">
         <option value="1" selected>1</option>
@@ -404,22 +404,29 @@ const PieCanvas = L.Layer.extend({
       const cy = centre.y - origin.y;
       if (showSites && siteName) siteLabels.push([cx, cy - 10, siteName]);
       for (let a = 0; a < arms.length; a++) {
-        const az = arms[a][1] * Math.PI / 180;
+        const start = map.latLngToLayerPoint(offsetKm(lat, lon, arms[a][1], km * 0.36));
         const tip = map.latLngToLayerPoint(offsetKm(lat, lon, arms[a][1], km));
+        const x0 = start.x - origin.x;
+        const y0 = start.y - origin.y;
         const x = tip.x - origin.x;
         const y = tip.y - origin.y;
+        ctx.save();
+        ctx.lineCap = "butt";
+        ctx.globalAlpha = 0.4;
         ctx.beginPath();
-        ctx.moveTo(cx, cy);
+        ctx.moveTo(x0, y0);
         ctx.lineTo(x, y);
         ctx.strokeStyle = "#8FD8E0";
         ctx.lineWidth = 3.0;
         ctx.stroke();
+        ctx.globalAlpha = 0.55;
         ctx.beginPath();
-        ctx.moveTo(cx, cy);
+        ctx.moveTo(x0, y0);
         ctx.lineTo(x, y);
         ctx.strokeStyle = "#E7FBFD";
         ctx.lineWidth = 1.5;
         ctx.stroke();
+        ctx.restore();
         if (showNames && arms[a][0]) {
           const nameAt = map.latLngToLayerPoint(offsetKm(lat, lon, arms[a][1], km * 1.28));
           labels.push([nameAt.x - origin.x, nameAt.y - origin.y, arms[a][0]]);

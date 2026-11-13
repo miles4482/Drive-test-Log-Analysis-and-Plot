@@ -88,7 +88,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.61"
+REPORT_VERSION = "1.62"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -436,7 +436,7 @@ def _spread_drawing_anchors(drawing: str, sheet_xml: bytes) -> str:
         return total
 
     col_at = prefix(50, col_emu)
-    row_at = prefix(2500, row_emu)
+    row_at = prefix(8000, row_emu)
 
     def locate(at: list[int], absolute: int) -> tuple[int, int]:
         absolute = max(0, absolute)
@@ -505,7 +505,7 @@ def _emu_prefix(sheet_xml: bytes):
             total.append(total[-1] + size_of(i))
         return total
 
-    return prefix(60, col_emu), prefix(2500, row_emu)
+    return prefix(60, col_emu), prefix(8000, row_emu)
 
 
 def _drop_ellipses_on_picture(drawing: str, sheet_xml: bytes, picture_block: str, keep_last: int = 0) -> str:
@@ -2459,16 +2459,118 @@ _PIE_SENTENCE_NEW = (
 )
 
 
+_BAD_SPOT_STRIDE = 41
+
+
+def _sheet_part_path(parts: dict[str, bytes], sheet_name: str) -> str:
+    main = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    rel_ns = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+    wb = ET.fromstring(parts["xl/workbook.xml"])
+    book_rels = ET.fromstring(parts["xl/_rels/workbook.xml.rels"])
+    rid_target = {rel.attrib["Id"]: rel.attrib["Target"].lstrip("/") for rel in book_rels}
+    for node in wb.find(f"{main}sheets"):
+        if node.attrib["name"] == sheet_name:
+            return rid_target[node.attrib[f"{rel_ns}id"]]
+    raise SystemExit(f"{sheet_name} was not found")
+
+
+def _append_missing_bad_spot_maps(
+    parts: dict[str, bytes],
+    sheet_name: str,
+    drawing: str,
+    rels: str,
+    paths: list[Path],
+    plans: list[dict],
+    first_number: int,
+) -> tuple[str, str]:
+    """Add one map, circle and suggestion table for each bad spot past the ones already drawn.
+
+    The maps already in the sheet stay on their rows. The summary and the identified
+    table move down to make room.
+    """
+    if len(paths) != len(plans):
+        raise SystemExit(f"{sheet_name}: {len(paths)} new maps and {len(plans)} solutions")
+    if not paths:
+        return drawing, rels
+    sheet_path = _sheet_part_path(parts, sheet_name)
+    xml = parts[sheet_path].decode("utf-8")
+    found = re.search(
+        r'<row r="(\d+)"[^>]*>(?:(?!</row>).)*Summary of proposed solutions',
+        xml,
+        flags=re.S,
+    )
+    if found is None:
+        raise SystemExit(f"{sheet_name}: summary row was not found, so the extra maps have nowhere to go")
+    start = int(found.group(1))
+    xml = _shift_rows_down(xml, start, len(paths) * _BAD_SPOT_STRIDE)
+    rows: dict[int, str] = {}
+    merges: list[str] = []
+    anchors: list[str] = []
+    next_shape = max((int(i) for i in re.findall(r'<cNvPr id="(\d+)"', drawing)), default=0) + 1
+    next_rid = max((int(i) for i in re.findall(r'Id="rId(\d+)"', rels)), default=0) + 1
+    media_numbers = [int(i) for i in re.findall(r"xl/media/image(\d+)\.jpg", "\n".join(parts))]
+    next_media = max(media_numbers, default=0) + 1
+    for offset, (png, plan) in enumerate(zip(paths, plans)):
+        header = start + offset * _BAD_SPOT_STRIDE
+        number = first_number + offset
+        bar = [_inline_cell(f"A{header}", 5, f"Bad Spot {number}")]
+        for col in range(2, 9):
+            bar.append(f'<c r="{get_column_letter(col)}{header}" s="5" t="n" />')
+        rows[header] = f'<row r="{header}" ht="22" customHeight="1">{"".join(bar)}</row>'
+        merges.append(f"A{header}:H{header}")
+        advice_rows, advice_merges = _advice_sheet_rows(header, plan)
+        rows.update(advice_rows)
+        merges.extend(advice_merges)
+        media = f"xl/media/image{next_media}.jpg"
+        next_media += 1
+        parts[media] = _jpeg_bytes(png)
+        rid = f"rId{next_rid}"
+        next_rid += 1
+        rels = rels.replace(
+            "</Relationships>",
+            f'<Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" '
+            f'Target="/{media}" Id="{rid}" /></Relationships>',
+            1,
+        )
+        drawing_row = header + 1
+        anchors.append(
+            f'<oneCellAnchor><from><col>0</col><colOff>0</colOff><row>{drawing_row}</row><rowOff>0</rowOff></from>'
+            f'<ext cx="7286625" cy="6858000" /><pic><nvPicPr><cNvPr id="{next_shape}" name="Image {next_shape}" '
+            f'descr="Picture" /><cNvPicPr /></nvPicPr><blipFill><a:blip cstate="print" r:embed="{rid}" />'
+            f'<a:stretch><a:fillRect /></a:stretch></blipFill><spPr><a:prstGeom prst="rect" /></spPr></pic>'
+            f'<clientData /></oneCellAnchor>'
+        )
+        geom = MAP_CIRCLE_PIXELS.get(str(Path(png).resolve()))
+        if geom and geom.get("circles"):
+            img_w, img_h = geom["size"]
+            for circle in geom["circles"]:
+                anchors.append(_circle_anchor(circle, next_shape + 1, 0, 0, drawing_row, 0, 7286625, 6858000, img_w, img_h))
+                next_shape += 1
+        next_shape += 1
+    xml = _insert_sheet_rows(xml, rows, merges)
+    parts[sheet_path] = xml.encode("utf-8")
+    drawing = drawing.replace("</wsDr>", "".join(anchors) + "</wsDr>")
+    print(f"  {sheet_name}: added {len(paths)} maps", flush=True)
+    return drawing, rels
+
+
 def refresh_bad_spot_pies(src: Path | None = None) -> Path:
     """Redraw the serial bad-spot maps and swap them into the current workbook.
 
     Combined views, KPI sheets, and the circle count stay as they are. Each serial
-    map keeps one movable circle, placed again from the new picture.
+    map keeps one movable circle, placed again from the new picture. Spots that
+    were not drawn before get a new map below the last one.
     """
     import io
     from PIL import Image
 
-    from merge_and_analyze import ACTIVE_MERGED, MERGED_CSV, load_active_merged, load_merged_csv
+    from merge_and_analyze import (
+        ACTIVE_MERGED,
+        MERGED_CSV,
+        bad_spot_advice,
+        load_active_merged,
+        load_merged_csv,
+    )
 
     src = src or REPORT_XLSX
     if not src.exists():
@@ -2484,6 +2586,7 @@ def refresh_bad_spot_pies(src: Path | None = None) -> Path:
     active_track = best_carrier(active)
     MAP_CIRCLE_PIXELS.clear()
     zoom_for_sheet: dict[str, list[Path]] = {}
+    plans_for_sheet: dict[str, list[dict]] = {}
     for tag, frame in (("", idle_track), ("active", active_track)):
         suffix = f"_{tag}" if tag else ""
         for kpi, classify, labels, colors in (
@@ -2499,6 +2602,10 @@ def refresh_bad_spot_pies(src: Path | None = None) -> Path:
             )
             sheet = f"Bad Spot {kpi}" + ("_Active" if tag else "")
             zoom_for_sheet[sheet] = paths
+            shown = spots.head(len(paths))
+            plans_for_sheet[sheet] = [
+                bad_spot_advice(frame, kpi, shown.iloc[i]) for i in range(len(shown))
+            ]
             print(f"  {sheet}: {len(paths)} maps", flush=True)
 
     print("Updating the workbook", flush=True)
@@ -2526,7 +2633,7 @@ def refresh_bad_spot_pies(src: Path | None = None) -> Path:
             pictures.append((row, block))
         pictures.sort()
         serial = pictures[1:]
-        if len(serial) != len(paths):
+        if len(paths) < len(serial):
             raise SystemExit(f"{sheet}: {len(serial)} pictures, {len(paths)} new maps")
         drawing = re.sub(
             r'<oneCellAnchor>(?:(?!</oneCellAnchor>).)*prst="ellipse".*?</oneCellAnchor>',
@@ -2553,8 +2660,21 @@ def refresh_bad_spot_pies(src: Path | None = None) -> Path:
             for circle in geom["circles"]:
                 extras.append(_circle_anchor(circle, next_shape, col, col_off, row, row_off, pic_cx, pic_cy, img_w, img_h))
                 next_shape += 1
-        parts[drawing_name] = drawing.replace("</wsDr>", "".join(extras) + "</wsDr>").encode("utf-8")
-        print(f"  {sheet}: replaced {len(paths)} maps, {len(extras)} circles", flush=True)
+        drawing = drawing.replace("</wsDr>", "".join(extras) + "</wsDr>")
+        extra_paths = paths[len(serial):]
+        if extra_paths:
+            drawing, rels = _append_missing_bad_spot_maps(
+                parts,
+                sheet,
+                drawing,
+                rels,
+                extra_paths,
+                plans_for_sheet[sheet][len(serial):],
+                len(serial) + 1,
+            )
+            parts[rels_name] = rels.encode("utf-8")
+        parts[drawing_name] = drawing.encode("utf-8")
+        print(f"  {sheet}: replaced {len(serial)} maps, added {len(extra_paths)}, {len(extras)} circles on the first maps", flush=True)
 
     note_hits = 0
     for name, body in list(parts.items()):
@@ -3160,61 +3280,69 @@ def _graft_cover_summary(xml: str, idle_plans: list[dict], active_plans: list[di
     merges.append(f"A{row}:T{row}")
     row += 2
 
-    def add_mode(title: str, plans: list[dict]) -> None:
-        nonlocal row
-        rows.append(
-            f'<row r="{row}" ht="20" customHeight="1">{_inline_cell(f"A{row}", 6, title)}</row>'
-        )
-        row += 1
+    def counts_of(plans: list[dict]) -> dict[str, int]:
         counts = {"tune": 0, "fourth": 0, "new": 0}
         for plan in plans:
             kind = str(plan.get("kind") or "")
             if kind in counts:
                 counts[kind] += 1
-        rows.append(
-            f'<row r="{row}" ht="18" customHeight="1">'
-            f'{_inline_cell(f"A{row}", 7, "Solution")}{_inline_cell(f"B{row}", 7, "Count")}</row>'
-        )
-        row += 1
-        for label, key in (
-            ("Tilt and azimuth", "tune"),
-            ("4th sector, L900", "fourth"),
-            ("New 3-sector site", "new"),
-            ("All bad spots", None),
-        ):
-            value = str(len(plans) if key is None else counts[key])
-            style = 7 if key is None else 20
-            rows.append(
-                f'<row r="{row}" ht="18" customHeight="1">'
-                f'{_inline_cell(f"A{row}", style, label)}{_inline_cell(f"B{row}", style, value)}</row>'
-            )
-            row += 1
-        row += 1
-        rows.append(
-            f'<row r="{row}" ht="18" customHeight="1">'
-            f'{_inline_cell(f"A{row}", 7, "Bad spot")}'
-            f'{_inline_cell(f"B{row}", 7, "Site")}'
-            f'{_inline_cell(f"C{row}", 7, "Population")}'
-            f'{_inline_cell(f"D{row}", 7, "Solution")}'
-            f'{_inline_cell(f"E{row}", 7, "Final solution")}</row>'
-        )
-        merges.append(f"E{row}:T{row}")
-        row += 1
-        for index, plan in enumerate(plans, 1):
-            rows.append(
-                f'<row r="{row}" ht="48" customHeight="1">'
-                f'{_inline_cell(f"A{row}", 20, f"Bad spot {index}")}'
-                f'{_inline_cell(f"B{row}", 20, str(plan.get("site") or ""))}'
-                f'{_inline_cell(f"C{row}", 20, str(plan.get("population") or ""))}'
-                f'{_inline_cell(f"D{row}", 20, _SOLUTION_NAME.get(str(plan.get("kind") or ""), ""))}'
-                f'{_inline_cell(f"E{row}", 37, str(plan.get("final") or ""))}</row>'
-            )
-            merges.append(f"E{row}:T{row}")
-            row += 1
-        row += 2
+        return counts
 
-    add_mode("Idle", idle_plans)
-    add_mode("Active", active_plans)
+    idle_counts = counts_of(idle_plans)
+    active_counts = counts_of(active_plans)
+    rows.append(
+        f'<row r="{row}" ht="18" customHeight="1">'
+        f'{_inline_cell(f"A{row}", 7, "Solution")}'
+        f'{_inline_cell(f"B{row}", 7, "Idle")}'
+        f'{_inline_cell(f"C{row}", 7, "Active")}</row>'
+    )
+    row += 1
+    for label, key in (
+        ("Tilt and azimuth", "tune"),
+        ("4th sector, L900", "fourth"),
+        ("New 3-sector site", "new"),
+        ("All bad spots", None),
+    ):
+        idle_value = str(len(idle_plans) if key is None else idle_counts[key])
+        active_value = str(len(active_plans) if key is None else active_counts[key])
+        style = 7 if key is None else 20
+        rows.append(
+            f'<row r="{row}" ht="18" customHeight="1">'
+            f'{_inline_cell(f"A{row}", style, label)}'
+            f'{_inline_cell(f"B{row}", style, idle_value)}'
+            f'{_inline_cell(f"C{row}", style, active_value)}</row>'
+        )
+        row += 1
+    row += 1
+    rows.append(
+        f'<row r="{row}" ht="18" customHeight="1">'
+        f'{_inline_cell(f"A{row}", 7, "Mode")}'
+        f'{_inline_cell(f"B{row}", 7, "Bad spot")}'
+        f'{_inline_cell(f"C{row}", 7, "Site")}'
+        f'{_inline_cell(f"D{row}", 7, "Sector")}'
+        f'{_inline_cell(f"E{row}", 7, "Serving cell")}'
+        f'{_inline_cell(f"F{row}", 7, "Population")}'
+        f'{_inline_cell(f"G{row}", 7, "Solution")}'
+        f'{_inline_cell(f"H{row}", 7, "Final solution")}</row>'
+    )
+    merges.append(f"H{row}:T{row}")
+    row += 1
+    for mode, plans in (("Idle", idle_plans), ("Active", active_plans)):
+        for index, plan in enumerate(plans, 1):
+            sector, cell = _plan_sector_cell(plan)
+            rows.append(
+                f'<row r="{row}" ht="36" customHeight="1">'
+                f'{_inline_cell(f"A{row}", 20, mode)}'
+                f'{_inline_cell(f"B{row}", 20, f"Bad spot {index}")}'
+                f'{_inline_cell(f"C{row}", 20, str(plan.get("site") or ""))}'
+                f'{_inline_cell(f"D{row}", 37, sector)}'
+                f'{_inline_cell(f"E{row}", 37, cell)}'
+                f'{_inline_cell(f"F{row}", 20, str(plan.get("population") or ""))}'
+                f'{_inline_cell(f"G{row}", 20, _SOLUTION_NAME.get(str(plan.get("kind") or ""), ""))}'
+                f'{_inline_cell(f"H{row}", 37, str(plan.get("final") or ""))}</row>'
+            )
+            merges.append(f"H{row}:T{row}")
+            row += 1
     last = row - 1
     xml = xml.replace("</sheetData>", "".join(rows) + "</sheetData>", 1)
     xml = re.sub(
@@ -3226,6 +3354,20 @@ def _graft_cover_summary(xml: str, idle_plans: list[dict], active_plans: list[di
     xml = xml.replace("</mergeCells>", "".join(f'<mergeCell ref="{ref}"/>' for ref in merges) + "</mergeCells>", 1)
     xml = re.sub(r'<dimension ref="A1:[A-Z]+\d+"', f'<dimension ref="A1:T{last}"', xml, count=1)
     return xml
+
+
+def _plan_sector_cell(plan: dict) -> tuple[str, str]:
+    """Sector names and serving-cell names proposed for one bad spot."""
+    sectors: list[str] = []
+    cells: list[str] = []
+    for action in plan.get("actions") or []:
+        sector = str(action.get("sector") or "").strip()
+        cell = str(action.get("cell") or "").strip()
+        if sector and sector not in sectors:
+            sectors.append(sector)
+        if cell and cell not in cells:
+            cells.append(cell)
+    return ", ".join(sectors), ", ".join(cells)
 
 
 def _ep_text(value: object) -> str:
@@ -3430,9 +3572,9 @@ def write_bad_spot_advice(src: Path | None = None) -> Path:
                 xml,
             )
         ]
-        map_plans = pairs[:BAD_SPOT_MAX_ZOOMS]
-        if len(headers) != len(map_plans):
-            raise SystemExit(f"{sheet}: {len(headers)} headers, {len(map_plans)} advice rows")
+        if len(headers) > len(pairs):
+            raise SystemExit(f"{sheet}: {len(headers)} headers, {len(pairs)} advice rows")
+        map_plans = pairs[: len(headers)]
         rows: dict[int, str] = {}
         merges: list[str] = []
         xml = _strip_advice_rows(xml, headers)

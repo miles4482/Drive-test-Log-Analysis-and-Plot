@@ -1626,21 +1626,24 @@ def draw_bad_spot_sector_pies(
             rad = np.radians(az)
             if _ang_diff(az, bearing) <= BAD_SPOT_AIM_DEG:
                 facing.append(az)
+            gap = 0.36
             ax.plot(
-                [lon, lon + r_deg * np.sin(rad)],
-                [lat, lat + r_deg * np.cos(rad)],
+                [lon + r_deg * gap * np.sin(rad), lon + r_deg * np.sin(rad)],
+                [lat + r_deg * gap * np.cos(rad), lat + r_deg * np.cos(rad)],
                 color="#8FD8E0",
                 linewidth=3.0,
-                solid_capstyle="round",
+                alpha=0.4,
+                solid_capstyle="butt",
                 zorder=24,
                 clip_on=True,
             )
             ax.plot(
-                [lon, lon + r_deg * np.sin(rad)],
-                [lat, lat + r_deg * np.cos(rad)],
+                [lon + r_deg * gap * np.sin(rad), lon + r_deg * np.sin(rad)],
+                [lat + r_deg * gap * np.cos(rad), lat + r_deg * np.cos(rad)],
                 color="#E7FBFD",
                 linewidth=1.5,
-                solid_capstyle="round",
+                alpha=0.5,
+                solid_capstyle="butt",
                 zorder=25,
                 clip_on=True,
             )
@@ -2411,7 +2414,7 @@ BAD_SPOT_OVERVIEW_TIERS = (
     (10**9, 0.8, 0.50, False),
 )
 BAD_SPOT_ZOOM_COLS = 4
-BAD_SPOT_MAX_ZOOMS = 16
+BAD_SPOT_MAX_ZOOMS = 300
 BAD_SPOT_MAX = BAD_SPOT_MAX_CONSEC + BAD_SPOT_MAX_DISCRETE
 BAD_SPOT_RULES = {
     # strict_less: a value equal to the threshold is not poor. -120 is the top of the red bin.
