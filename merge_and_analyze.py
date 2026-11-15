@@ -1279,13 +1279,30 @@ def _local_companion(sites: list[dict], spot_pop: float) -> list[dict]:
     return []
 
 
-def _prefer_overshoot(choice: dict, slots: list[dict], sites: list[dict], spot_pop: float) -> dict:
-    """Downtilt a far serving cell before moving the nearest sector."""
+def _overshoot_rows(slots: list[dict], sites: list[dict]) -> list[dict]:
+    """Far servers on every red piece inside the circle, not only the longest run.
+
+    A short red sample is included with the longer one. The 50 m piece served
+    by BOSBG03A is the case this covers. Later report builds must keep passing
+    every red bin in the circle into this check.
+    """
     nearest_km = sites[0]["dist"] if sites else 99.0
     if nearest_km > FOURTH_SAVE_KM:
-        return choice
+        return []
     limit = max(OVERSHOOT_KM, nearest_km * 2.5)
-    far = [row for row in slots if row["dist"] >= limit and _downtilt_moves(row["cell"])][:2]
+    return [row for row in slots if row["dist"] >= limit and _downtilt_moves(row["cell"])]
+
+
+def _overshoot_mark(row: dict) -> str:
+    """The tilt change written on that cell's dashed line."""
+    cell = row["cell"]
+    old_e, _old_m, new_e, _new_m = _tilt_step(cell.get("etilt"), cell.get("mtilt"), DOWNTILT_MAX_DEG)
+    return _tilt_bit("E_tilt", old_e, new_e)
+
+
+def _prefer_overshoot(choice: dict, slots: list[dict], sites: list[dict], spot_pop: float) -> dict:
+    """Downtilt a far serving cell before moving the nearest sector."""
+    far = _overshoot_rows(slots, sites)
     if not far:
         return choice
     sentences = [_overshoot_sentence(row) for row in far]
@@ -1305,6 +1322,7 @@ def _prefer_overshoot(choice: dict, slots: list[dict], sites: list[dict], spot_p
         actions.extend(_tune_action(item) for item in companions)
     else:
         near = sites[0]["name"] if sites else "The nearest sector"
+        nearest_km = sites[0]["dist"] if sites else 99.0
         bits.append(f"{near} at {nearest_km:.1f} km is not moved. The bad samples come from the overshooting cell.")
     final = " ".join(bits)
     names = []
@@ -1442,17 +1460,24 @@ def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series) -> dict
     choice = _choose_coverage_fix(
         sites, sectors, spot_pop, target_lat, target_lon, red_lat, red_lon,
     )
-    served = _served_slots(main or bins)
-    overshoot_note = [
-        f"{row['cell'].get('sector')} {row['cell'].get('layer')} at {row['dist'] * 1000:,.0f} m"
-        for row in served
-        if sites and row["dist"] >= max(OVERSHOOT_KM, sites[0]["dist"] * 2.5)
-    ]
-    if overshoot_note:
+    # All red bins in the circle. The longest run alone would drop a far cell
+    # on a shorter piece, such as BOSBG03A on the 50 m sample.
+    served = _served_slots(bins) if bins else []
+    far = _overshoot_rows(served, sites)
+    if far:
         finding_lines.append(
-            "Overshooting cell on this red road: " + "; ".join(overshoot_note[:2]) + ". Downtilt that cell first."
+            "Overshooting cell on this red road: "
+            + "; ".join(
+                f"{row['cell'].get('sector')} {row['cell'].get('layer')} at {row['dist'] * 1000:,.0f} m"
+                for row in far
+            )
+            + ". Downtilt that cell first."
         )
     choice = _prefer_overshoot(choice, served, sites, spot_pop)
+    overshoot_marks = {
+        (row["cell"].get("sector"), row["cell"].get("layer")): _overshoot_mark(row)
+        for row in far
+    }
     final = choice["final"]
     if blank_m >= 80:
         final = f"{final} This covers the red road and the {blank_m:,.0f} m blank."
@@ -1466,6 +1491,7 @@ def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series) -> dict
         "final": final,
         "draw": choice.get("draw"),
         "actions": choice.get("actions") or [],
+        "overshoot_marks": overshoot_marks,
     }
 
 
@@ -1738,6 +1764,7 @@ def _view_arm_deg(ax, spot_lat: float) -> float:
 def _draw_serving_spider(
     ax, samples: pd.DataFrame, column: str, spot: pd.Series,
     avoid: list[tuple[float, float]] | None = None,
+    overshoot: dict | None = None,
 ) -> None:
     """Dashed yellow line from the serving sector arm to each red bin.
 
@@ -1776,6 +1803,7 @@ def _draw_serving_spider(
                     "lon1": float(end["lon"]), "lat1": float(end["lat"]),
                     "dist_m": dist_m,
                     "sector": str(cell.get("sector") or "").strip(),
+                    "layer": cell.get("layer"),
                     "site_lat": float(cell["lat"]),
                     "site_lon": float(cell["lon"]),
                 }
@@ -1802,6 +1830,9 @@ def _draw_serving_spider(
         sector = item.get("sector") or ""
         if sector and sector.lower() != "nan" and not on_map:
             text = f"{sector}\n{text}"
+        mark = (overshoot or {}).get((item.get("sector"), item.get("layer")))
+        if mark:
+            text = f"{text}\n{mark}"
         _ink(ax, mx, my, text, 8, "#F7FEFF")
     spot_lon = float(spot["lon"])
     spot_lat = float(spot["lat"])
@@ -1895,6 +1926,7 @@ def draw_bad_spot_sector_pies(
     samples: pd.DataFrame | None = None,
     column: str | None = None,
     proposal: dict | None = None,
+    overshoot: dict | None = None,
 ) -> None:
     """Transparent sector marks for every site that touches this bad-spot view.
 
@@ -1916,7 +1948,7 @@ def draw_bad_spot_sector_pies(
         name_points.append((float(proposal["lon"]), float(proposal["lat"])))
     if not inside.any():
         if samples is not None and column:
-            _draw_serving_spider(ax, samples, column, spot, avoid=name_points)
+            _draw_serving_spider(ax, samples, column, spot, avoid=name_points, overshoot=overshoot)
         return
     present = sectors.loc[inside, "SiteName"].unique()
     chosen = sectors[sectors["SiteName"].isin(present)]
@@ -1991,7 +2023,7 @@ def draw_bad_spot_sector_pies(
             lx, ly = _label_on_segment(ax, spot_lon, spot_lat, x0, y0, avoid=name_points)
             _ink(ax, lx, ly, text, 8, "#F7FEFF")
     if samples is not None and column:
-        _draw_serving_spider(ax, samples, column, spot, avoid=name_points)
+        _draw_serving_spider(ax, samples, column, spot, avoid=name_points, overshoot=overshoot)
 
 
 def _coverage_extent_from_geo(geo: pd.DataFrame) -> tuple[float, float, float, float]:
@@ -3794,7 +3826,9 @@ def plot_bad_spot_serial_maps(
         arm_lon = arm_km / _km_per_deg_lon(mid_lat)
         arm_lat = arm_km / 111.32
         zext = (zext[0] - arm_lon, zext[1] + arm_lon, zext[2] - arm_lat, zext[3] + arm_lat)
-        proposal = bad_spot_advice(df, column, spot).get("draw")
+        plan = bad_spot_advice(df, column, spot)
+        proposal = plan.get("draw")
+        overshoot = plan.get("overshoot_marks") or {}
         if proposal:
             zext = _extent_with_proposal(zext, proposal)
         local = geo[
@@ -3835,7 +3869,7 @@ def plot_bad_spot_serial_maps(
             _add_boundary_basemap(ax)
         else:
             _add_basemap(ax)
-        draw_bad_spot_sector_pies(ax, spot, local, column, proposal)
+        draw_bad_spot_sector_pies(ax, spot, local, column, proposal, overshoot)
         _draw_proposal(ax, proposal)
         for gap in blanks:
             ax.plot(

@@ -117,13 +117,13 @@ The Cover sheet keeps the Idle dataset, KPI table, and Idle histograms. Under Ac
 
 Every coverage map and bad-spot map is drawn on Esri World Imagery. The combined view is the satellite route only: no circle is painted into it and no circle shape is placed on it. Bad Spot 1, Bad Spot 2, and the rest follow down the left side of the sheet, each a larger map with one movable circle. A site that falls in that view is drawn as a transparent cyan outline, one arm per sector, with the Sector name at the end of the arm and no fill. A circle is at most 10 km across. Where the poor road is in separate pockets, several circles sit inside that 10 km neighbourhood.
 
-## Web coverage map (v1.66)
+## Web coverage map (v1.67)
 
-Download, unzip, and open `Bogura_DriveTest_Web_v1.66.html`. Site names are white with a dark edge so they stay readable on the satellite picture. Sector names on this map stay small. The larger sector names are on the bad-spot maps only. With KPI set to Blank, turn on Info and click a sector or the site centre to open the cell table.
+Download, unzip, and open `Bogura_DriveTest_Web_v1.67.html`. Site names are white with a dark edge so they stay readable on the satellite picture. Sector names on this map stay small. The larger sector names are on the bad-spot maps only. With KPI set to Blank, turn on Info and click a sector or the site centre to open the cell table.
 
-**v1.66 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.66.zip
+**v1.67 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.67.zip
 
-Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.64.zip
+Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.66.zip
 
 Previous web: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.63.zip
 
@@ -138,29 +138,33 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
-## Download Excel report (v1.66)
+## Download Excel report (v1.67)
 
-**v1.66 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.66.xlsx
+**v1.67 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.67.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.66.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.67.xlsx
 
-Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.63.xlsx
+Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.66.xlsx
 
-The web map is v1.66. The summary presentation is v1.66.
+The web map is v1.67. The summary presentation is v1.67.
 
-## Summary presentation (v1.66)
+## Summary presentation (v1.67)
 
 One PowerPoint for the bad-spot result. It keeps three examples of each solution: tilt and azimuth, a 4th L900 sector, and a new 3-sector site. Each example map shows the orange bad-spot circle. The other spots stay in the Excel workbook.
 
-**v1.66 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.66.pptx
+**v1.67 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.67.pptx
 
-Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.65.pptx
+Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.66.pptx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.66.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.67.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+
+### Every red piece in the circle (v1.67)
+
+A far cell is downtilted when it serves any red sample inside the orange circle, including a short piece that is not the longest run. Idle Bad Spot 12 is the example: BOSBG03A L2100 serves the separate 50 m sample from 6,238 m and is pulled back, E_tilt 2° to 4°, as well as BOSBG26B on the 123 m piece. The same check adds the missed far cell on Idle 5 and on Active bad spots 4, 5, 6, 7, 9, 19, 25 and 31. The dashed line for that cell carries the tilt change. Later report builds keep this check on every red bin in the circle.
 
 ### Overshoot first, and clearer bad-spot labels (v1.66)
 

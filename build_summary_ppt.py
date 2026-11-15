@@ -19,9 +19,9 @@ from pptx.util import Emu, Inches, Pt
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
-REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.66.xlsx"
+REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.67.xlsx"
 PLOTS = OUTPUT / "plots"
-DEST = OUTPUT / "Bogura_DriveTest_Summary_v1.66.pptx"
+DEST = OUTPUT / "Bogura_DriveTest_Summary_v1.67.pptx"
 CIRCLES = PLOTS / "bad_spot_circles.json"
 
 NAVY = RGBColor(0x1B, 0x4F, 0x72)
@@ -64,13 +64,13 @@ EXAMPLES = [
         "solution": "4th sector, L900",
         "mode": "Active",
         "n": 4,
-        "why": "The red road is 0.2 km from GBPLS02 and sits in the null, so a new L900 sector is aimed through it. GBSDL14B and GBSDL27B are also downtilted. They serve this road from more than 5 km.",
+        "why": "The red road is 0.2 km from GBPLS02 and sits in the null, so a new L900 sector is aimed through it. GBPLS12A, GBSDL14B and GBSDL27B also serve red samples in this circle, from 4.4 km to 6.5 km, so those beams are pulled back.",
     },
     {
         "solution": "4th sector, L900",
         "mode": "Idle",
         "n": 12,
-        "why": "The existing sector would need more than 2° of extra downtilt, so a 4th L900 sector on BOSBG02 is aimed at the spot. BOSBG26B is also downtilted. It serves this road from about 4.9 km.",
+        "why": "The 4th L900 sector on BOSBG02 is aimed at the 123 m red piece. BOSBG26B serves that piece from about 4.9 km and is downtilted. BOSBG03A serves the separate 50 m sample from about 6.2 km, so that beam is pulled back too, E_tilt 2° to 4°.",
     },
     {
         "solution": "4th sector, L900",
@@ -245,7 +245,7 @@ def _text(slide, left, top, width, height, text: str, size: int, color: RGBColor
 def _footer(slide, page: int, pages: int) -> None:
     _text(
         slide, Inches(0.4), Inches(7.18), Inches(10), Inches(0.24),
-        "Bogura drive test  ·  Summary v1.66  ·  Excel v1.66  ·  Web v1.66",
+        "Bogura drive test  ·  Summary v1.67  ·  Excel v1.67  ·  Web v1.67",
         11, MUTED,
     )
     _text(
@@ -437,10 +437,10 @@ def _close(prs: Presentation, page: int, pages: int) -> None:
     _box(slide, 0, 0, prs.slide_width, prs.slide_height, NAVY)
     _text(slide, Inches(0.7), Inches(1.5), Inches(12), Inches(0.8), "The full set is in the workbook", 32, WHITE, True)
     lines = [
-        "Excel v1.66 has a map, a suggestion table and a movable circle for all 26 idle spots and all 99 active spots.",
+        "Excel v1.67 has a map, a suggestion table and a movable circle for all 26 idle spots and all 99 active spots.",
         "The Cover sheet lists every spot, with the sector, the serving cell and the final solution.",
         "EP Details is the sector and cell tracker: existing height, azimuth, E_tilt and M_tilt beside the proposed values.",
-        "The web map is v1.66. Site names are white with a dark edge. With KPI set to Blank, Info on a sector or the site centre opens the cell table. Sector names on the live map stay small. The larger sector names are on the bad-spot maps only.",
+        "The web map is v1.67. Site names are white with a dark edge. With KPI set to Blank, Info on a sector or the site centre opens the cell table. Sector names on the live map stay small. The larger sector names are on the bad-spot maps only.",
     ]
     top = 2.6
     for line in lines:
@@ -464,7 +464,7 @@ def build() -> Path:
     prs = Presentation()
     prs.slide_width = Inches(13.333)
     prs.slide_height = Inches(7.5)
-    prs.core_properties.title = "Bogura Drive Test Summary v1.66"
+    prs.core_properties.title = "Bogura Drive Test Summary v1.67"
     prs.core_properties.subject = "Three examples of each bad-spot solution"
     pages = 5 + len(EXAMPLES) + 1
     _title(prs)
