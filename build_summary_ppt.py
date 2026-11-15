@@ -2,6 +2,7 @@
 """One summary presentation: the bad-spot rules, the counts, and three examples of each solution."""
 from __future__ import annotations
 
+import json
 import re
 import zipfile
 from io import BytesIO
@@ -18,9 +19,10 @@ from pptx.util import Emu, Inches, Pt
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
-REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.63.xlsx"
+REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.66.xlsx"
 PLOTS = OUTPUT / "plots"
-DEST = OUTPUT / "Bogura_DriveTest_Summary_v1.65.pptx"
+DEST = OUTPUT / "Bogura_DriveTest_Summary_v1.66.pptx"
+CIRCLES = PLOTS / "bad_spot_circles.json"
 
 NAVY = RGBColor(0x1B, 0x4F, 0x72)
 INK = RGBColor(0x1A, 0x1A, 0x1A)
@@ -44,7 +46,7 @@ EXAMPLES = [
         "solution": "Tilt and azimuth",
         "mode": "Idle",
         "n": 1,
-        "why": "The sector already points at the red road. Only the tilt changes, from 3° to 1.8°.",
+        "why": "BOSDR56A L2600 is serving this road from about 6.6 km, so it is downtilted from 3° to 5°. BOGBT18C still needs an uptilt, from 3° to 1.8°, because that nearer beam falls short.",
     },
     {
         "solution": "Tilt and azimuth",
@@ -56,19 +58,19 @@ EXAMPLES = [
         "solution": "Tilt and azimuth",
         "mode": "Idle",
         "n": 20,
-        "why": "The site is 0.4 km from the spot. Downtilt increases by 2°, the maximum on an existing sector, and the azimuth turns 9°.",
+        "why": "A far cell serves this short red road. That cell is downtilted so it stops overshooting. The nearest sector is not moved, because its own beam already fits the road.",
     },
     {
         "solution": "4th sector, L900",
         "mode": "Active",
         "n": 4,
-        "why": "The red road is 0.2 km from GBPLS02 and sits in the null between its sectors. A new L900 sector is aimed through that null. Existing sectors stay.",
+        "why": "The red road is 0.2 km from GBPLS02 and sits in the null, so a new L900 sector is aimed through it. GBSDL14B and GBSDL27B are also downtilted. They serve this road from more than 5 km.",
     },
     {
         "solution": "4th sector, L900",
         "mode": "Idle",
         "n": 12,
-        "why": "The existing sector would need more than 2° of extra downtilt. A 4th L900 sector on BOSBG02, 0.2 km away, is used instead.",
+        "why": "The existing sector would need more than 2° of extra downtilt, so a 4th L900 sector on BOSBG02 is aimed at the spot. BOSBG26B is also downtilted. It serves this road from about 4.9 km.",
     },
     {
         "solution": "4th sector, L900",
@@ -126,8 +128,64 @@ def _map_path(mode: str, number: int) -> Path:
     return PLOTS / f"excel_bad_spots_rsrp_spot_active_{number:02d}.png"
 
 
+def _circle_box(path: Path) -> dict | None:
+    if not CIRCLES.exists():
+        return None
+    boxes = json.loads(CIRCLES.read_text())
+    return boxes.get(path.name)
+
+
+def _paint_circle(image: Image.Image, box: dict) -> Image.Image:
+    """The orange bad-spot oval the workbook keeps as a movable shape."""
+    import math
+
+    from PIL import ImageDraw
+
+    recorded_w = float(box["width"]) or image.width
+    recorded_h = float(box["height"]) or image.height
+    sx = image.width / recorded_w
+    sy = image.height / recorded_h
+    left = float(box["x"]) * sx
+    top = float(box["y"]) * sy
+    right = left + float(box["w"]) * sx
+    bottom = top + float(box["h"]) * sy
+    cx = (left + right) / 2.0
+    cy = (top + bottom) / 2.0
+    rx = max(2.0, (right - left) / 2.0)
+    ry = max(2.0, (bottom - top) / 2.0)
+    overlay = image.copy()
+    draw = ImageDraw.Draw(overlay)
+    steps = 280
+    points = []
+    for index in range(steps):
+        angle = 2.0 * math.pi * index / steps
+        points.append((cx + rx * math.cos(angle), cy + ry * math.sin(angle)))
+    points.append(points[0])
+
+    def stroke(width: int, fill: tuple[int, int, int], dash: float, gap: float) -> None:
+        travel = 0.0
+        drawing = True
+        for start, end in zip(points, points[1:]):
+            length = math.hypot(end[0] - start[0], end[1] - start[1])
+            if drawing:
+                draw.line([start, end], fill=fill, width=width)
+            travel += length
+            limit = dash if drawing else gap
+            if travel >= limit:
+                drawing = not drawing
+                travel = 0.0
+
+    dash, gap = (8, 7) if box.get("dotted") else (22, 14)
+    stroke(7, (27, 27, 27), dash, gap)
+    stroke(4, (255, 102, 0), dash, gap)
+    return overlay
+
+
 def _jpeg(path: Path, width: int = 1400) -> BytesIO:
     image = Image.open(path).convert("RGB")
+    box = _circle_box(path)
+    if box:
+        image = _paint_circle(image, box)
     if image.width > width:
         height = round(image.height * width / image.width)
         image = image.resize((width, height), Image.Resampling.LANCZOS)
@@ -187,7 +245,7 @@ def _text(slide, left, top, width, height, text: str, size: int, color: RGBColor
 def _footer(slide, page: int, pages: int) -> None:
     _text(
         slide, Inches(0.4), Inches(7.18), Inches(10), Inches(0.24),
-        "Bogura drive test  ·  Summary v1.65  ·  Excel v1.63  ·  Web v1.64",
+        "Bogura drive test  ·  Summary v1.66  ·  Excel v1.66  ·  Web v1.66",
         11, MUTED,
     )
     _text(
@@ -247,7 +305,7 @@ def _rules(prs: Presentation, page: int, pages: int) -> None:
     _text(slide, Inches(0.4), Inches(0.16), Inches(12), Inches(0.42), "How a solution is chosen", 26, WHITE, True)
     cards = [
         (GOLD, "1", "Tilt and azimuth",
-         "A sector inside about 2.5 km can be aimed at the spot. Azimuth is turned only when the population on the new bearing still serves the customers. Downtilt of an existing sector does not increase by more than 2°."),
+         "A cell serving the red road from more than 4 km, and much farther than the nearest site, is downtilted first so it stops overshooting. The nearest sector stays unless its own beam misses the road. Otherwise a sector inside 2.5 km can be aimed at the spot. Downtilt of an existing sector does not increase by more than 2°."),
         (ORANGE, "2", "4th sector, L900",
          "Used when the spot sits in the null between sectors, when the required downtilt would be more than 2°, or when an existing site inside 3 km can aim at the spot. Existing sectors are not moved."),
         (PURPLE, "3", "New 3-sector site",
@@ -379,10 +437,10 @@ def _close(prs: Presentation, page: int, pages: int) -> None:
     _box(slide, 0, 0, prs.slide_width, prs.slide_height, NAVY)
     _text(slide, Inches(0.7), Inches(1.5), Inches(12), Inches(0.8), "The full set is in the workbook", 32, WHITE, True)
     lines = [
-        "Excel v1.63 has a map, a suggestion table and a movable circle for all 26 idle spots and all 99 active spots.",
+        "Excel v1.66 has a map, a suggestion table and a movable circle for all 26 idle spots and all 99 active spots.",
         "The Cover sheet lists every spot, with the sector, the serving cell and the final solution.",
         "EP Details is the sector and cell tracker: existing height, azimuth, E_tilt and M_tilt beside the proposed values.",
-        "The web map is v1.64. Site names are white with a dark edge. With KPI set to Blank, Info on a sector or the site centre opens the cell table.",
+        "The web map is v1.66. Site names are white with a dark edge. With KPI set to Blank, Info on a sector or the site centre opens the cell table. Sector names on the live map stay small. The larger sector names are on the bad-spot maps only.",
     ]
     top = 2.6
     for line in lines:
@@ -406,7 +464,7 @@ def build() -> Path:
     prs = Presentation()
     prs.slide_width = Inches(13.333)
     prs.slide_height = Inches(7.5)
-    prs.core_properties.title = "Bogura Drive Test Summary v1.65"
+    prs.core_properties.title = "Bogura Drive Test Summary v1.66"
     prs.core_properties.subject = "Three examples of each bad-spot solution"
     pages = 5 + len(EXAMPLES) + 1
     _title(prs)

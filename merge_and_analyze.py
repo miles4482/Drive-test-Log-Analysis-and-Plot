@@ -14,6 +14,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib import patheffects as pe
 from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from matplotlib.patches import Ellipse, PathPatch, Wedge, Circle
@@ -725,6 +726,9 @@ FOURTH_MUST_KM = 1.5
 FOURTH_RISK_KM = 2.0
 FOURTH_SAVE_KM = 3.0
 DOWNTILT_MAX_DEG = 2.0
+# A cell serving the red road from this far, and much farther than the nearest
+# site, is overshooting. It is downtilted before the nearest sector is moved.
+OVERSHOOT_KM = 4.0
 
 
 def _sites_around(sectors: list[dict], lat: float, lon: float) -> list[dict]:
@@ -1187,6 +1191,175 @@ def _choose_coverage_fix(
     ), new_draw, new_actions)
 
 
+def _served_slots(bins: list[dict]) -> list[dict]:
+    """Serving cells on the red bins, with how far each one reaches."""
+    served: dict[tuple, dict] = {}
+    for item in bins:
+        for end in item.get("ends") or ():
+            cell = _resolve_serving_cell(end.get("eci"), end.get("earfcn"))
+            if cell is None or cell.get("azimuth") is None:
+                continue
+            key = (cell.get("sector"), cell.get("layer"))
+            slot = served.setdefault(key, {"by": {}, "n": 0, "lat": 0.0, "lon": 0.0})
+            slot["n"] += 1
+            slot["lat"] += float(end["lat"])
+            slot["lon"] += float(end["lon"])
+            name = cell.get("name") or ""
+            bucket = slot["by"].setdefault(name, {"cell": cell, "n": 0})
+            bucket["n"] += 1
+    rows = []
+    for slot in served.values():
+        slat = slot["lat"] / slot["n"]
+        slon = slot["lon"] / slot["n"]
+        cell = max(slot["by"].values(), key=lambda item: item["n"])["cell"]
+        dist = float(_equirect_km(cell["lat"], cell["lon"], slat, slon))
+        off = abs(_signed_deg(cell["azimuth"], _bearing_deg(cell["lat"], cell["lon"], slat, slon)))
+        rows.append({"cell": cell, "n": slot["n"], "dist": dist, "off": off})
+    rows.sort(key=lambda item: (-item["n"], -item["dist"]))
+    return rows
+
+
+def _downtilt_moves(cell: dict) -> bool:
+    _old_e, _old_m, new_e, new_m = _tilt_step(cell.get("etilt"), cell.get("mtilt"), DOWNTILT_MAX_DEG)
+    old_e, old_m = cell.get("etilt"), cell.get("mtilt")
+    e_moves = old_e is not None and new_e is not None and abs(new_e - old_e) >= 0.4
+    m_moves = old_m is not None and new_m is not None and abs(new_m - old_m) >= 0.4
+    return e_moves or m_moves
+
+
+def _overshoot_sentence(row: dict) -> str:
+    cell = row["cell"]
+    name = f"{cell.get('sector')} {cell.get('layer')}".strip()
+    old_e, old_m, new_e, new_m = _tilt_step(cell.get("etilt"), cell.get("mtilt"), DOWNTILT_MAX_DEG)
+    dist_m = row["dist"] * 1000.0
+    return (
+        f"{name} serves this road from {dist_m:,.0f} m. That is overshoot, so the beam is "
+        f"pulled back: {_tilt_bit('E_tilt', old_e, new_e)}. {_tilt_bit('M_tilt', old_m, new_m)}. "
+        f"Azimuth stays {float(cell['azimuth']):.0f}°."
+    )
+
+
+def _overshoot_item(row: dict) -> dict:
+    cell = row["cell"]
+    return {
+        "rec": cell,
+        "dist": row["dist"],
+        "off": row["off"],
+        "delta": DOWNTILT_MAX_DEG,
+        "turn": 0.0,
+        "old_pop": None,
+        "new_pop": None,
+        "overshoot": True,
+        "site": cell.get("site") or cell.get("sector") or "",
+    }
+
+
+def _local_companion(sites: list[dict], spot_pop: float) -> list[dict]:
+    """A nearest-sector change kept only when that beam itself misses the road.
+
+    Downtilt of the nearest sector is not used once a far cell is the overshooter.
+    An uptilt, or a large azimuth turn, is kept with the overshooter downtilt.
+    """
+    if not sites or sites[0]["dist"] > TUNE_KM:
+        return []
+    site = sites[0]
+    for rec in site["recs"]:
+        hit = _tune_candidate(rec, site["dist"], site["bearing"], spot_pop)
+        if hit is None:
+            continue
+        if hit["delta"] > 0.4:
+            hit["delta"] = 0.0
+        if abs(hit["turn"]) < 15.0:
+            hit["turn"] = 0.0
+        if abs(hit["delta"]) < 0.8 and abs(hit["turn"]) < 15.0:
+            continue
+        hit["site"] = site["name"]
+        hit["overshoot"] = False
+        return [hit]
+    return []
+
+
+def _prefer_overshoot(choice: dict, slots: list[dict], sites: list[dict], spot_pop: float) -> dict:
+    """Downtilt a far serving cell before moving the nearest sector."""
+    nearest_km = sites[0]["dist"] if sites else 99.0
+    if nearest_km > FOURTH_SAVE_KM:
+        return choice
+    limit = max(OVERSHOOT_KM, nearest_km * 2.5)
+    far = [row for row in slots if row["dist"] >= limit and _downtilt_moves(row["cell"])][:2]
+    if not far:
+        return choice
+    sentences = [_overshoot_sentence(row) for row in far]
+    extra_actions = [_tune_action(_overshoot_item(row)) for row in far]
+    if choice.get("kind") in ("fourth", "new"):
+        choice["final"] = f"{choice['final']} {' '.join(sentences)}"
+        choice["actions"] = list(choice.get("actions") or []) + extra_actions
+        if choice.get("steps"):
+            choice["steps"][0]["proposal"] = " ".join(sentences)
+        return choice
+    companions = _local_companion(sites, spot_pop)
+    bits = list(sentences)
+    actions = list(extra_actions)
+    if companions:
+        _tilt, _azimuth, _site, companion_final = _companion_final(companions)
+        bits.append(f"The nearest sector also needs a change. {companion_final}")
+        actions.extend(_tune_action(item) for item in companions)
+    else:
+        near = sites[0]["name"] if sites else "The nearest sector"
+        bits.append(f"{near} at {nearest_km:.1f} km is not moved. The bad samples come from the overshooting cell.")
+    final = " ".join(bits)
+    names = []
+    for item in [_overshoot_item(row) for row in far] + companions:
+        if item["site"] not in names:
+            names.append(item["site"])
+    steps = [
+        {"step": "1", "action": "E-tilt / M-tilt", "proposal": "Final. " + final},
+        {
+            "step": "2",
+            "action": "Azimuth",
+            "proposal": _not_required(
+                "The overshooting cell keeps its azimuth. Downtilt is what pulls the beam back."
+            ),
+        },
+        {
+            "step": "3",
+            "action": "4th sector, L900",
+            "proposal": _not_required(
+                "A 4th sector is not added on the nearest site. The far cell is downtilted first."
+            ),
+        },
+        {
+            "step": "4",
+            "action": "New 3-sector site",
+            "proposal": _not_required("The overshoot is restricted, so a new site is not added for this reason."),
+        },
+    ]
+    return {
+        "kind": "tune",
+        "site": ", ".join(names),
+        "final": final,
+        "steps": steps,
+        "draw": None,
+        "actions": actions,
+    }
+
+
+def _companion_final(chosen: list[dict]) -> tuple[str, str, str, str]:
+    """Short final line for a nearest sector that still needs an uptilt or a large turn."""
+    bits = []
+    for item in chosen:
+        rec = item["rec"]
+        name = f"{rec.get('sector')} {rec.get('layer')}".strip()
+        parts = [f"{name} at {item['dist']:.1f} km"]
+        if abs(item["delta"]) >= 0.8:
+            _old_e, _old_m, new_e, _new_m = _tilt_step(rec.get("etilt"), rec.get("mtilt"), item["delta"])
+            parts.append(f"E_tilt {_deg_text(rec.get('etilt'))}° to {_deg_text(new_e)}°")
+        if abs(item["turn"]) >= 15.0:
+            new_az = (float(rec["azimuth"]) + item["turn"]) % 360.0
+            parts.append(f"azimuth {float(rec['azimuth']):.0f}° to {new_az:.0f}°")
+        bits.append(", ".join(parts))
+    return "", "", "", "; ".join(bits) + "."
+
+
 def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series) -> dict:
     """Finding and one final solution for a bad spot, including a blank inside the circle.
 
@@ -1269,6 +1442,17 @@ def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series) -> dict
     choice = _choose_coverage_fix(
         sites, sectors, spot_pop, target_lat, target_lon, red_lat, red_lon,
     )
+    served = _served_slots(main or bins)
+    overshoot_note = [
+        f"{row['cell'].get('sector')} {row['cell'].get('layer')} at {row['dist'] * 1000:,.0f} m"
+        for row in served
+        if sites and row["dist"] >= max(OVERSHOOT_KM, sites[0]["dist"] * 2.5)
+    ]
+    if overshoot_note:
+        finding_lines.append(
+            "Overshooting cell on this red road: " + "; ".join(overshoot_note[:2]) + ". Downtilt that cell first."
+        )
+    choice = _prefer_overshoot(choice, served, sites, spot_pop)
     final = choice["final"]
     if blank_m >= 80:
         final = f"{final} This covers the red road and the {blank_m:,.0f} m blank."
@@ -1429,6 +1613,120 @@ def _run_length_m(run: list[dict]) -> float:
     return total + float(MAP_BIN_M)
 
 
+_LABEL_STROKE = [pe.withStroke(linewidth=2.6, foreground="#14202B")]
+
+
+def _ink(ax, lon: float, lat: float, text: str, size: float, color: str = "#F7FEFF") -> None:
+    """Map text with a dark edge and no filled box."""
+    ax.text(
+        lon, lat, text,
+        ha="center", va="center", fontsize=size, color=color, fontweight="bold",
+        zorder=35, clip_on=True, path_effects=_LABEL_STROKE,
+    )
+
+
+def _inside_axes(ax, lon: float, lat: float, margin: float = 0.03) -> bool:
+    x0, x1 = ax.get_xlim()
+    y0, y1 = ax.get_ylim()
+    mx = margin * (x1 - x0)
+    my = margin * (y1 - y0)
+    return (x0 + mx) <= lon <= (x1 - mx) and (y0 + my) <= lat <= (y1 - my)
+
+
+def _px_shift(ax) -> tuple[float, float]:
+    """Data degrees per screen pixel, from the axes box and its limits."""
+    pos = ax.get_position()
+    fig = ax.figure
+    # savefig writes MAP_DPI, so a 16 px gap is 16 px in the PNG, not at the screen dpi.
+    width = max(fig.get_figwidth() * MAP_DPI * pos.width, 1.0)
+    height = max(fig.get_figheight() * MAP_DPI * pos.height, 1.0)
+    x0, x1 = ax.get_xlim()
+    y0, y1 = ax.get_ylim()
+    return (x1 - x0) / width, (y1 - y0) / height
+
+
+def _beside(
+    ax, lon: float, lat: float, dx: float, dy: float, pixels: float, side: float,
+) -> tuple[float, float]:
+    """A point `pixels` to one side of the direction (dx, dy)."""
+    dlon, dlat = _px_shift(ax)
+    vx = dx / dlon if dlon else 0.0
+    vy = dy / dlat if dlat else 0.0
+    norm = math.hypot(vx, vy) or 1.0
+    px, py = -vy / norm, vx / norm
+    return lon + side * pixels * px * dlon, lat + side * pixels * py * dlat
+
+
+def _px_from(ax, lon: float, lat: float, other_lon: float, other_lat: float) -> float:
+    dlon, dlat = _px_shift(ax)
+    return math.hypot(
+        (lon - other_lon) / (dlon or 1e-12),
+        (lat - other_lat) / (dlat or 1e-12),
+    )
+
+
+def _label_on_segment(
+    ax, near_lon: float, near_lat: float, far_lon: float, far_lat: float,
+    fracs: tuple[float, ...] = (0.30, 0.42, 0.20, 0.55),
+    pixels: float = 16.0,
+    side: float = 1.0,
+    clear_px: float = 0.0,
+    avoid: list[tuple[float, float]] | None = None,
+) -> tuple[float, float]:
+    """A point beside the line, off `near`, with no filled box.
+
+    The offset is in screen pixels, measured after the axes has its final size.
+    When `avoid` points are given, the side farther from them is used.
+    """
+    dx = far_lon - near_lon
+    dy = far_lat - near_lat
+
+    def clearance(point: tuple[float, float]) -> float:
+        if not avoid:
+            return 0.0
+        return min(_px_from(ax, point[0], point[1], lon, lat) for lon, lat in avoid)
+
+    if math.hypot(dx, dy) < 1e-12:
+        _dlon, dlat = _px_shift(ax)
+        up = (near_lon, near_lat + pixels * abs(dlat))
+        down = (near_lon, near_lat - pixels * abs(dlat))
+        if avoid:
+            return max((up, down), key=clearance)
+        return up if _inside_axes(ax, up[0], up[1]) else down
+
+    best = None
+    best_score = -1.0
+    fallback = None
+    for frac in fracs:
+        lon = near_lon + frac * dx
+        lat = near_lat + frac * dy
+        choices = []
+        for sign in (side, -side):
+            point = _beside(ax, lon, lat, dx, dy, pixels, sign)
+            if clear_px and _px_from(ax, point[0], point[1], near_lon, near_lat) < clear_px:
+                continue
+            choices.append(point)
+        if not choices:
+            continue
+        choices.sort(key=clearance, reverse=True)
+        if fallback is None:
+            fallback = choices[0]
+        for point in choices:
+            if not _inside_axes(ax, point[0], point[1]):
+                continue
+            if not avoid:
+                return point
+            score = clearance(point)
+            if score > best_score:
+                best, best_score = point, score
+            break
+    if best is not None:
+        return best
+    if fallback is not None:
+        return fallback
+    return near_lon + fracs[0] * dx, near_lat + fracs[0] * dy
+
+
 def _view_arm_deg(ax, spot_lat: float) -> float:
     """Same arm length the cyan sector mark uses, in degrees of latitude."""
     xlim, ylim = ax.get_xlim(), ax.get_ylim()
@@ -1437,7 +1735,10 @@ def _view_arm_deg(ax, spot_lat: float) -> float:
     return radius_km / 111.32
 
 
-def _draw_serving_spider(ax, samples: pd.DataFrame, column: str, spot: pd.Series) -> None:
+def _draw_serving_spider(
+    ax, samples: pd.DataFrame, column: str, spot: pd.Series,
+    avoid: list[tuple[float, float]] | None = None,
+) -> None:
     """Dashed yellow line from the serving sector arm to each red bin.
 
     The line starts at the end of that cell's sector, not at the middle of the
@@ -1474,6 +1775,9 @@ def _draw_serving_spider(ax, samples: pd.DataFrame, column: str, spot: pd.Series
                     "lon0": lon0, "lat0": lat0,
                     "lon1": float(end["lon"]), "lat1": float(end["lat"]),
                     "dist_m": dist_m,
+                    "sector": str(cell.get("sector") or "").strip(),
+                    "site_lat": float(cell["lat"]),
+                    "site_lon": float(cell["lon"]),
                 }
     if segments:
         ax.add_collection(LineCollection(
@@ -1488,29 +1792,31 @@ def _draw_serving_spider(ax, samples: pd.DataFrame, column: str, spot: pd.Series
     for item in labeled.values():
         if item["dist_m"] < 80:
             continue
-        mx = item["lon0"] + 0.55 * (item["lon1"] - item["lon0"])
-        my = item["lat0"] + 0.55 * (item["lat1"] - item["lat0"])
-        ax.text(
-            mx, my, f"{item['dist_m']:,.0f} m",
-            ha="center", va="center", fontsize=8, color="#4A235A", fontweight="bold",
-            zorder=34, clip_on=True,
-            bbox={"boxstyle": "round,pad=0.16", "fc": "#F5EEF8", "ec": "#6C3483", "lw": 0.7, "alpha": 0.94},
+        # near = the red bin, so the words leave the bad samples and sit beside the line.
+        mx, my = _label_on_segment(
+            ax, item["lon1"], item["lat1"], item["lon0"], item["lat0"],
+            fracs=(0.32, 0.46, 0.22, 0.58), pixels=28, avoid=avoid,
         )
+        on_map = _inside_axes(ax, item["site_lon"], item["site_lat"], margin=0.0)
+        text = f"{item['dist_m']:,.0f} m"
+        sector = item.get("sector") or ""
+        if sector and sector.lower() != "nan" and not on_map:
+            text = f"{sector}\n{text}"
+        _ink(ax, mx, my, text, 8, "#F7FEFF")
+    spot_lon = float(spot["lon"])
+    spot_lat = float(spot["lat"])
     for run in _red_runs(bins):
-        mid = run[len(run) // 2]
-        ax.text(
-            mid["lon"],
-            mid["lat"],
-            f"{_run_length_m(run):.0f} m",
-            ha="center",
-            va="bottom",
-            fontsize=7,
-            color="#9B1B1B",
-            fontweight="bold",
-            zorder=30,
-            clip_on=True,
-            bbox={"boxstyle": "square,pad=0.16", "fc": "white", "ec": "#C0392B", "lw": 0.7, "alpha": 0.94},
+        first, last = run[0], run[-1]
+        # Use the end farther from the spot, so the words are not on the site or the red samples.
+        d0 = math.hypot(float(first["lon"]) - spot_lon, float(first["lat"]) - spot_lat)
+        d1 = math.hypot(float(last["lon"]) - spot_lon, float(last["lat"]) - spot_lat)
+        end, other = (first, last) if d0 >= d1 else (last, first)
+        mx, my = _label_on_segment(
+            ax, float(end["lon"]), float(end["lat"]),
+            float(other["lon"]), float(other["lat"]),
+            fracs=(0.0, 0.2, -0.25, -0.5, 0.4), pixels=40, avoid=avoid,
         )
+        _ink(ax, mx, my, f"{_run_length_m(run):.0f} m", 8, "#FFE4E4")
 
 
 def _proposal_arm_km(ax, lat: float, draw: dict, azimuth: float, facing: bool) -> float:
@@ -1564,20 +1870,23 @@ def _draw_proposal(ax, draw: dict | None) -> None:
         y1 = lat + (length / 111.32) * np.cos(rad)
         ax.plot([lon, x1], [lat, y1], color="white", linewidth=6.0, solid_capstyle="round", zorder=31, clip_on=True)
         ax.plot([lon, x1], [lat, y1], color=color, linewidth=3.2, solid_capstyle="round", zorder=32, clip_on=True)
-        if index == 0:
-            ax.text(
-                x1, y1, f"{az:.0f}°",
-                ha="center", va="center", fontsize=7, color=color, fontweight="bold",
-                zorder=35, clip_on=True,
-                bbox={"boxstyle": "round,pad=0.12", "fc": "white", "ec": color, "lw": 0.6, "alpha": 0.94},
-            )
+        # Azimuth sits toward the tip, on one side of the arm, clear of the site.
+        mx, my = _label_on_segment(
+            ax, lon, lat, x1, y1, (0.86, 0.74, 0.94), pixels=32, side=1.0, clear_px=48,
+        )
+        _ink(ax, mx, my, f"{az:.0f}°", 8, "#F7FEFF")
     ax.scatter([lon], [lat], s=42, c=color, marker="o", zorder=36, edgecolors="white", linewidths=0.9)
-    ax.text(
-        lon, lat, str(draw.get("label") or "Proposed"),
-        ha="center", va="bottom", fontsize=8, color=color, fontweight="bold",
-        zorder=37, clip_on=False,
-        bbox={"boxstyle": "round,pad=0.18", "fc": "white", "ec": color, "lw": 0.8, "alpha": 0.95},
-    )
+    if azimuths:
+        face = float(azimuths[0])
+        length = _proposal_arm_km(ax, lat, draw, face, True)
+        rad = np.radians(face % 360.0)
+        tip_lon = lon + (length / _km_per_deg_lon(lat)) * np.sin(rad)
+        tip_lat = lat + (length / 111.32) * np.cos(rad)
+        # The solution name is on the other side of the facing arm, not on the site.
+        lx, ly = _label_on_segment(
+            ax, lon, lat, tip_lon, tip_lat, (0.62, 0.50, 0.74), pixels=40, side=-1.0, clear_px=56,
+        )
+        _ink(ax, lx, ly, str(draw.get("label") or "Proposed"), 8, "#F7FEFF")
 
 
 def draw_bad_spot_sector_pies(
@@ -1585,6 +1894,7 @@ def draw_bad_spot_sector_pies(
     spot: pd.Series,
     samples: pd.DataFrame | None = None,
     column: str | None = None,
+    proposal: dict | None = None,
 ) -> None:
     """Transparent sector marks for every site that touches this bad-spot view.
 
@@ -1601,9 +1911,12 @@ def draw_bad_spot_sector_pies(
     spot_lat = float(spot["lat"])
     spot_lon = float(spot["lon"])
     inside = sectors["lat"].between(ylim[0], ylim[1]) & sectors["lon"].between(xlim[0], xlim[1])
+    name_points: list[tuple[float, float]] = []
+    if proposal:
+        name_points.append((float(proposal["lon"]), float(proposal["lat"])))
     if not inside.any():
         if samples is not None and column:
-            _draw_serving_spider(ax, samples, column, spot)
+            _draw_serving_spider(ax, samples, column, spot, avoid=name_points)
         return
     present = sectors.loc[inside, "SiteName"].unique()
     chosen = sectors[sectors["SiteName"].isin(present)]
@@ -1647,17 +1960,12 @@ def draw_bad_spot_sector_pies(
             name = str(sec["Sector"]).strip()
             if not name or name.lower() == "nan":
                 continue
-            ax.text(
-                lon + r_deg * 1.28 * np.sin(rad),
-                lat + r_deg * 1.28 * np.cos(rad),
-                name,
-                ha="center",
-                va="center",
-                fontsize=4.8,
-                color="#F7FEFF",
-                zorder=29,
-                clip_on=True,
-            )
+            tip_lon = lon + r_deg * 1.28 * np.sin(rad)
+            tip_lat = lat + r_deg * 1.28 * np.cos(rad)
+            # One side of the arm. The solution name uses the other side, so the two do not stack.
+            nx, ny = _beside(ax, tip_lon, tip_lat, float(np.sin(rad)), float(np.cos(rad)), 48, 1.0)
+            _ink(ax, nx, ny, name, 8)
+            name_points.append((nx, ny))
         if samples is not None and column:
             continue
         if not facing:
@@ -1680,13 +1988,10 @@ def draw_bad_spot_sector_pies(
             )
             mx = (x0 + spot_lon) / 2.0
             my = (y0 + spot_lat) / 2.0
-            ax.text(
-                mx, my, text, ha="center", va="center", fontsize=6, color="#111111",
-                fontweight="bold", zorder=28, clip_on=True,
-                bbox={"boxstyle": "round,pad=0.12", "fc": "#FFE14A", "ec": "none", "alpha": 0.92},
-            )
+            lx, ly = _label_on_segment(ax, spot_lon, spot_lat, x0, y0, avoid=name_points)
+            _ink(ax, lx, ly, text, 8, "#F7FEFF")
     if samples is not None and column:
-        _draw_serving_spider(ax, samples, column, spot)
+        _draw_serving_spider(ax, samples, column, spot, avoid=name_points)
 
 
 def _coverage_extent_from_geo(geo: pd.DataFrame) -> tuple[float, float, float, float]:
@@ -3063,8 +3368,11 @@ def _circle_from_bbox(lon_min: float, lon_max: float, lat_min: float, lat_max: f
     return lon0, lat0, diameter_km / _km_per_deg_lon(lat0), diameter_km / 111.32
 
 
-def add_map_scale_bar(ax, km: float | None = None, corner: str = "upper left") -> None:
-    """Scale bar on a map. The length is a round fraction of the view."""
+def add_map_scale_bar(ax, km: float | None = None, corner: str = "upper left", boxed: bool = True) -> None:
+    """Scale bar on a map. The length is a round fraction of the view.
+
+    boxed is off on a bad-spot map so the length text has no filled background.
+    """
     xlim = ax.get_xlim()
     ylim = ax.get_ylim()
     if xlim[1] <= xlim[0] or ylim[1] <= ylim[0]:
@@ -3089,11 +3397,20 @@ def add_map_scale_bar(ax, km: float | None = None, corner: str = "upper left") -
     ax.plot([lon0, lon0], [lat - tick, lat + tick], color="#1B1B1B", lw=1.3, zorder=41, clip_on=True)
     ax.plot([lon0 + width, lon0 + width], [lat - tick, lat + tick], color="#1B1B1B", lw=1.3, zorder=41, clip_on=True)
     label = f"{km:g} km" if km >= 1 else f"{int(round(km * 1000))} m"
-    ax.text(
-        lon0 + width / 2.0, lat + tick, label,
-        ha="center", va="bottom", fontsize=8, color="#1B1B1B", fontweight="bold", zorder=42, clip_on=True,
-        bbox={"boxstyle": "round,pad=0.15", "fc": "white", "ec": "#1B1B1B", "lw": 0.6, "alpha": 0.94},
-    )
+    style = {
+        "ha": "center",
+        "va": "bottom",
+        "fontsize": 8,
+        "color": "#F7FEFF" if not boxed else "#1B1B1B",
+        "fontweight": "bold",
+        "zorder": 42,
+        "clip_on": True,
+    }
+    if boxed:
+        style["bbox"] = {"boxstyle": "round,pad=0.15", "fc": "white", "ec": "#1B1B1B", "lw": 0.6, "alpha": 0.94}
+    else:
+        style["path_effects"] = _LABEL_STROKE
+    ax.text(lon0 + width / 2.0, lat + tick, label, **style)
 
 
 def _spot_outline(spot: pd.Series) -> tuple[float, float, float, float, float, tuple]:
@@ -3499,13 +3816,27 @@ def plot_bad_spot_serial_maps(
         ax.set_xlim(zext[0], zext[1])
         ax.set_ylim(zext[2], zext[3])
         ax.set_aspect("equal", adjustable="box")
+        kind = str(spot.get("kind", "consecutive"))
+        blanks = _blank_segments(df, spot)
+        blank_m = sum(gap["length_m"] for gap in blanks)
+        if kind == "discrete":
+            caption = f"Discrete {float(spot['area_km2']):.1f} km²"
+        else:
+            word = "Poor run" if min_consecutive_m(column) <= 0 else "Consecutive"
+            caption = f"{word} {float(spot['length_m']):.0f} m"
+        if blank_m >= 80:
+            caption = f"{caption}  +  blank {blank_m:,.0f} m"
+        ax.set_title(caption, fontsize=14, fontweight="bold")
+        hide_map_axes(ax)
+        # Lock the axes size before any label is measured in screen pixels.
+        fig.tight_layout()
+        fig.canvas.draw()
         if basemap_style == "boundary":
             _add_boundary_basemap(ax)
         else:
             _add_basemap(ax)
-        draw_bad_spot_sector_pies(ax, spot, local, column)
+        draw_bad_spot_sector_pies(ax, spot, local, column, proposal)
         _draw_proposal(ax, proposal)
-        blanks = _blank_segments(df, spot)
         for gap in blanks:
             ax.plot(
                 [gap["lon1"], gap["lon2"]],
@@ -3525,19 +3856,7 @@ def plot_bad_spot_serial_maps(
                 solid_capstyle="round",
                 zorder=25,
             )
-        add_map_scale_bar(ax)
-        hide_map_axes(ax)
-        kind = str(spot.get("kind", "consecutive"))
-        blank_m = sum(gap["length_m"] for gap in blanks)
-        if kind == "discrete":
-            caption = f"Discrete {float(spot['area_km2']):.1f} km²"
-        else:
-            word = "Poor run" if min_consecutive_m(column) <= 0 else "Consecutive"
-            caption = f"{word} {float(spot['length_m']):.0f} m"
-        if blank_m >= 80:
-            caption = f"{caption}  +  blank {blank_m:,.0f} m"
-        ax.set_title(caption, fontsize=14, fontweight="bold")
-        fig.tight_layout()
+        add_map_scale_bar(ax, boxed=False)
         one = work.iloc[[i - 1]].reset_index(drop=True)
         _save_map(fig, path, ax=ax, spots=one, name_start=i)
         paths.append(path)

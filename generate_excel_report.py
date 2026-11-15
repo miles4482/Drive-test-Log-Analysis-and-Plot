@@ -88,7 +88,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.63"
+REPORT_VERSION = "1.66"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -2708,7 +2708,33 @@ def refresh_bad_spot_pies(src: Path | None = None) -> Path:
     if VERSIONED_XLSX.resolve() != REPORT_XLSX.resolve():
         shutil.copy2(VERSIONED_XLSX, REPORT_XLSX)
     print(f"Wrote {VERSIONED_XLSX}", flush=True)
+    _write_circle_index()
     return VERSIONED_XLSX
+
+
+def _write_circle_index() -> None:
+    """Pixel box of each bad-spot circle, so the summary deck can draw the same oval."""
+    import json
+
+    payload = {}
+    for png, geom in MAP_CIRCLE_PIXELS.items():
+        circles = geom.get("circles") or []
+        if not circles:
+            continue
+        circle = circles[0]
+        payload[Path(png).name] = {
+            "width": geom["size"][0],
+            "height": geom["size"][1],
+            "x": circle["x"],
+            "y": circle["y"],
+            "w": circle["w"],
+            "h": circle["h"],
+            "dotted": bool(circle.get("dotted")),
+        }
+    dest = PLOTS_DIR / "bad_spot_circles.json"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(json.dumps(payload))
+    print(f"Wrote {dest} ({len(payload)} circles)", flush=True)
 
 
 def _jpeg_bytes(path: Path) -> bytes:
