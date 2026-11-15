@@ -46,6 +46,8 @@ You can rebuild only the Excel report from the merged CSV:
 python generate_excel_report.py
 ```
 
+The same program is also in one Jupyter notebook, `Bogura_DriveTest_Complete.ipynb`. Each section has a note. Run the cells from the top. The last cell builds the workbook, the web map, and the summary deck.
+
 ## Plots
 
 After a successful run:
