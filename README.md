@@ -144,7 +144,13 @@ GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/
 
 Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.62.xlsx
 
-The web map is v1.63 as well.
+The web map is v1.64. The summary presentation is v1.65.
+
+## Summary presentation (v1.65)
+
+One PowerPoint for the bad-spot result. It keeps three examples of each solution: tilt and azimuth, a 4th L900 sector, and a new 3-sector site. The other spots stay in the Excel workbook.
+
+**v1.65 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.65.pptx
 
 ## Excel report
 
