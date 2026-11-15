@@ -529,6 +529,12 @@ def _tilt_step(
 
 
 def _deg_text(value: float | None) -> str:
+    """Degrees for a solution sentence.
+
+    The summary deck shows a proposed azimuth, E_tilt and M_tilt as the nearest
+    whole degree, and half a degree rounds up. The next workbook publish must
+    apply that same rounding to the proposed value. The dump value stays as measured.
+    """
     if value is None:
         return "blank"
     if abs(value - round(value)) < 0.05:

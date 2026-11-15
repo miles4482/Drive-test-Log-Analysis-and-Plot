@@ -148,15 +148,17 @@ GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/
 
 Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.66.xlsx
 
-The web map is v1.67. The summary presentation is v1.67.
+The web map is v1.67. The summary presentation is v1.68.
 
-## Summary presentation (v1.67)
+## Summary presentation (v1.68)
 
-One PowerPoint for the bad-spot result. It keeps three examples of each solution: tilt and azimuth, a 4th L900 sector, and a new 3-sector site. Each example map shows the orange bad-spot circle. The other spots stay in the Excel workbook.
+The deck opens with the drive summary, then the RSRP, RSRQ and SINR plots with the plotted-sample shares. The bad-spot summary comes next. Active then has 5 azimuth, 5 tilt, 5 fourth-sector and 5 new-site examples. Idle has every azimuth turn (4), 5 tilts, 5 fourth sectors and every new site (3). One slide named Annex follows the last example. The slides after it hold the rounding rule, how a solution is chosen, the map key, and the check that every red sample inside the circle is included.
 
-**v1.67 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.67.pptx
+Proposed azimuth, E_tilt and M_tilt on these slides are the nearest whole degree. Half a degree rounds up. The next workbook publish must use that same rounding on the proposed value. The dump value stays as measured. Later report builds also keep the check on every red bin inside the orange circle.
 
-Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.66.pptx
+**v1.68 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.68.pptx
+
+Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.67.pptx
 
 ## Excel report
 
