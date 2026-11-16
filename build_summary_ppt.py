@@ -26,9 +26,9 @@ from pptx.util import Emu, Inches, Pt
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
-REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.71.xlsx"
+REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.72.xlsx"
 PLOTS = OUTPUT / "plots"
-SUMMARY_VERSION = "1.71"
+SUMMARY_VERSION = "1.72"
 DEST = OUTPUT / f"Bogura_DriveTest_Summary_v{SUMMARY_VERSION}.pptx"
 CIRCLES = PLOTS / "bad_spot_circles.json"
 
@@ -277,7 +277,7 @@ def _text(slide, left, top, width, height, text: str, size: int, color: RGBColor
 def _footer(slide, page: int, pages: int) -> None:
     _text(
         slide, Inches(0.4), Inches(7.18), Inches(10), Inches(0.24),
-        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.71  ·  Web v1.69",
+        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.72  ·  Web v1.69",
         11, MUTED,
     )
     _text(
@@ -490,7 +490,8 @@ def _bad_summary(prs: Presentation, page: int, pages: int, groups: list[dict]) -
         "The azimuth is not changed. The site is checked.\n"
         "A group of 5 or fewer shows every spot. A larger group shows the first 5. "
         "When a spot changes more than one cell, each action is its own numbered line.\n"
-        "Serving cell on an example is the cell that served the red samples. "
+        "The example box shows only the serving cell, the cell that served the red samples. "
+        "A turned sector keeps its current arm. The proposed azimuth is a blue dashed arm labeled with the new degree. "
         "On the example slides, a tenth of a degree is shown as the nearest whole degree. 0.5 rounds up.",
         14, INK,
     )
@@ -527,21 +528,13 @@ def _example(prs: Presentation, group: dict, item: dict, record: dict[str, str],
         f"Proposed Solutions : {SOLUTION_LABEL[group['solution']]}", 13, color, True,
     )
     _text(slide, Inches(panel), Inches(0.98), Inches(panel_w), Inches(0.85), item["why"], 12, INK)
-    fields = [
-        ("Mode", group["mode"]),
-        ("Bad spot", str(item["n"])),
-        ("Site", record.get("C", "")),
-        ("Sector", record.get("D", "")),
-        ("Serving cell", record.get("E", "")),
-        ("Population", record.get("F", "")),
-    ]
+    value = record.get("E", "")
+    lines = max(1, min(4, (len(value) + 39) // 40))
+    height = 0.22 * lines
     top = 1.9
-    for label, value in fields:
-        lines = max(1, min(4, (len(value) + 39) // 40))
-        height = 0.22 * lines
-        _text(slide, Inches(panel), Inches(top), Inches(1.35), Inches(height), label, 11, MUTED, True)
-        _text(slide, Inches(panel + 1.35), Inches(top), Inches(panel_w - 1.35), Inches(height), value, 12, INK)
-        top += height + 0.02
+    _text(slide, Inches(panel), Inches(top), Inches(1.35), Inches(height), "Serving cell", 11, MUTED, True)
+    _text(slide, Inches(panel + 1.35), Inches(top), Inches(panel_w - 1.35), Inches(height), value, 12, INK)
+    top += height + 0.08
     _text(slide, Inches(panel), Inches(top + 0.04), Inches(panel_w), Inches(0.22), "FINAL SOLUTION  ·  NEAREST DEGREE", 11, color, True)
     solution = _whole_degrees(record.get("H", ""))
     size = 11 if len(solution) > 420 else 12
@@ -745,7 +738,7 @@ def _annex_read(prs: Presentation, page: int, pages: int) -> None:
         ("Orange circle", "The bad spot. A blank with no plot inside the circle is part of the same spot."),
         ("Yellow dashed line", "The cell that served the red samples. It starts at the end of that sector. It is not the proposed sector. The length is from the arm tip, so it is shorter than the site-centre distance."),
         ("Tilt on the dashed line", "When that cell is an overshooter, the line also carries the E_tilt change."),
-        ("Orange arm", "A proposed 4th L900 sector, drawn from the existing site toward the spot. A gold arm is an existing sector that was turned."),
+        ("Orange arm", "A proposed 4th L900 sector, drawn from the existing site toward the spot. A turned sector keeps its current arm. The proposed azimuth is a blue dashed arm, labeled with the new degree and the size of the turn."),
         ("Purple arms", "A proposed new 3-sector site. Every arm is labeled with its azimuth."),
     ]
     for index, (title, body) in enumerate(items):
@@ -800,7 +793,7 @@ def _annex_workbook(prs: Presentation, page: int, pages: int, groups: list[dict]
     if partial:
         deck += "Samples: " + ", ".join(partial) + "."
     rows = [
-        ("Excel v1.71", "A map, a suggestion table and a movable circle for every idle and active bad spot. The Cover sheet lists every spot, with the cell that served the red samples. EP Details has the existing and proposed height, azimuth, E_tilt and M_tilt. An on-site check leaves the proposed azimuth blank."),
+        ("Excel v1.72", "A map, a suggestion table and a movable circle for every idle and active bad spot. The Cover sheet lists every spot. A turned sector keeps its current arm, and the proposed azimuth is a blue dashed arm. An on-site check leaves the proposed azimuth blank."),
         ("This deck", deck),
         ("Web v1.69", "The live map is unchanged. Site names are white with a dark edge. Sector names on that map stay small. With KPI set to Blank, Info on a sector or the site centre opens the cell table."),
         ("RSRQ and SINR", "The coverage maps are in this deck. The workbook no longer has separate RSRQ or SINR bad-spot sheets. Poor RSRQ is at or below −20 dB. Poor SINR is at or below 0 dB."),

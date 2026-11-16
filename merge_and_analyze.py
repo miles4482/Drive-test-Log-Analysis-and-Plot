@@ -2522,15 +2522,22 @@ def draw_bad_spot_sector_pies(
         facing: list[float] = []
         for _, sec in part.iterrows():
             name = str(sec["Sector"]).strip()
-            moved = name in turns
-            az = float(turns.get(name, sec["azimuth"])) % 360.0
+            # The existing arm stays on the dump azimuth and in the normal colour.
+            # A proposed turn is a separate dashed arm, with the new azimuth on it.
+            current = float(sec["azimuth"]) % 360.0
+            proposed = None
+            if name in turns:
+                candidate = float(turns[name]) % 360.0
+                if abs(_signed_deg(current, candidate)) >= 0.5:
+                    proposed = candidate
+            az = current
             rad = np.radians(az)
             if _ang_diff(az, bearing) <= BAD_SPOT_AIM_DEG:
                 facing.append(az)
             ax.plot(
                 [lon, lon + r_deg * np.sin(rad)],
                 [lat, lat + r_deg * np.cos(rad)],
-                color="#E1B84A" if moved else "#8FD8E0",
+                color="#8FD8E0",
                 linewidth=3.0,
                 solid_capstyle="round",
                 zorder=24,
@@ -2539,21 +2546,57 @@ def draw_bad_spot_sector_pies(
             ax.plot(
                 [lon, lon + r_deg * np.sin(rad)],
                 [lat, lat + r_deg * np.cos(rad)],
-                color="#FFF6D8" if moved else "#E7FBFD",
+                color="#E7FBFD",
                 linewidth=1.5,
                 solid_capstyle="round",
                 zorder=25,
                 clip_on=True,
             )
-            name = str(sec["Sector"]).strip()
-            if not name or name.lower() == "nan":
+            name_xy = None
+            if name and name.lower() != "nan":
+                tip_lon = lon + r_deg * 1.28 * np.sin(rad)
+                tip_lat = lat + r_deg * 1.28 * np.cos(rad)
+                # One side of the arm. The solution name uses the other side, so the two do not stack.
+                name_xy = _beside(ax, tip_lon, tip_lat, float(np.sin(rad)), float(np.cos(rad)), 48, 1.0)
+            if proposed is not None:
+                prad = np.radians(proposed)
+                # Longer than the cyan arm, so the planned turn is not lost on the yellow serving line.
+                reach = r_deg * 2.35
+                x1 = lon + reach * np.sin(prad)
+                y1 = lat + reach * np.cos(prad)
+                ax.plot(
+                    [lon, x1], [lat, y1],
+                    color="white", linewidth=4.2, linestyle=(0, (8, 4.5)),
+                    solid_capstyle="butt", zorder=28, clip_on=True,
+                )
+                ax.plot(
+                    [lon, x1], [lat, y1],
+                    color="#3D7EFF", linewidth=2.3, linestyle=(0, (8, 4.5)),
+                    solid_capstyle="butt", zorder=29, clip_on=True,
+                )
+                delta = _signed_deg(current, proposed)
+                # Out near the tip, in the wedge, and clear of the sector name on the current arm.
+                p_dx, p_dy = math.sin(prad), math.cos(prad)
+                c_dx, c_dy = math.sin(rad), math.cos(rad)
+                toward_current = 1.0 if (-p_dy * c_dx + p_dx * c_dy) > 0 else -1.0
+                avoid = [(spot_lon, spot_lat), *name_points]
+                if name_xy is not None:
+                    avoid.append(name_xy)
+                deg_lon, deg_lat = _label_on_segment(
+                    ax, lon, lat, x1, y1,
+                    fracs=(0.88, 0.76, 0.96),
+                    pixels=32,
+                    side=toward_current,
+                    clear_px=44,
+                    avoid=avoid,
+                )
+                _ink(ax, deg_lon, deg_lat, f"{proposed:.0f}° ({delta:+.0f}°)", 8, "#D6E6FF")
+                name_points.append((deg_lon, deg_lat))
+                name_points.append((x1, y1))
+            if name_xy is None:
                 continue
-            tip_lon = lon + r_deg * 1.28 * np.sin(rad)
-            tip_lat = lat + r_deg * 1.28 * np.cos(rad)
-            # One side of the arm. The solution name uses the other side, so the two do not stack.
-            nx, ny = _beside(ax, tip_lon, tip_lat, float(np.sin(rad)), float(np.cos(rad)), 48, 1.0)
-            _ink(ax, nx, ny, name, 8)
-            name_points.append((nx, ny))
+            _ink(ax, name_xy[0], name_xy[1], name, 8)
+            name_points.append(name_xy)
         if samples is not None and column:
             continue
         if not facing:
@@ -4369,8 +4412,9 @@ def _extent_with_nearest_site(
     if nearest:
         best = min(nearest, key=lambda rec: float(_equirect_km(rec["lat"], rec["lon"], lat, lon)))
         extent = _extent_around(extent, float(best["lat"]), float(best["lon"]))
+    override_names = {str(name).strip() for name in (overrides or {})}
     wanted = [str(name).strip() for name in (names or []) if str(name).strip()]
-    wanted.extend(str(name).strip() for name in (overrides or {}))
+    wanted.extend(override_names)
     if not wanted:
         return extent
     sectors = load_site_sectors()
@@ -4387,7 +4431,9 @@ def _extent_with_nearest_site(
         slat, slon = float(hit.iloc[0]["lat"]), float(hit.iloc[0]["lon"])
         if float(_equirect_km(slat, slon, lat, lon)) > 5.0:
             continue
-        extent = _extent_around(extent, slat, slon)
+        # A turned sector grows a dashed arm about twice the cyan arm. Keep that tip in frame.
+        pad = 2.3 if name in override_names else 0.95
+        extent = _extent_around(extent, slat, slon, pad_km=pad)
     return extent
 
 

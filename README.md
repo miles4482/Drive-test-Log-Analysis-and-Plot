@@ -138,17 +138,25 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
-## Download Excel report (v1.71)
+## Download Excel report (v1.72)
 
-**v1.71 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.71.xlsx
+**v1.72 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.72.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.71.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.72.xlsx
 
-Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.69.xlsx
+Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.71.xlsx
 
-The web map stays v1.69. The summary presentation is v1.71.
+The web map stays v1.69. The summary presentation is v1.72.
+
+## Summary presentation (v1.72)
+
+The example box on each bad-spot slide shows only the serving cell, the cell that served the red samples. A sector whose azimuth is turned keeps its current arm in the normal colour. The proposed azimuth is a blue dashed arm, labeled with the new degree and the size of the turn.
+
+**v1.72 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.72.pptx
+
+Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.71.pptx
 
 ## Summary presentation (v1.71)
 
@@ -162,7 +170,11 @@ Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/curs
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.71.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.72.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+
+### What changed in v1.72
+
+A turned sector keeps the arm that is in the dump, in the same colour as the other sectors. The proposed azimuth is a blue dashed arm beside it, labeled with the new degree and the turn, for example 270° (+25°). The Cover sheet is unchanged. The web map stays v1.69.
 
 ### What changed in v1.71
 
