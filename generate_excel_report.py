@@ -59,6 +59,7 @@ from merge_and_analyze import (
     BAD_SPOT_RULES,
     consecutive_label,
     bad_spot_advice,
+    remember_seen_sectors,
     find_bad_spots,
     logic_drift,
     LOGIC_LOCK,
@@ -88,7 +89,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.69"
+REPORT_VERSION = "1.71"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -1380,7 +1381,7 @@ BAD_SPOT_KPI_NOTES = {
 
 def place_solution_summary(ws, row: int, plans: list[dict]) -> int:
     """Count of tilt, 4th sector, and new site, just above the bad-spot table."""
-    counts = {"tune": 0, "fourth": 0, "new": 0}
+    counts = {"tune": 0, "fourth": 0, "new": 0, "ep": 0}
     for plan in plans:
         kind = str(plan.get("kind") or "")
         if kind in counts:
@@ -1395,11 +1396,12 @@ def place_solution_summary(ws, row: int, plans: list[dict]) -> int:
             ["Tilt and azimuth", counts["tune"]],
             ["4th sector, L900", counts["fourth"]],
             ["New 3-sector site", counts["new"]],
+            ["On site EP Check", counts["ep"]],
             ["All bad spots", len(plans)],
         ],
         num_formats={1: "#,##0"},
     )
-    return row + 8
+    return row + 9
 
 
 def _bad_spot_table_rows(spots: pd.DataFrame, *, include_kpi: bool = True, plans: list[dict] | None = None) -> list[list]:
@@ -2307,6 +2309,9 @@ def build_report(df: pd.DataFrame, active: pd.DataFrame | None = None, out_path:
             f"{len(active_robi):,} rows of {active_raw_n:,}"
         )
 
+    remember_seen_sectors("Idle", df)
+    if active_robi is not None:
+        remember_seen_sectors("Active", active_robi)
     idle_fixed = strongest_fix(df)
     print(f"Idle strongest row per lat/lon/time: {len(idle_fixed):,} of {len(df):,}", flush=True)
     idle_track = best_server(idle_fixed)
@@ -2571,6 +2576,7 @@ def refresh_bad_spot_pies(src: Path | None = None) -> Path:
         bad_spot_advice,
         load_active_merged,
         load_merged_csv,
+        remember_seen_sectors,
     )
 
     src = src or REPORT_XLSX
@@ -2582,6 +2588,8 @@ def refresh_bad_spot_pies(src: Path | None = None) -> Path:
     if idle is None or active is None:
         raise SystemExit("Merged drive logs are missing; a full report build is required.")
     active = select_active_report(active)
+    remember_seen_sectors("Idle", idle)
+    remember_seen_sectors("Active", active)
     print(f"Idle rows {len(idle):,}  Active {ACTIVE_OPERATOR} {ACTIVE_CELL_TYPE} rows {len(active):,}", flush=True)
     idle_track = best_server(idle)
     active_track = best_carrier(active)
@@ -2909,6 +2917,7 @@ def _xml_text(value: str) -> str:
         value.replace("&", "&amp;")
         .replace("<", "&lt;")
         .replace(">", "&gt;")
+        .replace("\n", "&#10;")
     )
 
 
@@ -3088,6 +3097,12 @@ def _add_solution_columns(xml: str, plans: list[dict]) -> str:
         row_n = match.group(1)
         attrs = match.group(2)
         body = match.group(3)
+        lines = str(plan.get("final") or "").count("\n") + 1
+        height = max(52, min(16 * lines + 8, 120))
+        if "ht=" in attrs:
+            attrs = re.sub(r'ht="[\d.]+"', f'ht="{height}"', attrs)
+        else:
+            attrs += f' ht="{height}" customHeight="1"'
         pieces.append(xml[last:match.start()])
         updates = (
             (f"O{row_n}", 20, str(plan.get("site", ""))),
@@ -3308,6 +3323,7 @@ _SOLUTION_NAME = {
     "tune": "Tilt and azimuth",
     "fourth": "4th sector, L900",
     "new": "New 3-sector site",
+    "ep": "On site EP Check",
 }
 
 
@@ -3343,7 +3359,7 @@ def _graft_cover_summary(xml: str, idle_plans: list[dict], active_plans: list[di
     row += 2
 
     def counts_of(plans: list[dict]) -> dict[str, int]:
-        counts = {"tune": 0, "fourth": 0, "new": 0}
+        counts = {"tune": 0, "fourth": 0, "new": 0, "ep": 0}
         for plan in plans:
             kind = str(plan.get("kind") or "")
             if kind in counts:
@@ -3363,6 +3379,7 @@ def _graft_cover_summary(xml: str, idle_plans: list[dict], active_plans: list[di
         ("Tilt and azimuth", "tune"),
         ("4th sector, L900", "fourth"),
         ("New 3-sector site", "new"),
+        ("On site EP Check", "ep"),
         ("All bad spots", None),
     ):
         idle_value = str(len(idle_plans) if key is None else idle_counts[key])
@@ -3391,9 +3408,12 @@ def _graft_cover_summary(xml: str, idle_plans: list[dict], active_plans: list[di
     row += 1
     for mode, plans in (("Idle", idle_plans), ("Active", active_plans)):
         for index, plan in enumerate(plans, 1):
-            sector, cell = _plan_sector_cell(plan)
+            sector, _proposed_cell = _plan_sector_cell(plan)
+            cell = str(plan.get("serving") or "")
+            lines = str(plan.get("final") or "").count("\n") + 1
+            height = max(36, min(16 * lines + 8, 110))
             rows.append(
-                f'<row r="{row}" ht="36" customHeight="1">'
+                f'<row r="{row}" ht="{height}" customHeight="1">'
                 f'{_inline_cell(f"A{row}", 20, mode)}'
                 f'{_inline_cell(f"B{row}", 20, f"Bad spot {index}")}'
                 f'{_inline_cell(f"C{row}", 20, str(plan.get("site") or ""))}'
@@ -3421,7 +3441,7 @@ def _graft_cover_summary(xml: str, idle_plans: list[dict], active_plans: list[di
 
 def _place_cover_summary_beside_route(xml: str, idle_plans: list[dict], active_plans: list[dict]) -> str:
     """Put the Idle and Active counts to the right of the DT route."""
-    counts = {"tune": 0, "fourth": 0, "new": 0}
+    counts = {"tune": 0, "fourth": 0, "new": 0, "ep": 0}
     idle_counts = dict(counts)
     active_counts = dict(counts)
     for plan in idle_plans:
@@ -3467,7 +3487,8 @@ def _place_cover_summary_beside_route(xml: str, idle_plans: list[dict], active_p
         (77, "Tilt and azimuth", idle_counts["tune"], active_counts["tune"], 20),
         (78, "4th sector, L900", idle_counts["fourth"], active_counts["fourth"], 20),
         (79, "New 3-sector site", idle_counts["new"], active_counts["new"], 20),
-        (80, "All bad spots", len(idle_plans), len(active_plans), 7),
+        (80, "On site EP Check", idle_counts["ep"], active_counts["ep"], 20),
+        (81, "All bad spots", len(idle_plans), len(active_plans), 7),
     )
     for row, label, idle_n, active_n, style in data_rows:
         write(row, {
@@ -3668,6 +3689,8 @@ def write_bad_spot_advice(src: Path | None = None) -> Path:
     if idle is None or active is None:
         raise SystemExit("Merged drive logs are missing; a full report build is required.")
     active = select_active_report(active)
+    remember_seen_sectors("Idle", idle)
+    remember_seen_sectors("Active", active)
     idle_track = best_server(idle)
     active_track = best_carrier(active)
     tracks = {

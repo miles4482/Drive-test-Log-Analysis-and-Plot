@@ -26,9 +26,9 @@ from pptx.util import Emu, Inches, Pt
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
-REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.69.xlsx"
+REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.71.xlsx"
 PLOTS = OUTPUT / "plots"
-SUMMARY_VERSION = "1.70"
+SUMMARY_VERSION = "1.71"
 DEST = OUTPUT / f"Bogura_DriveTest_Summary_v{SUMMARY_VERSION}.pptx"
 CIRCLES = PLOTS / "bad_spot_circles.json"
 
@@ -44,13 +44,29 @@ PURPLE = RGBColor(0x6C, 0x34, 0x83)
 
 
 GREEN = RGBColor(0x1A, 0x7A, 0x4C)
+TEAL = RGBColor(0x0F, 0x6C, 0x8C)
 
 SOLUTION_COLOR = {
     "Azimuth": GOLD,
     "Tilt": GREEN,
     "4th sector, L900": ORANGE,
     "New 3-sector site": PURPLE,
+    "On site EP Check": TEAL,
 }
+SOLUTION_LABEL = {
+    "Azimuth": "Azimuth",
+    "Tilt": "Tilt",
+    "4th sector, L900": "4th Sector, L900",
+    "New 3-sector site": "New 3-sector site",
+    "On site EP Check": "On site EP Check",
+}
+SOLUTION_ORDER = (
+    "Azimuth",
+    "Tilt",
+    "4th sector, L900",
+    "New 3-sector site",
+    "On site EP Check",
+)
 
 
 def _whole_degrees(text: str) -> str:
@@ -63,104 +79,50 @@ def _whole_degrees(text: str) -> str:
     return re.sub(r"(E_tilt|M_tilt|azimuth) (\d+)° to \2°", r"\1 stays \2°", text)
 
 
-# Idle has 4 azimuth turns and 3 new sites, so those two groups show every spot.
-# Every other group shows 5. An azimuth example may also change tilt. A tilt
-# example leaves the azimuth where it is.
-GROUPS = [
-    {
-        "solution": "Azimuth",
-        "mode": "Active",
-        "spots": 25,
-        "items": [
-            {"n": 97, "why": "The tilt already fits 0.6 km. GBSDR37B turns from 140° to 132°. The dashed line leaves GBSDR37A, the cell that served the red samples."},
-            {"n": 60, "why": "Tilt stays. GBSND16A turns from 20° to 7°, and GBSND21B turns from 240° to 216°."},
-            {"n": 23, "why": "BOKHL09B turns from 110° to 135°. E_tilt goes from 2° to 1°."},
-            {"n": 43, "why": "SGTRS13C turns from 255° to 275°. E_tilt goes from 4° to 1°."},
-            {"n": 70, "why": "BOSDRC1B turns from 215° to 229°. E_tilt goes from 3° to 1°."},
-        ],
-    },
-    {
-        "solution": "Tilt",
-        "mode": "Active",
-        "spots": 17,
-        "items": [
-            {"n": 16, "why": "PBCTM14C is uptilted from 2° to 1°. The azimuth stays 240°."},
-            {"n": 37, "why": "PBSTH22A is uptilted from 2° to 1°. The azimuth stays 60°."},
-            {"n": 27, "why": "JYPBB01C is uptilted from 3° to 1°. The azimuth stays 335°. The map is wide enough to show the site."},
-            {"n": 34, "why": "BOSDR78B serves the road from 5.2 km and is downtilted from 4° to 6°. The nearer sector is uptilted, shown as 2° to 1°."},
-            {"n": 7, "why": "Three cells change, so the solution is numbered. JYKLI02C and JYSDR26A are downtilted. JYKTL08B is uptilted from 2° to 1°."},
-        ],
-    },
-    {
-        "solution": "4th sector, L900",
-        "mode": "Active",
-        "spots": 45,
-        "items": [
-            {"n": 4, "why": "GBPLS02 is 0.2 km away and the spot is in the null. The far cells on that same piece are left in place, because the new sector covers them."},
-            {"n": 1, "why": "BOSRK11 is 2.6 km away, so a 4th L900 sector at 329° replaces a new site. BOSRK11C was 19° from it, so that sector turns from 310° to 284° and the gap is 45°."},
-            {"n": 5, "why": "GBGBD24 is 0.4 km away and the spot is in the null, so the 4th sector covers it. GBSGT12C is not downtilted. GBGBD15A turns from 25° to 41° toward the far end of the blank."},
-            {"n": 66, "why": "PBSTH27 is 0.2 km away. A new L900 sector at 255°, E_tilt 7°, fills the null. Existing sectors stay."},
-            {"n": 14, "why": "GBSDR46 is 0.7 km away. A new L900 sector at 136°, E_tilt 3°, is aimed at the spot."},
-        ],
-    },
-    {
-        "solution": "New 3-sector site",
-        "mode": "Active",
-        "spots": 12,
-        "items": [
-            {"n": 2, "why": "The nearest existing site is 3.9 km away, past 3 km. The new site also covers the 2,749 m blank."},
-            {"n": 10, "why": "The nearest existing site is 4.8 km away. No existing sector is close enough."},
-            {"n": 8, "why": "The nearest existing site is 3.8 km away. The new site covers the red road and the 1,418 m blank."},
-            {"n": 12, "why": "The nearest existing site is 3.3 km away, just past the 3 km line, so the plan is a new site."},
-            {"n": 61, "why": "The nearest existing site is past 3 km. Each of the three L900 sectors has its own azimuth and tilt."},
-        ],
-    },
-    {
-        "solution": "Azimuth",
-        "mode": "Idle",
-        "spots": 7,
-        "items": [
-            {"n": 2, "why": "BOSDR52A turns from 355° to 9°. BOSDR76A keeps azimuth 40°, and its tilt is shown as 2° to 1°."},
-            {"n": 13, "why": "SGTRS15C turns from 270° to 295°. E_tilt 4° to 0.9° is shown as 4° to 1°."},
-            {"n": 17, "why": "SGROY03B L2600 is not downtilted. SGROY05C turns from 350° to 328°, and its tilt is shown as 3° to 1°."},
-            {"n": 20, "why": "DPFLB01B L2600 is left in place. It is the idle priority layer. DPFLB03C at 0.4 km turns from 280° to 289°, and E_tilt goes from 2° to 4°."},
-            {"n": 26, "why": "DPGRT02B turns from 170° to 151°. The tilts are shown as 4° to 5° and 4° to 1°."},
-        ],
-    },
-    {
-        "solution": "Tilt",
-        "mode": "Idle",
-        "spots": 4,
-        "items": [
-            {"n": 1, "why": "BOSDR56A L2600 serves from 6.6 km and is not downtilted. L2600 stays the idle priority layer. BOGBT18C at 1.1 km is uptilted from 3° to 2°. Its azimuth already faces the road and stays 240°."},
-            {"n": 14, "why": "DPHKM11B is uptilted from 3° to 1°. The azimuth stays 120°."},
-            {"n": 8, "why": "JYKTL02A is uptilted. The calculated 0.8° is shown as 1°. The azimuth stays 50°."},
-            {"n": 3, "why": "BOSJP16B L2600 is not downtilted. BOSJP24A and BOSDR54B are uptilted from 3° to 1°. Both azimuths stay."},
-        ],
-    },
-    {
-        "solution": "4th sector, L900",
-        "mode": "Idle",
-        "spots": 12,
-        "items": [
-            {"n": 12, "why": "The 4th L900 sector on BOSBG02 aims at the 123 m piece. BOSBG02C turns from 250° to 214° so the gap is 45°. BOSBG26B L2600 on that piece is not downtilted. BOSBG03A serves the separate 50 m sample and is still downtilted, E_tilt 2° to 4°."},
-            {"n": 11, "why": "BOSRP22 is 1.1 km away and the spot is in the null. A new L900 sector at 359°, E_tilt 2°, is aimed through it."},
-            {"n": 16, "why": "SGROY15 is 0.1 km from the spot. A new L900 sector at 118°, E_tilt 10°, covers it. Existing sectors stay."},
-            {"n": 22, "why": "DPHKM12 is 1.7 km away. A new L900 sector at 213°, E_tilt 1°, fills the gap."},
-            {"n": 24, "why": "JYKTL09 is 2.9 km away, so a 4th sector is used. JYKTL09C turns from 350° to 309° to open a 45° gap. DPGRT04B L2600 is not downtilted."},
-        ],
-    },
-    {
-        "solution": "New 3-sector site",
-        "mode": "Idle",
-        "spots": 3,
-        "items": [
-            {"n": 4, "why": "The nearest existing site is 3.3 km away, just past 3 km, so the final step is a new site."},
-            {"n": 10, "why": "The nearest existing site is 4.3 km away. The three L900 sectors are 180°, 300° and 60°."},
-            {"n": 23, "why": "The nearest existing site is 3.3 km away. The new site also covers the 304 m blank."},
-        ],
-    },
-]
+def _slide_solution(cells: dict[str, str]) -> str:
+    """Cover column G, with tilt-and-azimuth split by whether an azimuth is turned."""
+    kind = cells.get("G", "")
+    if kind in ("4th sector, L900", "New 3-sector site", "On site EP Check"):
+        return kind
+    if re.search(r"azimuth \d+° to \d+°", cells.get("H", "")):
+        return "Azimuth"
+    return "Tilt"
+
+
+def _lead_line(final: str) -> str:
+    lines = [re.sub(r"^\d+\.\s*", "", line).strip() for line in final.split("\n") if line.strip()]
+    if not lines:
+        return ""
+    lead = lines[0]
+    if lead.lower().startswith("on site ep check") and len(lines) > 1:
+        lead = lines[1]
+    if len(lead) > 260:
+        lead = lead[:257].rstrip() + "..."
+    return lead
+
+
+def _example_groups(rows: dict[tuple[str, int], dict[str, str]]) -> list[dict]:
+    """Up to five examples of each solution, taken from the cover sheet in spot order."""
+    buckets: dict[tuple[str, str], list[int]] = {}
+    for (mode, number), cells in rows.items():
+        buckets.setdefault((mode, _slide_solution(cells)), []).append(number)
+    groups = []
+    for mode in ("Active", "Idle"):
+        for solution in SOLUTION_ORDER:
+            spots = sorted(buckets.get((mode, solution), []))
+            if not spots:
+                continue
+            shown = spots if len(spots) <= 5 else spots[:5]
+            groups.append({
+                "solution": solution,
+                "mode": mode,
+                "spots": len(spots),
+                "items": [
+                    {"n": number, "why": _lead_line(rows[(mode, number)].get("H", ""))}
+                    for number in shown
+                ],
+            })
+    return groups
 
 def _cover_rows() -> dict[tuple[str, int], dict[str, str]]:
     ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
@@ -297,18 +259,25 @@ def _text(slide, left, top, width, height, text: str, size: int, color: RGBColor
         frame._txBody.bodyPr.set("anchor", {MSO_ANCHOR.TOP: "t", MSO_ANCHOR.MIDDLE: "ctr", MSO_ANCHOR.BOTTOM: "b"}[anchor])
     except Exception:
         pass
+    lines = str(text).split("\n")
     paragraph = frame.paragraphs[0]
     paragraph.alignment = align
     paragraph.space_before = Pt(0)
     paragraph.space_after = Pt(0)
-    _set_run(paragraph.add_run(), text, size, color, bold)
+    _set_run(paragraph.add_run(), lines[0], size, color, bold)
+    for line in lines[1:]:
+        paragraph = frame.add_paragraph()
+        paragraph.alignment = align
+        paragraph.space_before = Pt(3)
+        paragraph.space_after = Pt(0)
+        _set_run(paragraph.add_run(), line, size, color, bold)
     return shape
 
 
 def _footer(slide, page: int, pages: int) -> None:
     _text(
         slide, Inches(0.4), Inches(7.18), Inches(10), Inches(0.24),
-        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.69  ·  Web v1.69",
+        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.71  ·  Web v1.69",
         11, MUTED,
     )
     _text(
@@ -456,51 +425,74 @@ def _kpi(prs: Presentation, spec: dict, page: int, pages: int) -> None:
     _footer(slide, page, pages)
 
 
-def _bad_summary(prs: Presentation, page: int, pages: int) -> None:
+def _group_count(groups: list[dict], mode: str, solution: str) -> tuple[int, int]:
+    for group in groups:
+        if group["mode"] == mode and group["solution"] == solution:
+            return int(group["spots"]), len(group["items"])
+    return 0, 0
+
+
+def _bad_summary(prs: Presentation, page: int, pages: int, groups: list[dict]) -> None:
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _heading(slide, "Bad spot summary")
     headers = ["Solution", "Idle spots", "Idle shown", "Active spots", "Active shown"]
-    rows = [
-        ("Azimuth", "7", "5", "25", "5", GOLD),
-        ("Tilt, azimuth unchanged", "4", "4", "17", "5", GREEN),
-        ("4th sector, L900", "12", "5", "45", "5", ORANGE),
-        ("New 3-sector site", "3", "3", "12", "5", PURPLE),
-        ("All bad spots", "26", "", "99", "", NAVY),
+    labels = [
+        ("Azimuth", "Azimuth", GOLD),
+        ("Tilt, azimuth unchanged", "Tilt", GREEN),
+        ("4th sector, L900", "4th sector, L900", ORANGE),
+        ("New 3-sector site", "New 3-sector site", PURPLE),
+        ("On site EP Check", "On site EP Check", TEAL),
     ]
+    rows = []
+    for label, key, color in labels:
+        idle_n, idle_shown = _group_count(groups, "Idle", key)
+        active_n, active_shown = _group_count(groups, "Active", key)
+        rows.append((label, str(idle_n), str(idle_shown), str(active_n), str(active_shown), color))
+    idle_all = sum(_group_count(groups, "Idle", key)[0] for _label, key, _color in labels)
+    active_all = sum(_group_count(groups, "Active", key)[0] for _label, key, _color in labels)
+    rows.append(("All bad spots", str(idle_all), "", str(active_all), "", NAVY))
     widths = [4.3, 1.9, 1.9, 2.1, 2.1]
     left0 = 0.45
-    top = 0.95
+    top = 0.78
+    row_h = 0.56
     x = left0
     for header, width in zip(headers, widths):
-        _box(slide, Inches(x), Inches(top), Inches(width), Inches(0.48), NAVY)
-        _text(slide, Inches(x), Inches(top + 0.08), Inches(width), Inches(0.32), header, 13, WHITE, True, PP_ALIGN.CENTER)
+        _box(slide, Inches(x), Inches(top), Inches(width), Inches(0.42), NAVY)
+        _text(slide, Inches(x), Inches(top + 0.06), Inches(width), Inches(0.3), header, 13, WHITE, True, PP_ALIGN.CENTER)
         x += width
     for row_index, (label, idle, idle_shown, active, active_shown, color) in enumerate(rows):
-        y = top + 0.48 + row_index * 0.72
+        y = top + 0.42 + row_index * row_h
         values = [label, idle, idle_shown, active, active_shown]
         x = left0
         fill = RGBColor(0xEE, 0xF3, 0xF7) if row_index % 2 == 0 else WHITE
         if row_index == len(rows) - 1:
             fill = RGBColor(0xE8, 0xF0, 0xF6)
         for col, (value, width) in enumerate(zip(values, widths)):
-            _box(slide, Inches(x), Inches(y), Inches(width), Inches(0.72), fill, LINE)
+            _box(slide, Inches(x), Inches(y), Inches(width), Inches(row_h), fill, LINE)
             if col == 0:
-                _box(slide, Inches(x), Inches(y), Inches(0.1), Inches(0.72), color)
+                _box(slide, Inches(x), Inches(y), Inches(0.1), Inches(row_h), color)
             _text(
-                slide, Inches(x + (0.18 if col == 0 else 0)), Inches(y + 0.16), Inches(width), Inches(0.4),
-                value, 16, INK, col == 0 or row_index == len(rows) - 1,
+                slide, Inches(x + (0.18 if col == 0 else 0)), Inches(y + 0.1), Inches(width), Inches(0.36),
+                value, 15, INK, col == 0 or row_index == len(rows) - 1,
                 PP_ALIGN.CENTER if col else PP_ALIGN.LEFT,
             )
             x += width
+    idle_tune = _group_count(groups, "Idle", "Azimuth")[0] + _group_count(groups, "Idle", "Tilt")[0]
+    active_tune = _group_count(groups, "Active", "Azimuth")[0] + _group_count(groups, "Active", "Tilt")[0]
+    idle_ep, _shown = _group_count(groups, "Idle", "On site EP Check")
+    active_ep, _shown = _group_count(groups, "Active", "On site EP Check")
     _text(
-        slide, Inches(0.45), Inches(5.2), Inches(12.4), Inches(1.7),
-        "Tilt and azimuth together are 11 idle and 42 active. The table splits that group. "
-        "An azimuth row is a spot where an existing azimuth is turned. Most of those also change tilt. "
-        "A tilt row leaves the azimuth as it is. Idle now has 7 azimuth turns, because a far L2600 cell is no longer downtilted and the nearest site is tuned instead.\n"
-        "Idle tilt and Idle new site are the full set, 4 and 3. Idle azimuth shows 5 of 7. "
-        "Every active group shows 5. When a spot changes more than one cell, the solution is numbered.\n"
+        slide, Inches(0.45), Inches(4.7), Inches(12.4), Inches(2.2),
+        f"Tilt and azimuth together are {idle_tune} idle and {active_tune} active. The table splits that group. "
+        "An azimuth row is a spot where an existing azimuth is turned. A tilt row leaves the azimuth as it is.\n"
+        f"On site EP Check is {idle_ep} idle and {active_ep} active. The nearest site already faces the red road, "
+        "within 12°, but that sector is missing from the log while another sector of the same site is on air. "
+        "The azimuth is not changed. The site is checked.\n"
+        "A group of 5 or fewer shows every spot. A larger group shows the first 5. "
+        "When a spot changes more than one cell, each action is its own numbered line.\n"
+        "Serving cell on an example is the cell that served the red samples. "
         "On the example slides, a tenth of a degree is shown as the nearest whole degree. 0.5 rounds up.",
-        15, INK,
+        14, INK,
     )
     _footer(slide, page, pages)
 
@@ -530,8 +522,11 @@ def _example(prs: Presentation, group: dict, item: dict, record: dict[str, str],
 
     panel = 7.05
     panel_w = 5.95
-    _text(slide, Inches(panel), Inches(0.66), Inches(panel_w), Inches(0.22), group["solution"].upper(), 12, color, True)
-    _text(slide, Inches(panel), Inches(0.9), Inches(panel_w), Inches(1.05), item["why"], 13, INK)
+    _text(
+        slide, Inches(panel), Inches(0.66), Inches(panel_w), Inches(0.28),
+        f"Proposed Solutions : {SOLUTION_LABEL[group['solution']]}", 13, color, True,
+    )
+    _text(slide, Inches(panel), Inches(0.98), Inches(panel_w), Inches(0.85), item["why"], 12, INK)
     fields = [
         ("Mode", group["mode"]),
         ("Bad spot", str(item["n"])),
@@ -540,11 +535,13 @@ def _example(prs: Presentation, group: dict, item: dict, record: dict[str, str],
         ("Serving cell", record.get("E", "")),
         ("Population", record.get("F", "")),
     ]
-    top = 2.0
+    top = 1.9
     for label, value in fields:
-        _text(slide, Inches(panel), Inches(top), Inches(1.35), Inches(0.26), label, 11, MUTED, True)
-        _text(slide, Inches(panel + 1.35), Inches(top), Inches(panel_w - 1.35), Inches(0.26), value, 12, INK)
-        top += 0.26
+        lines = max(1, min(4, (len(value) + 39) // 40))
+        height = 0.22 * lines
+        _text(slide, Inches(panel), Inches(top), Inches(1.35), Inches(height), label, 11, MUTED, True)
+        _text(slide, Inches(panel + 1.35), Inches(top), Inches(panel_w - 1.35), Inches(height), value, 12, INK)
+        top += height + 0.02
     _text(slide, Inches(panel), Inches(top + 0.04), Inches(panel_w), Inches(0.22), "FINAL SOLUTION  ·  NEAREST DEGREE", 11, color, True)
     solution = _whole_degrees(record.get("H", ""))
     size = 11 if len(solution) > 420 else 12
@@ -577,9 +574,9 @@ def _off_angle_png() -> BytesIO:
     from matplotlib.patches import Wedge
 
     sites = [
-        {"name": "BOSDR07C", "dist": 0.80, "bearing": 346, "azimuth": 350, "off": 4, "note": "azimuth stays", "change": False},
-        {"name": "BOSDR52A", "dist": 1.11, "bearing": 17, "azimuth": 355, "off": 22, "new_az": 9, "note": "turns to 9°", "change": True},
-        {"name": "BOSDR76A", "dist": 1.94, "bearing": 46, "azimuth": 40, "off": 6, "note": "azimuth stays", "change": False},
+        {"name": "BOSDR07C", "dist": 0.80, "bearing": 346, "azimuth": 350, "off": 4, "note": "faces the road", "change": False},
+        {"name": "BOSDR52A", "dist": 1.11, "bearing": 17, "azimuth": 355, "off": 22, "note": "outside the wedge", "change": False},
+        {"name": "BOSDR76A", "dist": 1.94, "bearing": 46, "azimuth": 40, "off": 6, "note": "faces the road", "change": False},
     ]
 
     def from_road(dist: float, bearing: float) -> tuple[float, float]:
@@ -640,9 +637,9 @@ def _off_angle_png() -> BytesIO:
         ax.scatter([sx], [sy], s=32, color="#1d3557", zorder=8)
 
     labels = [
-        ("BOSDR07C", 0.80, 346, (1.05, -0.35), "4°\nazimuth stays", "#1e7a34"),
-        ("BOSDR52A", 1.11, 17, (-0.95, -2.15), "22°\nturns to 9°", "#c0392b"),
-        ("BOSDR76A", 1.94, 46, (-2.55, -0.85), "6°\nazimuth stays", "#1e7a34"),
+        ("BOSDR07C", 0.80, 346, (1.05, -0.35), "4°\nfaces the road\nnot in the log", "#1e7a34"),
+        ("BOSDR52A", 1.11, 17, (-0.95, -2.15), "22°\noutside the wedge", "#c0392b"),
+        ("BOSDR76A", 1.94, 46, (-2.55, -0.85), "6°\nfaces the road", "#1e7a34"),
     ]
     for name, dist, bearing, (tx, ty), note, color in labels:
         sx, sy = from_road(dist, bearing)
@@ -686,11 +683,11 @@ def _annex_off_angle(prs: Presentation, page: int, pages: int) -> None:
         (0.76, 1.52, "The angle",
          "Stand at the site. The blue arrow is where the antenna points. The dashed line is the direction from that site to the middle of the red road. The red road is the bad samples. The gap between the two lines is the angle."),
         (2.38, 1.42, "The green wedge",
-         "The wedge is 12° to either side of the antenna. A dashed line inside it means the antenna already faces the red road, and the azimuth stays. A dashed line outside it means the azimuth turns toward the red road."),
+         "The wedge is 12° to either side of the antenna. A dashed line inside it means the antenna already faces the red road. A dashed line outside it is the case where an azimuth would turn toward the red road."),
         (3.90, 2.95, "Idle Bad Spot 2",
-         "BOSDR07C is 0.8 km away. Azimuth 350°. The red road is at 346°. The gap is 4°, so the azimuth stays.\n\n"
-         "BOSDR52A is 1.1 km away. Azimuth 355°. The red road is at 17°. The gap is 22°, so it turns to 9°. The gold arrow is the new azimuth. The turn leaves about 8°.\n\n"
-         "BOSDR76A is 1.9 km away. Azimuth 40°. The red road is at 46°. The gap is 6°, so the azimuth stays. E_tilt goes from 2° to 1°."),
+         "BOSDR07C is the nearest sector, 0.8 km away. Azimuth 350°. The red road is at 346°. The gap is 4°, inside the wedge.\n\n"
+         "The idle log does not decode BOSDR07C. The other sectors of BOSDR07 are on air. The solution is On site EP Check: confirm on site that the antenna is really at 350° and that the sector is radiating. The cell that serves the red road is BOSDR96L21C.\n\n"
+         "BOSDR52A is 22° outside the wedge. BOSDR76A is 6° inside it. Those angles stay on this sketch. The spot is no longer a turn of BOSDR52A."),
     ]
     for top, height, title, body in cards:
         _box(slide, Inches(left), Inches(top), Inches(width), Inches(height), PAPER, LINE)
@@ -725,17 +722,18 @@ def _annex_rules(prs: Presentation, page: int, pages: int) -> None:
         (GOLD, "Azimuth", "A sector inside 2.5 km can be turned when it does not already face the spot. Beside a new 4th sector, the closest existing sector is turned away until the gap is 30° to 60°. On a long blank, the nearest other sector can turn toward the far end."),
         (GREEN, "Tilt", "Downtilt of an existing sector is at most 2°. A far cell is downtilted when it serves a red sample the new sector does not cover. Idle L2600 is not downtilted. The nearest site is tuned instead. A far cell on the piece the new sector already covers is left in place."),
         (ORANGE, "4th sector", "Used when the spot sits in the null inside 1.5 km, when one or two sites inside 2 km leave it in the null, when the required downtilt would pass 2°, or when a host inside 3 km can aim at the spot. The closest existing sector moves when it would sit within 30° of the new one."),
-        (PURPLE, "New site", "Used only when the nearest existing site is farther than 3 km. Three L900 sectors are drawn at the spot. The sector toward the red road is long enough to cross it, and every sector shows its azimuth."),
+        (PURPLE, "New site", "Used only when the nearest existing site is farther than 3 km. One L900 sector aims at the bad spot. The other two aim at the higher population around the site. The gap between any two sectors is at least 40°."),
+        (TEAL, "On site EP Check", "Used when the nearest site already faces the red road, within 12°, and that sector is missing from the log while another sector of the same site is on air. The azimuth is not changed. The site is checked."),
     ]
     for index, (color, title, body) in enumerate(cards):
         col = index % 2
         row = index // 2
         left = 0.35 + col * 6.5
-        top = 0.9 + row * 3.0
-        _box(slide, Inches(left), Inches(top), Inches(6.25), Inches(2.8), PAPER, LINE)
-        _box(slide, Inches(left), Inches(top), Inches(6.25), Inches(0.1), color)
-        _text(slide, Inches(left + 0.22), Inches(top + 0.25), Inches(5.8), Inches(0.4), title, 20, NAVY, True)
-        _text(slide, Inches(left + 0.22), Inches(top + 0.75), Inches(5.8), Inches(1.85), body, 14, INK)
+        top = 0.72 + row * 2.08
+        _box(slide, Inches(left), Inches(top), Inches(6.25), Inches(1.96), PAPER, LINE)
+        _box(slide, Inches(left), Inches(top), Inches(6.25), Inches(0.08), color)
+        _text(slide, Inches(left + 0.18), Inches(top + 0.16), Inches(5.9), Inches(0.32), title, 16, NAVY, True)
+        _text(slide, Inches(left + 0.18), Inches(top + 0.5), Inches(5.9), Inches(1.38), body, 13, INK)
     _footer(slide, page, pages)
 
 
@@ -784,13 +782,27 @@ def _annex_circle(prs: Presentation, page: int, pages: int) -> None:
     _footer(slide, page, pages)
 
 
-def _annex_workbook(prs: Presentation, page: int, pages: int) -> None:
+def _annex_workbook(prs: Presentation, page: int, pages: int, groups: list[dict]) -> None:
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _heading(slide, "Annex  ·  where the full set is")
+    full = []
+    partial = []
+    for group in groups:
+        name = f"{group['mode']} {SOLUTION_LABEL[group['solution']]}"
+        shown = len(group["items"])
+        if shown == group["spots"]:
+            full.append(f"{name} ({shown})")
+        else:
+            partial.append(f"{name} shows {shown} of {group['spots']}")
+    deck = "The examples above. "
+    if full:
+        deck += "Full sets: " + ", ".join(full) + ". "
+    if partial:
+        deck += "Samples: " + ", ".join(partial) + "."
     rows = [
-        ("Excel v1.69", "A map, a suggestion table and a movable circle for all 26 idle spots and all 99 active spots. The Cover sheet lists every spot. EP Details has the existing and proposed height, azimuth, E_tilt and M_tilt."),
-        ("This deck", "The examples above. Idle tilt and Idle new site are the full set. Idle azimuth shows 5 of 7. Each active group shows 5."),
-        ("Web v1.69", "The live map. Site names are white with a dark edge. Sector names on that map stay small. With KPI set to Blank, Info on a sector or the site centre opens the cell table."),
+        ("Excel v1.71", "A map, a suggestion table and a movable circle for every idle and active bad spot. The Cover sheet lists every spot, with the cell that served the red samples. EP Details has the existing and proposed height, azimuth, E_tilt and M_tilt. An on-site check leaves the proposed azimuth blank."),
+        ("This deck", deck),
+        ("Web v1.69", "The live map is unchanged. Site names are white with a dark edge. Sector names on that map stay small. With KPI set to Blank, Info on a sector or the site centre opens the cell table."),
         ("RSRQ and SINR", "The coverage maps are in this deck. The workbook no longer has separate RSRQ or SINR bad-spot sheets. Poor RSRQ is at or below −20 dB. Poor SINR is at or below 0 dB."),
     ]
     top = 0.95
@@ -837,8 +849,9 @@ def build() -> Path:
     if not REPORT.exists():
         raise SystemExit(f"Missing {REPORT.name}")
     rows = _cover_rows()
+    groups = _example_groups(rows)
     missing = []
-    for group in GROUPS:
+    for group in groups:
         for item in group["items"]:
             if (group["mode"], item["n"]) not in rows:
                 missing.append(f"{group['mode']} {item['n']}")
@@ -851,7 +864,7 @@ def build() -> Path:
     if missing:
         raise SystemExit("Missing example data: " + ", ".join(missing))
 
-    example_count = sum(len(group["items"]) for group in GROUPS)
+    example_count = sum(len(group["items"]) for group in groups)
     # cover, 3 KPI, bad-spot summary, examples, annex, 6 annex detail slides
     pages = 1 + len(KPI_SLIDES) + 1 + example_count + 1 + 6
     prs = Presentation()
@@ -861,12 +874,12 @@ def build() -> Path:
     prs.core_properties.subject = "Route, radio KPIs, bad-spot summary, and examples"
     _report(prs, pages)
     page = 2
-    _bad_summary(prs, page, pages)
+    _bad_summary(prs, page, pages, groups)
     page += 1
     for spec in KPI_SLIDES:
         _kpi(prs, spec, page, pages)
         page += 1
-    for group in GROUPS:
+    for group in groups:
         for ordinal, item in enumerate(group["items"], start=1):
             _example(prs, group, item, rows[(group["mode"], item["n"])], ordinal, page, pages)
             page += 1
@@ -882,14 +895,14 @@ def build() -> Path:
     page += 1
     _annex_circle(prs, page, pages)
     page += 1
-    _annex_workbook(prs, page, pages)
+    _annex_workbook(prs, page, pages, groups)
     if page != pages:
         raise SystemExit(f"Page count {page} does not match {pages}")
     OUTPUT.mkdir(parents=True, exist_ok=True)
     prs.save(DEST)
+    print(f"Wrote {DEST} ({DEST.stat().st_size / 1e6:.1f} MB, {len(groups)} groups, {pages} slides)")
     return DEST
 
 
 if __name__ == "__main__":
-    path = build()
-    print(f"Wrote {path} ({path.stat().st_size / 1e6:.1f} MB, {len(GROUPS)} groups)")
+    build()

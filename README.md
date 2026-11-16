@@ -138,31 +138,40 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
-## Download Excel report (v1.69)
+## Download Excel report (v1.71)
 
-**v1.69 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.69.xlsx
+**v1.71 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.71.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.69.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.71.xlsx
 
-Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.67.xlsx
+Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.69.xlsx
 
-The web map is v1.69. The summary presentation is v1.70.
+The web map stays v1.69. The summary presentation is v1.71.
 
-## Summary presentation (v1.70)
+## Summary presentation (v1.71)
 
-The first slide is a report page: the DT route table, then RSRP, RSRQ and SINR each as a short table and a share chart. The bad-spot summary is the second slide. The geographic RSRP, RSRQ and SINR maps follow. Active then has 5 azimuth, 5 tilt, 5 fourth-sector and 5 new-site examples. Idle has 5 of 7 azimuth turns, all 4 tilt-only spots, 5 fourth sectors and all 3 new sites. One slide named Annex follows the last example. The first annex slide draws the 12° angle on Idle Bad Spot 2: the antenna, the direction to the red road, and the gap between them. The slides after it hold the rounding rule, how a solution is chosen, the map key, and the check that every red sample inside the circle is included.
+The first slide is a report page: the DT route table, then RSRP, RSRQ and SINR each as a short table and a share chart. The bad-spot summary is the second slide. The geographic RSRP, RSRQ and SINR maps follow. Each solution group shows every spot when there are 5 or fewer, and the first 5 otherwise. The example header reads "Proposed Solutions :" and the serving-cell line is the cell that served the red samples. Each cell action is its own numbered line. One slide named Annex follows the last example. The first annex slide draws the 12° angle on Idle Bad Spot 2 and records that this spot is an on-site EP check. The slides after it hold the rounding rule, how a solution is chosen, the map key, and the check that every red sample inside the circle is included.
 
-Proposed azimuth, E_tilt and M_tilt are the nearest whole degree in the workbook and on the slides. Half a degree rounds up. The dump value stays as measured. Later report builds also keep the check on every red bin inside the orange circle.
+Proposed azimuth, E_tilt and M_tilt are the nearest whole degree in the workbook and on the slides. Half a degree rounds up. The dump value stays as measured. An on-site EP check leaves the proposed azimuth blank.
 
-**v1.70 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.70.pptx
+**v1.71 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.71.pptx
 
-Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.69.pptx
+Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.70.pptx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.69.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.71.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+
+### What changed in v1.71
+
+Counts stay 26 idle and 99 active. Idle is 10 tilt-and-azimuth, 11 fourth-sector, 3 new-site and 2 on-site EP checks. Active is 42 tilt-and-azimuth, 45 fourth-sector, 12 new-site and 0 on-site EP checks. Inside the idle tilt-and-azimuth group, 6 spots turn an azimuth and 4 leave it.
+
+- On site EP Check replaces a retune when the nearest site already faces the red road, within 12°, and that sector is missing from the log while another sector of the same site is on air. Idle Bad Spot 2 checks BOSDR07C, dump azimuth 350°. Idle Bad Spot 15 checks GBSGT03B, dump azimuth 150°. The serving cell on Idle Bad Spot 2 stays BOSDR96L21C. No active spot has this pattern.
+- A new site still puts one sector on the bad spot. The other two sectors aim at the higher population around the site, and every pair of sectors is at least 40° apart. The bad-spot sector is 180° because the site sits just north of the spot.
+- The Cover serving-cell column, and the same line on the example slides, is the cell that served the red samples. The sector column stays the sector in the solution.
+- Two or more cell actions are numbered, one action on each line, in the Cover sheet and on the slides.
 
 ### What changed in v1.69
 

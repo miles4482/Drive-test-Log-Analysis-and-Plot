@@ -724,6 +724,34 @@ def _not_required(reason: str) -> str:
     return "Not required. " + reason
 
 
+# A sector this close to the bearing is already facing the red road.
+FACE_ON_ROAD_DEG = 12.0
+# New-site sectors stay at least this far apart. One sector aims at the bad spot.
+NEW_SITE_MIN_GAP_DEG = 40.0
+_SEEN_SECTORS: dict[str, set[str]] = {}
+
+
+def remember_seen_sectors(mode: str, samples: pd.DataFrame) -> None:
+    """Sectors decoded in this mode. Idle is every scanner cell. Active is the serving cell."""
+    if samples is None or samples.empty or "Cell Id" not in samples.columns:
+        _SEEN_SECTORS[mode] = set()
+        return
+    work = samples.dropna(subset=["Cell Id"])
+    if "DL EARFCN" in work.columns:
+        pairs = work[["Cell Id", "DL EARFCN"]].drop_duplicates()
+        ears = pairs["DL EARFCN"]
+    else:
+        pairs = work[["Cell Id"]].drop_duplicates()
+        ears = [None] * len(pairs)
+    seen: set[str] = set()
+    for eci, ear in zip(pairs["Cell Id"], ears):
+        cell = _resolve_serving_cell(eci, ear)
+        sector = "" if cell is None else str(cell.get("sector") or "")
+        if sector:
+            seen.add(sector)
+    _SEEN_SECTORS[mode] = seen
+
+
 # Azimuth and tilt are used when a sector is within about 2 to 2.5 km.
 # A 4th sector is required in the null inside 1.5 km. It also replaces a new site
 # when a host inside 3 km can aim at the bad spot. Downtilt is limited to 2°.
@@ -909,25 +937,73 @@ def _tune_action(item: dict) -> dict:
     }
 
 
+def _azimuth_gap(left: float, right: float) -> float:
+    """Smallest angle between two azimuths, in degrees."""
+    return abs(_signed_deg(left, right))
+
+
+def _new_site_azimuths(site_lat: float, site_lon: float, face: float) -> list[tuple[float, float]]:
+    """One sector on the bad spot, two toward the higher population, gaps at least 40°.
+
+    Returns (azimuth, people per km²) with the bad-spot sector first. Equal spacing
+    is used only when the population grid has no people to choose between.
+    """
+    face = face % 360.0
+    face_pop = _wedge_population(site_lat, site_lon, face)
+    candidates = []
+    for deg in range(0, 360, 5):
+        if _azimuth_gap(face, deg) < NEW_SITE_MIN_GAP_DEG:
+            continue
+        candidates.append((float(deg), _wedge_population(site_lat, site_lon, deg)))
+    best: tuple[float, float, float] | None = None
+    for index, (az1, pop1) in enumerate(candidates):
+        for az2, pop2 in candidates[index + 1 :]:
+            if _azimuth_gap(az1, az2) < NEW_SITE_MIN_GAP_DEG:
+                continue
+            score = pop1 + pop2
+            if best is None or score > best[0]:
+                best = (score, az1, az2)
+    if best is None or best[0] <= 0:
+        offsets = (0.0, 120.0, 240.0)
+        return [( (face + offset) % 360.0, _wedge_population(site_lat, site_lon, (face + offset) % 360.0)) for offset in offsets]
+    second, third = best[1], best[2]
+    return [
+        (face, face_pop),
+        (second, _wedge_population(site_lat, site_lon, second)),
+        (third, _wedge_population(site_lat, site_lon, third)),
+    ]
+
+
 def _new_site_text(lat: float, lon: float, red_lat: float, red_lon: float, sectors: list[dict]) -> tuple[str, str]:
     site_lat = lat + 0.18 / 111.32
     site_lon = lon
     face = _bearing_deg(site_lat, site_lon, red_lat, red_lon)
-    azimuths = [face % 360.0, (face + 120.0) % 360.0, (face + 240.0) % 360.0]
+    planned = _new_site_azimuths(site_lat, site_lon, face)
+    azimuths = [az for az, _pop in planned]
     near = min(
         (float(_equirect_km(rec["lat"], rec["lon"], site_lat, site_lon)) for rec in sectors),
         default=5.0,
     )
     face_tilt = int(round(min(10.0, max(2.0, _ground_tilt_deg(30.0, 0.25)))))
     outer_tilt = int(round(min(8.0, max(2.0, _ground_tilt_deg(30.0, max(near / 2.0, 0.6))))))
-    arms = ", ".join(
-        f"{az:.0f}° E_tilt {face_tilt if i == 0 else outer_tilt}° M_tilt 0°"
-        for i, az in enumerate(azimuths)
-    )
+    ordered = sorted(azimuths)
+    gaps = [((ordered[(i + 1) % 3] - az) % 360.0) for i, az in enumerate(ordered)]
+    gap_text = ", ".join(f"{gap:.0f}°" for gap in gaps)
+    sentences = []
+    for index, (az, pop) in enumerate(planned):
+        tilt = face_tilt if index == 0 else outer_tilt
+        if index == 0:
+            aim = "aims at the bad spot"
+        else:
+            aim = f"aims toward the higher population, {_people(pop)}"
+        sentences.append(
+            f"New L900 sector at {az:.0f}°, E_tilt {tilt}°, M_tilt 0°, {aim}."
+        )
     text = (
-        f"New 3-sector L900 site at {site_lat:.5f}, {site_lon:.5f}. "
-        f"Sectors {arms}. The nearest existing site is {near:.1f} km away, "
-        f"and the outer tilts land short of it."
+        " ".join(sentences)
+        + f" The site is at {site_lat:.5f}, {site_lon:.5f}. "
+        + f"The nearest existing site is {near:.1f} km away. "
+        + f"The gaps between the sectors are {gap_text}."
     )
     where = f"New site {site_lat:.5f}, {site_lon:.5f}"
     actions = []
@@ -1682,7 +1758,8 @@ def _number_actions(text: str) -> str:
     """Number the cell actions when a spot changes more than one cell.
 
     Tilt and azimuth sentences that belong to the same cell stay in one point.
-    A new point starts at the next cell, new sector, or new site.
+    A new point starts at the next cell, new sector, or new site. Each point is
+    its own line.
     """
     parts = [part.strip() for part in re.split(r"(?<=\.)\s+", text.strip()) if part.strip()]
     points: list[str] = []
@@ -1698,10 +1775,9 @@ def _number_actions(text: str) -> str:
             points.append(sentence)
     if len(points) < 2:
         return text.strip()
-    numbered = " ".join(f"{number}. {sentence}" for number, sentence in enumerate(points, start=1))
-    if tail:
-        numbered += " " + " ".join(tail)
-    return numbered
+    lines = [f"{number}. {sentence}" for number, sentence in enumerate(points, start=1)]
+    lines.extend(tail)
+    return "\n".join(lines)
 
 
 def _round_proposed(row: dict) -> dict:
@@ -1737,6 +1813,95 @@ def _companion_final(chosen: list[dict]) -> tuple[str, str, str, str]:
             parts.append(f"azimuth {float(rec['azimuth']):.0f}° to {new_az:.0f}°")
         bits.append(", ".join(parts))
     return "", "", "", "; ".join(bits) + "."
+
+
+def _facing_for_ep_check(sites: list[dict], seen: set[str]) -> dict | None:
+    """Nearest site already faces the red road, but that sector is absent from this log.
+
+    The other sectors of the same site have to be present, so a site the drive
+    never reached is left alone. The check is the physical azimuth and whether
+    the sector is radiating.
+    """
+    if not sites or sites[0]["dist"] > TUNE_KM:
+        return None
+    site = sites[0]
+    facing = None
+    for rec in site["recs"]:
+        if rec.get("azimuth") is None:
+            continue
+        off = abs(_signed_deg(float(rec["azimuth"]), site["bearing"]))
+        reach = _layer_reach_km(rec.get("layer") or "")
+        if off > FACE_ON_ROAD_DEG or site["dist"] > reach:
+            continue
+        if facing is None or off < facing["off"]:
+            facing = {"site": site, "rec": rec, "off": off, "dist": site["dist"]}
+    if facing is None:
+        return None
+    sector = str(facing["rec"].get("sector") or "")
+    if not sector or sector in seen:
+        return None
+    siblings = []
+    for rec in site["recs"]:
+        name = str(rec.get("sector") or "")
+        if name and name != sector and name in seen and name not in siblings:
+            siblings.append(name)
+    if not siblings:
+        return None
+    facing["siblings"] = siblings
+    return facing
+
+
+def _ep_check_choice(hit: dict, spot_pop: float, mode: str) -> dict:
+    """Replace a radio retune when the facing sector is missing from the log."""
+    rec = hit["rec"]
+    site = hit["site"]
+    sector = str(rec.get("sector") or "")
+    cell = str(rec.get("name") or sector)
+    log = "active" if "active" in mode.lower() else "idle"
+    siblings = ", ".join(hit["siblings"])
+    text = (
+        f"On site EP Check. {sector} is {hit['dist']:.1f} km from the red road. "
+        f"The dump azimuth is {float(rec['azimuth']):.0f}°, {hit['off']:.0f}° off the road, "
+        f"so this sector should be the dominant server. The {log} log does not decode {sector}, "
+        f"while {siblings} on the same site are on air. Check on site that the antenna azimuth "
+        f"is {float(rec['azimuth']):.0f}° and that the sector is radiating."
+    )
+    steps = [
+        {"step": "1", "action": "E-tilt / M-tilt", "proposal": _not_required(
+            "Tilt is not changed until the site check confirms the sector is on air and the azimuth is the dump value."
+        )},
+        {"step": "2", "action": "Azimuth", "proposal": "Final. " + text},
+        {"step": "3", "action": "4th sector, L900", "proposal": _not_required(
+            "A 4th sector is not added while the facing sector may be off air or on a different azimuth."
+        )},
+        {"step": "4", "action": "New 3-sector site", "proposal": _not_required(
+            f"Population on the spot is {_people(spot_pop)}. A new site is not planned until the existing sector is checked."
+        )},
+    ]
+    return {
+        "kind": "ep",
+        "site": site["name"],
+        "final": text,
+        "steps": steps,
+        "draw": None,
+        "actions": [{
+            "site": site["name"],
+            "sector": sector,
+            "cell": cell,
+            "height": _ep_num(rec.get("height")),
+            "azimuth": _ep_num(rec.get("azimuth")),
+            "et": _ep_num(rec.get("etilt")),
+            "mt": _ep_num(rec.get("mtilt")),
+            "p_height": _ep_num(rec.get("height")),
+            "p_azimuth": None,
+            "p_et": None,
+            "p_mt": None,
+            "action": "On site EP Check",
+        }],
+        "overshoot_marks": {},
+        "azimuth_overrides": {},
+        "spared": [],
+    }
 
 
 def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series, mode: str = "") -> dict:
@@ -1831,6 +1996,16 @@ def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series, mode: s
     far = _overshoot_rows(served, sites)
     plan_mode = "Active" if "active" in str(mode).lower() else ("Idle" if "idle" in str(mode).lower() else "")
     choice = _prefer_overshoot(choice, served, sites, spot_pop, plan_mode)
+    seen = _SEEN_SECTORS.get(plan_mode)
+    if seen is not None:
+        silent = _facing_for_ep_check(sites, seen)
+        if silent is not None:
+            choice = _ep_check_choice(silent, spot_pop, plan_mode)
+    serving_names: list[str] = []
+    for row in served:
+        name = str(row["cell"].get("name") or "").strip()
+        if name and name not in serving_names:
+            serving_names.append(name)
     spared = choice.get("spared") or []
     if far:
         names = "; ".join(
@@ -1851,7 +2026,10 @@ def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series, mode: s
     steps = []
     for step in choice.get("steps") or []:
         step = dict(step)
-        step["proposal"] = _whole_degrees(step.get("proposal") or "")
+        proposal = _whole_degrees(step.get("proposal") or "")
+        if proposal.startswith("Final. "):
+            proposal = "Final. " + final
+        step["proposal"] = proposal
         steps.append(step)
     return {
         "finding": " ".join(finding_lines),
@@ -1859,6 +2037,7 @@ def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series, mode: s
         "steps": steps,
         "kind": choice["kind"],
         "site": choice["site"],
+        "serving": ", ".join(serving_names),
         "population": _people(spot_pop),
         "final": final,
         "draw": choice.get("draw"),
