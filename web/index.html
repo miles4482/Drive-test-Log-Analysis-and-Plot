@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bogura Drive Test Web v1.69</title>
+<title>Bogura Drive Test Web v1.73</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   html, body { margin: 0; height: 100%; font-family: "Segoe UI", Calibri, sans-serif; color: #1a1a1a; }
@@ -98,12 +98,15 @@
   .leaflet-popup-content { margin: 10px 12px; font-size: 13px; line-height: 1.45; }
   .leaflet-popup-content b { display: inline-block; width: 112px; }
   #status { margin-left: auto; font-size: 11px; opacity: 0.9; }
+  .bad-spot-copy { margin-top: 12px; }
+  .bad-spot-copy h2, .bad-spot-copy h3 { margin: 10px 0 4px; font-size: 13px; }
+  .bad-spot-copy p { margin: 0; white-space: normal; line-height: 1.35; }
 </style>
 </head>
 <body>
 <div id="app">
   <header>
-    <h1>Bogura coverage v1.69</h1>
+    <h1>Bogura coverage v1.73</h1>
     <label>Windows
       <select id="split">
         <option value="1" selected>1</option>
@@ -119,6 +122,7 @@
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="coverage_data.js"></script>
+<script src="bad_spot_descriptions.js"></script>
 <script>
 const RSRP_COLORS = ["#008000", "#00FF00", "#FFFF00", "#FF6666", "#FF0000"];
 const RSRP_LABELS = ["-95 to 0", "-110 to -95", "-115 to -110", "-120 to -115", "-150 to -120"];
@@ -990,9 +994,43 @@ function createView(host, preset) {
     panel.hidden = true;
     panel.innerHTML = "";
   }
+  function badSpotHtml(lat, lon) {
+    const spots = (typeof BAD_SPOTS === "undefined") ? [] : BAD_SPOTS;
+    if (!spots.length || lat === null || lon === null) return "";
+    const kmLat = 111.32;
+    const kmLon = 111.32 * Math.cos(lat * Math.PI / 180);
+    let best = null;
+    let bestScore = 1;
+    spots.forEach(function (spot) {
+      const width = Number(spot.width_km) || 0;
+      const height = Number(spot.height_km) || 0;
+      if (width <= 0 || height <= 0) return;
+      const dx = ((lon - spot.lon) * kmLon) / (width / 2);
+      const dy = ((lat - spot.lat) * kmLat) / (height / 2);
+      const score = dx * dx + dy * dy;
+      if (score <= 1 && score < bestScore) {
+        best = spot;
+        bestScore = score;
+      }
+    });
+    if (!best) return "";
+    function block(title, text) {
+      return "<h3>" + esc(title) + "</h3><p>" + esc(text || "").replace(/\n/g, "<br>") + "</p>";
+    }
+    return "<section class=\"bad-spot-copy\">" +
+      "<h2>" + esc(best.mode + " Bad Spot " + best.n) + "</h2>" +
+      block("Serving Cells details", best.serving) +
+      block("Bad Spot Details", best.geography) +
+      block("Root Cause Analysis", best.rca) +
+      block("Suggestions", best.suggestions) +
+      "</section>";
+  }
+
   function showInfo(index, pack) {
     const panel = q(".info-panel");
-    panel.innerHTML = infoTable(spotRows(pack, index));
+    const lat = pack.lat[index];
+    const lon = pack.lon[index];
+    panel.innerHTML = infoTable(spotRows(pack, index)) + badSpotHtml(lat, lon);
     panel.hidden = false;
     panel.querySelector(".info-close").addEventListener("click", clearInfo);
   }

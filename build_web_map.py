@@ -439,6 +439,12 @@ def package_web() -> Path:
         '<script src="coverage_data.js"></script>',
         "<script>\n" + DATA_JS.read_text() + "</script>",
     )
+    descriptions = WEB_DIR / "bad_spot_descriptions.js"
+    if descriptions.exists():
+        page = page.replace(
+            '<script src="bad_spot_descriptions.js"></script>',
+            "<script>\n" + descriptions.read_text() + "</script>",
+        )
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     dest = OUTPUT_DIR / f"Bogura_DriveTest_Web_v{version}.zip"
     inner = f"Bogura_DriveTest_Web_v{version}.html"

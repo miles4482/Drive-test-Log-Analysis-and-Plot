@@ -2023,6 +2023,9 @@ def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series, mode: s
     if blank_m >= 80:
         final = f"{final} This covers the red road and the {blank_m:,.0f} m blank."
     final = _whole_degrees(_number_actions(final))
+    sections = _spot_sections(
+        served, sites, spot, blank_m, spot_pop, target_lat, target_lon, choice, final,
+    )
     steps = []
     for step in choice.get("steps") or []:
         step = dict(step)
@@ -2044,6 +2047,128 @@ def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series, mode: s
         "actions": [_round_proposed(row) for row in (choice.get("actions") or [])],
         "overshoot_marks": choice.get("overshoot_marks") or {},
         "azimuth_overrides": choice.get("azimuth_overrides") or {},
+        "sections": sections,
+        "outline": {
+            "lat": float(spot.get("outline_lat", spot["lat"])),
+            "lon": float(spot.get("outline_lon", spot["lon"])),
+            "width_km": float(spot.get("outline_width_km") or 0),
+            "height_km": float(spot.get("outline_height_km") or 0),
+        },
+    }
+
+
+def _server_comment(layer: str, dist_km: float, off_deg: float) -> str:
+    """Why this serving cell is weak on the red samples."""
+    reach = _layer_reach_km(layer or "")
+    if off_deg >= 90:
+        return "The sample is behind the sector, so only a back lobe reaches it."
+    if off_deg >= 35:
+        return "The sample is outside the main beam, so this is a side-lobe server."
+    if dist_km > reach:
+        return f"It is past the {reach:.1f} km {layer} reach, so this is overshoot."
+    if off_deg <= 12:
+        return "It points near the road, but it is not a stable dominant server."
+    return "It is off the beam centre, so the serving signal is weak."
+
+
+def _spot_sections(
+    served: list[dict],
+    sites: list[dict],
+    spot: pd.Series,
+    blank_m: float,
+    spot_pop: float,
+    lat: float,
+    lon: float,
+    choice: dict,
+    final: str,
+) -> dict[str, str]:
+    """The four description blocks used on the Excel sheet, the PPT, and the web.
+
+    The engineering decision stays the one already chosen. The text only explains it:
+    one line per serving cell, the geography, the root cause, and the suggestion.
+    """
+    serving_lines = []
+    for index, row in enumerate(served[:8], start=1):
+        cell = row["cell"]
+        name = str(cell.get("name") or cell.get("sector") or "cell")
+        layer = str(cell.get("layer") or "")
+        height = cell.get("height")
+        height_bit = f", height {float(height):.0f} m" if height else ""
+        look = _ground_tilt_deg(height, row["dist"])
+        serving_lines.append(
+            f"{index}. {name} {layer}, {row['dist']:.2f} km, azimuth {float(cell['azimuth']):.0f}°, "
+            f"{row['off']:.0f}° off{height_bit}, look-down {look:.2f}°. "
+            f"{_server_comment(layer, row['dist'], row['off'])}"
+        )
+    extra = len(served) - 8
+    if extra > 0:
+        serving_lines.append(f"{len(serving_lines) + 1}. {extra} more serving cells are on the red samples.")
+    if not serving_lines:
+        serving_lines.append("1. No serving cell was decoded on the red samples.")
+
+    poor_m = float(spot.get("length_m") or 0)
+    geo = [
+        f"1. Poor run {poor_m:.0f} m."
+        + (f" Blank inside the circle {blank_m:,.0f} m." if blank_m >= 80 else " No driven blank inside the circle."),
+        f"2. Centre {lat:.5f}, {lon:.5f}. WorldPop 2020 {_people(spot_pop)}.",
+    ]
+    nearest_bits = []
+    for site in sites[:4]:
+        height = site.get("height")
+        height_bit = f", antenna {float(height):.0f} m" if height else ""
+        look = _ground_tilt_deg(height, site["dist"])
+        nearest_bits.append(f"{site['name']} {site['dist']:.2f} km{height_bit}, look-down {look:.2f}°")
+    if nearest_bits:
+        geo.append("3. Nearest sites: " + "; ".join(nearest_bits) + ".")
+    geo.append(
+        "4. No terrain model is loaded. Elevation here is antenna height and the flat-ground look-down angle."
+    )
+
+    kind = str(choice.get("kind") or "")
+    nearest = sites[0] if sites else None
+    near_bit = (
+        f"Nearest site {nearest['name']} is {nearest['dist']:.2f} km and {nearest['nearest_off']:.0f}° off the road."
+        if nearest else "No site was found near this spot."
+    )
+    if kind == "new":
+        cause = (
+            f"1. This is a coverage hole. The poor run is {poor_m:.0f} m"
+            + (f" and the blank is {blank_m:,.0f} m." if blank_m >= 80 else ".")
+            + f" {near_bit} No host inside 3 km can take a 4th sector."
+        )
+        cause += "\n2. The logged servers are side-lobe or overshoot signals. No cell holds the road."
+        cause += "\n3. Tilt cannot turn a beam or close a hole this far from the nearest site. A new 3-sector L900 site is the fix."
+    elif kind == "fourth":
+        cause = (
+            f"1. The poor run is {poor_m:.0f} m"
+            + (f" and the blank is {blank_m:,.0f} m." if blank_m >= 80 else ".")
+            + f" {near_bit}"
+        )
+        cause += "\n2. The road sits off the existing beams, so the samples are side-lobe or overshoot energy."
+        cause += "\n3. Tilt cannot rotate the beam onto the road. A 4th L900 sector on the host inside 3 km covers the hole."
+    elif kind == "ep":
+        cause = (
+            f"1. {near_bit} That sector already faces the red road, within 12°, but it is missing from the log while a sibling sector is on air."
+        )
+        cause += "\n2. A retune would aim a sector that may already be correct. The azimuth has to be checked on site."
+        cause += "\n3. The suggestion is On site EP Check. The proposed azimuth is left blank."
+    elif kind == "azimuth":
+        cause = (
+            f"1. The poor run is {poor_m:.0f} m. {near_bit}"
+        )
+        cause += "\n2. The existing sector is close enough to retune, and the miss is horizontal."
+        cause += "\n3. The azimuth turn below brings the beam onto the red road. Downtilt stays within 2°."
+    else:
+        cause = (
+            f"1. The poor run is {poor_m:.0f} m. {near_bit}"
+        )
+        cause += "\n2. A far cell is overshooting the red samples. The azimuth already faces the road."
+        cause += "\n3. Downtilt is limited to 2°. The beam is pulled back. The azimuth stays as it is."
+    return {
+        "serving": "\n".join(serving_lines),
+        "geography": "\n".join(geo),
+        "rca": cause,
+        "suggestions": final,
     }
 
 

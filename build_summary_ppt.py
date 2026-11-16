@@ -26,9 +26,10 @@ from pptx.util import Emu, Inches, Pt
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
-REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.72.xlsx"
+REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.73.xlsx"
 PLOTS = OUTPUT / "plots"
-SUMMARY_VERSION = "1.72"
+DESCRIPTIONS = OUTPUT / "bad_spot_descriptions.json"
+SUMMARY_VERSION = "1.73"
 DEST = OUTPUT / f"Bogura_DriveTest_Summary_v{SUMMARY_VERSION}.pptx"
 CIRCLES = PLOTS / "bad_spot_circles.json"
 
@@ -277,7 +278,7 @@ def _text(slide, left, top, width, height, text: str, size: int, color: RGBColor
 def _footer(slide, page: int, pages: int) -> None:
     _text(
         slide, Inches(0.4), Inches(7.18), Inches(10), Inches(0.24),
-        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.72  ·  Web v1.69",
+        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.73  ·  Web v1.73",
         11, MUTED,
     )
     _text(
@@ -490,12 +491,28 @@ def _bad_summary(prs: Presentation, page: int, pages: int, groups: list[dict]) -
         "The azimuth is not changed. The site is checked.\n"
         "A group of 5 or fewer shows every spot. A larger group shows the first 5. "
         "When a spot changes more than one cell, each action is its own numbered line.\n"
-        "The example box shows only the serving cell, the cell that served the red samples. "
+        "The example box uses the same four blocks as the Excel sheet: Serving Cells details, "
+        "Bad Spot Details, Root Cause Analysis, and Suggestions. "
         "A turned sector keeps its current arm. The proposed azimuth is a blue dashed arm labeled with the new degree. "
         "On the example slides, a tenth of a degree is shown as the nearest whole degree. 0.5 rounds up.",
         14, INK,
     )
     _footer(slide, page, pages)
+
+
+def _block_heights(blocks: tuple, panel_w: float, size: int) -> list[float]:
+    """Height of each label-plus-body block, including wrapped lines."""
+    chars = max(40, int(panel_w * 72 / (size * 0.50)))
+    heights = []
+    for _label, value in blocks:
+        paragraphs = str(value).split("\n") or [""]
+        lines = 0
+        for paragraph in paragraphs:
+            length = max(1, len(paragraph))
+            lines += max(1, (length + chars - 1) // chars)
+        body = (lines * size * 1.15 + max(0, len(paragraphs) - 1) * 3) / 72
+        heights.append(0.20 + body + 0.04)
+    return heights
 
 
 def _example(prs: Presentation, group: dict, item: dict, record: dict[str, str], ordinal: int, page: int, pages: int) -> None:
@@ -524,23 +541,43 @@ def _example(prs: Presentation, group: dict, item: dict, record: dict[str, str],
     panel = 7.05
     panel_w = 5.95
     _text(
-        slide, Inches(panel), Inches(0.66), Inches(panel_w), Inches(0.28),
+        slide, Inches(panel), Inches(0.62), Inches(panel_w), Inches(0.26),
         f"Proposed Solutions : {SOLUTION_LABEL[group['solution']]}", 13, color, True,
     )
-    _text(slide, Inches(panel), Inches(0.98), Inches(panel_w), Inches(0.85), item["why"], 12, INK)
-    value = record.get("E", "")
-    lines = max(1, min(4, (len(value) + 39) // 40))
-    height = 0.22 * lines
-    top = 1.9
-    _text(slide, Inches(panel), Inches(top), Inches(1.35), Inches(height), "Serving cell", 11, MUTED, True)
-    _text(slide, Inches(panel + 1.35), Inches(top), Inches(panel_w - 1.35), Inches(height), value, 12, INK)
-    top += height + 0.08
-    _text(slide, Inches(panel), Inches(top + 0.04), Inches(panel_w), Inches(0.22), "FINAL SOLUTION  ·  NEAREST DEGREE", 11, color, True)
-    solution = _whole_degrees(record.get("H", ""))
-    size = 11 if len(solution) > 420 else 12
-    _box(slide, Inches(panel), Inches(top + 0.28), Inches(panel_w), Inches(7.05 - (top + 0.28)), PAPER, LINE)
-    _text(slide, Inches(panel + 0.1), Inches(top + 0.34), Inches(panel_w - 0.2), Inches(6.95 - (top + 0.34)), solution, size, INK)
+    sections = _description(group["mode"], item["n"])
+    blocks = (
+        ("Serving Cells details", sections.get("serving") or record.get("E", "")),
+        ("Bad Spot Details", sections.get("geography") or ""),
+        ("Root Cause Analysis", sections.get("rca") or ""),
+        ("Suggestions", sections.get("suggestions") or _whole_degrees(record.get("H", ""))),
+    )
+    # Long serving lists wrap inside the panel. Pick the largest body size that
+    # still keeps all four blocks above the footer, so the slide shows the same
+    # text as the Excel sheet.
+    available = 7.05 - 0.90
+    size = 10
+    heights = _block_heights(blocks, panel_w, size)
+    while size > 8 and sum(heights) > available:
+        size -= 1
+        heights = _block_heights(blocks, panel_w, size)
+    top = 0.90
+    for (label, value), height in zip(blocks, heights):
+        _text(slide, Inches(panel), Inches(top), Inches(panel_w), Inches(0.20), label, 11, color, True)
+        _text(slide, Inches(panel), Inches(top + 0.20), Inches(panel_w), Inches(height - 0.20), value, size, INK)
+        top += height
     _footer(slide, page, pages)
+
+
+def _description(mode: str, number: int) -> dict[str, str]:
+    """The four blocks written beside the same bad spot in the Excel workbook."""
+    if not DESCRIPTIONS.exists():
+        return {}
+    if not hasattr(_description, "rows"):
+        rows = {}
+        for item in json.loads(DESCRIPTIONS.read_text()):
+            rows[(item["mode"], int(item["n"]))] = item
+        _description.rows = rows
+    return _description.rows.get((mode, number), {})
 
 
 def _annex(prs: Presentation, page: int, pages: int) -> None:
@@ -793,7 +830,7 @@ def _annex_workbook(prs: Presentation, page: int, pages: int, groups: list[dict]
     if partial:
         deck += "Samples: " + ", ".join(partial) + "."
     rows = [
-        ("Excel v1.72", "A map, a suggestion table and a movable circle for every idle and active bad spot. The Cover sheet lists every spot. A turned sector keeps its current arm, and the proposed azimuth is a blue dashed arm. An on-site check leaves the proposed azimuth blank."),
+        ("Excel v1.73", "A map and the same four blocks for every idle and active bad spot: serving cells, geography, root cause, and suggestions. The PPT example uses those blocks. A turned sector keeps its current arm. The proposed azimuth is a blue dashed arm."),
         ("This deck", deck),
         ("Web v1.69", "The live map is unchanged. Site names are white with a dark edge. Sector names on that map stay small. With KPI set to Blank, Info on a sector or the site centre opens the cell table."),
         ("RSRQ and SINR", "The coverage maps are in this deck. The workbook no longer has separate RSRQ or SINR bad-spot sheets. Poor RSRQ is at or below −20 dB. Poor SINR is at or below 0 dB."),

@@ -89,7 +89,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.72"
+REPORT_VERSION = "1.73"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -1478,51 +1478,39 @@ def _zoom_display_height(path: Path | None, spots: pd.DataFrame, width: int = 86
 
 
 def place_bad_spot_advice(ws, header_row: int, plan: dict) -> None:
-    """Suggestion table on the right of one bad-spot map.
+    """Four description blocks on the right of one bad-spot map.
 
     Row heights stay at the default, so the movable circle on that map stays put.
+    A full rebuild uses this path. The XML graft in write_bad_spot_advice uses the
+    same titles, the same row spans, and the same text.
     """
     title = header_row + 2
-    find = header_row + 4
-    head = header_row + 10
+    sections = plan.get("sections") or {}
+    blocks = (
+        ("Serving Cells details", sections.get("serving") or plan.get("serving") or ""),
+        ("Bad Spot Details", sections.get("geography") or ""),
+        ("Root Cause Analysis", sections.get("rca") or plan.get("finding") or ""),
+        ("Suggestions", sections.get("suggestions") or plan.get("final") or ""),
+    )
+    spans = (8, 5, 5, 6)
     ws.merge_cells(start_row=title, start_column=9, end_row=title, end_column=16)
     write_cell(
-        ws, title, 9, "Suggestions and solutions",
+        ws, title, 9, "Bad spot description",
         size=11, bold=True, color=NAVY, fill_color=LIGHT, align="center",
     )
     for col in range(9, 17):
         ws.cell(title, col).fill = fill(LIGHT)
         ws.cell(title, col).font = font(11, bold=True, color=NAVY)
         ws.cell(title, col).alignment = Alignment(horizontal="center", vertical="center")
-    ws.merge_cells(start_row=find, start_column=9, end_row=find + 4, end_column=9)
-    ws.merge_cells(start_row=find, start_column=10, end_row=find + 4, end_column=16)
-    write_cell(ws, find, 9, "Findings", size=11, bold=True, color=NAVY, align="center", wrap=True)
-    write_cell(ws, find, 10, plan.get("finding", ""), size=11, color=NAVY, align="left", wrap=True)
-    ws.cell(find, 9).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    ws.cell(find, 10).alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-    ws.merge_cells(start_row=head, start_column=10, end_row=head, end_column=11)
-    ws.merge_cells(start_row=head, start_column=12, end_row=head, end_column=16)
-    for col, text in ((9, "Step"), (10, "Action"), (12, "Proposal")):
-        write_cell(ws, head, col, text, size=11, bold=True, color=NAVY, fill_color=LIGHT, align="center")
-        ws.cell(head, col).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        ws.cell(head, col).border = THIN
-    for col in range(9, 17):
-        ws.cell(head, col).fill = fill(LIGHT)
-        ws.cell(head, col).border = THIN
-        ws.cell(head, col).font = font(11, bold=True, color=NAVY)
-    for index, step in enumerate(plan.get("steps") or []):
-        row = head + 1 + index * 4
-        ws.merge_cells(start_row=row, start_column=9, end_row=row + 3, end_column=9)
-        ws.merge_cells(start_row=row, start_column=10, end_row=row + 3, end_column=11)
-        ws.merge_cells(start_row=row, start_column=12, end_row=row + 3, end_column=16)
-        write_cell(ws, row, 9, step.get("step", ""), size=12, bold=True, color=NAVY, align="center", wrap=True)
-        write_cell(ws, row, 10, step.get("action", ""), size=11, bold=True, color=NAVY, align="center", wrap=True)
-        write_cell(ws, row, 12, step.get("proposal", ""), size=11, color=NAVY, align="left", wrap=True)
-        for col in (9, 10, 12):
-            ws.cell(row, col).alignment = Alignment(
-                horizontal="center" if col < 12 else "left", vertical="top", wrap_text=True,
-            )
-            ws.cell(row, col).border = THIN
+    row = title + 1
+    for (label, text), span in zip(blocks, spans):
+        ws.merge_cells(start_row=row, start_column=9, end_row=row + span, end_column=9)
+        ws.merge_cells(start_row=row, start_column=10, end_row=row + span, end_column=16)
+        write_cell(ws, row, 9, label, size=11, bold=True, color=NAVY, align="center", wrap=True)
+        write_cell(ws, row, 10, text, size=11, color=NAVY, align="left", wrap=True)
+        ws.cell(row, 9).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        ws.cell(row, 10).alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        row += span + 1
 
 
 def build_kpi_bad_spot_sheet(
@@ -2897,12 +2885,12 @@ def refresh_sheet_maps(src: Path | None = None) -> Path:
 
 
 _ADVICE_NOTE_OLD = (
-    "The columns to the right of each map are a suggestion table. Azimuth and tilt are used when a sector is within about 2.5 km, and downtilt is limited to 2°. A larger downtilt becomes a 4th L900 sector on a site within 1 km. A 4th sector also replaces a new site when a host inside 4 km can aim at the bad spot. A new 3-sector site is kept only when the nearest site is farther than that. A blank with no plot inside the circle is counted with that bad spot.",
+    "The columns to the right of each map are a suggestion table. Azimuth and tilt are used when a sector is within about 2.5 km, and downtilt is limited to 2°. A larger downtilt becomes a 4th L900 sector on a site within 1 km. A 4th sector also replaces a new site when a host inside 3 km can aim at the bad spot. A new 3-sector site is kept only when the nearest site is farther than that. A blank with no plot inside the circle is counted with that bad spot.",
     "The space to the right of each map is that suggestion table. Site, Population and Final solution are filled for every bad spot in the table below. A blank with no plot inside the circle is counted with that bad spot.",
 )
 _ADVICE_NOTE_NEW = (
-    "The columns to the right of each map are a suggestion table. Azimuth and tilt are used when a sector is within about 2.5 km, and downtilt is limited to 2°. A larger downtilt becomes a 4th L900 sector on a site within 1 km. A 4th sector also replaces a new site when a host inside 3 km can aim at the bad spot. A new 3-sector site is kept only when the nearest site is farther than that. A blank with no plot inside the circle is counted with that bad spot.",
-    "The space to the right of each map is that suggestion table. Site, Population and Final solution are filled for every bad spot in the table below. A blank with no plot inside the circle is counted with that bad spot.",
+    "The columns to the right of each map are Serving Cells details, Bad Spot Details, Root Cause Analysis, and Suggestions. Azimuth and tilt are used when a sector is within about 2.5 km, and downtilt is limited to 2°. A 4th sector replaces a new site when a host inside 3 km can aim at the bad spot. A blank with no plot inside the circle is counted with that bad spot.",
+    "The space to the right of each map is that description. Site, Population and Final solution are filled for every bad spot in the table below. A blank with no plot inside the circle is counted with that bad spot.",
 )
 _DROP_BAD_SPOT_SHEETS = (
     "Bad Spot RSRQ",
@@ -2922,10 +2910,20 @@ def _xml_text(value: str) -> str:
 
 
 def _advice_sheet_rows(header: int, plan: dict) -> tuple[dict[int, str], list[str]]:
-    """Inline cells for the suggestion table beside one bad-spot map."""
+    """Four description blocks beside one bad-spot map.
+
+    The block stays inside the rows reserved for this spot, so the next map
+    and its movable circle are left where they are.
+    """
     title = header + 2
-    find = header + 4
-    head = header + 10
+    sections = plan.get("sections") or {}
+    blocks = (
+        ("Serving Cells details", sections.get("serving") or plan.get("serving") or ""),
+        ("Bad Spot Details", sections.get("geography") or ""),
+        ("Root Cause Analysis", sections.get("rca") or plan.get("finding") or ""),
+        ("Suggestions", sections.get("suggestions") or plan.get("final") or ""),
+    )
+    spans = (8, 5, 5, 6)
 
     def cell(ref: str, style: int, text: str | None = None) -> str:
         if text is None:
@@ -2939,43 +2937,20 @@ def _advice_sheet_rows(header: int, plan: dict) -> tuple[dict[int, str], list[st
         return f'<row r="{row}">{"".join(cells)}</row>'
 
     rows = {
-        title: styled_row(title, [cell(f"I{title}", 32, "Suggestions and solutions")] + [
+        title: styled_row(title, [cell(f"I{title}", 32, "Bad spot description")] + [
             cell(f"{get_column_letter(col)}{title}", 32) for col in range(10, 17)
         ]),
-        find: styled_row(find, [
-            cell(f"I{find}", 36, "Findings"),
-            cell(f"J{find}", 37, plan.get("finding", "")),
-        ]),
-        head: styled_row(head, [
-            cell(f"I{head}", 35, "Step"),
-            cell(f"J{head}", 35, "Action"),
-            cell(f"K{head}", 35),
-            cell(f"L{head}", 35, "Proposal"),
-            cell(f"M{head}", 35),
-            cell(f"N{head}", 35),
-            cell(f"O{head}", 35),
-            cell(f"P{head}", 35),
-        ]),
     }
-    merges = [
-        f"I{title}:P{title}",
-        f"I{find}:I{find + 4}",
-        f"J{find}:P{find + 4}",
-        f"J{head}:K{head}",
-        f"L{head}:P{head}",
-    ]
-    for index, step in enumerate(plan.get("steps") or []):
-        row = head + 1 + index * 4
+    merges = [f"I{title}:P{title}"]
+    row = title + 1
+    for (label, text), span in zip(blocks, spans):
         rows[row] = styled_row(row, [
-            cell(f"I{row}", 36, str(step.get("step", ""))),
-            cell(f"J{row}", 36, str(step.get("action", ""))),
-            cell(f"L{row}", 37, str(step.get("proposal", ""))),
+            cell(f"I{row}", 36, label),
+            cell(f"J{row}", 37, text),
         ])
-        merges.extend((
-            f"I{row}:I{row + 3}",
-            f"J{row}:K{row + 3}",
-            f"L{row}:P{row + 3}",
-        ))
+        merges.append(f"I{row}:I{row + span}")
+        merges.append(f"J{row}:P{row + span}")
+        row += span + 1
     return rows, merges
 
 
@@ -3671,6 +3646,37 @@ def _ensure_ep_sheet(parts: dict[str, bytes]) -> None:
         parts["[Content_Types].xml"] = content.encode("utf-8")
 
 
+def _write_bad_spot_descriptions(advice_for: dict[str, list[dict]]) -> Path:
+    """Same four sections for the PPT and the web. The Excel sheet is grafted separately."""
+    import json
+
+    records = []
+    for sheet, plans in advice_for.items():
+        mode = "Active" if "Active" in sheet else "Idle"
+        for index, plan in enumerate(plans, start=1):
+            sections = plan.get("sections") or {}
+            outline = plan.get("outline") or {}
+            records.append({
+                "mode": mode,
+                "n": index,
+                "kind": plan.get("kind"),
+                "lat": outline.get("lat"),
+                "lon": outline.get("lon"),
+                "width_km": outline.get("width_km"),
+                "height_km": outline.get("height_km"),
+                "serving": sections.get("serving") or "",
+                "geography": sections.get("geography") or "",
+                "rca": sections.get("rca") or "",
+                "suggestions": sections.get("suggestions") or plan.get("final") or "",
+            })
+    dest = OUTPUT_DIR / "bad_spot_descriptions.json"
+    dest.write_text(json.dumps(records, ensure_ascii=False))
+    web_js = Path(__file__).resolve().parent / "web" / "bad_spot_descriptions.js"
+    web_js.write_text("const BAD_SPOTS = " + json.dumps(records, ensure_ascii=False) + ";\n")
+    print(f"Wrote {dest} and {web_js} ({len(records)} spots)", flush=True)
+    return dest
+
+
 def write_bad_spot_advice(src: Path | None = None) -> Path:
     """Graft the findings table onto the six bad-spot sheets without rewriting the file.
 
@@ -3711,6 +3717,7 @@ def write_bad_spot_advice(src: Path | None = None) -> Path:
         for plan in advice_for[sheet]:
             kinds[plan["kind"]] = kinds.get(plan["kind"], 0) + 1
         print(f"  {len(advice_for[sheet])} spots {kinds}", flush=True)
+    _write_bad_spot_descriptions(advice_for)
 
     with zipfile.ZipFile(src) as zf:
         names = zf.namelist()
@@ -3724,13 +3731,13 @@ def write_bad_spot_advice(src: Path | None = None) -> Path:
         headers = [
             (int(row), int(number))
             for row, number in re.findall(
-                r'<c r="A(\d+)"[^>]*>\s*<is><t>Bad Spot (\d+)</t>',
+                r'<c r="A(\d+)"[^>]*>\s*<is><t(?:\s[^>]*)?>Bad Spot (\d+)</t>',
                 xml,
             )
         ]
-        if len(headers) > len(pairs):
+        if len(headers) != len(pairs):
             raise SystemExit(f"{sheet}: {len(headers)} headers, {len(pairs)} advice rows")
-        map_plans = pairs[: len(headers)]
+        map_plans = pairs
         rows: dict[int, str] = {}
         merges: list[str] = []
         xml = _strip_advice_rows(xml, headers)
@@ -3749,6 +3756,11 @@ def write_bad_spot_advice(src: Path | None = None) -> Path:
                     raise SystemExit(f"{sheet}: missing note sentence {old!r}")
                 continue
             xml = xml.replace(old, new)
+        written = xml.count(">Serving Cells details<")
+        if written != len(headers):
+            raise SystemExit(
+                f"{sheet}: wrote Serving Cells details {written} times for {len(headers)} bad spots"
+            )
         sheet_xml[sheet] = xml.encode("utf-8")
     # write the updated sheet bytes back onto their zip paths
     main = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
