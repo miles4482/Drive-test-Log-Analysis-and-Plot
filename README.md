@@ -117,13 +117,13 @@ The Cover sheet keeps the Idle dataset, KPI table, and Idle histograms. Under Ac
 
 Every coverage map and bad-spot map is drawn on Esri World Imagery. The combined view is the satellite route only: no circle is painted into it and no circle shape is placed on it. Bad Spot 1, Bad Spot 2, and the rest follow down the left side of the sheet, each a larger map with one movable circle. A site that falls in that view is drawn as a transparent cyan outline, one arm per sector, with the Sector name at the end of the arm and no fill. A circle is at most 10 km across. Where the poor road is in separate pockets, several circles sit inside that 10 km neighbourhood.
 
-## Web coverage map (v1.67)
+## Web coverage map (v1.69)
 
-Download, unzip, and open `Bogura_DriveTest_Web_v1.67.html`. Site names are white with a dark edge so they stay readable on the satellite picture. Sector names on this map stay small. The larger sector names are on the bad-spot maps only. With KPI set to Blank, turn on Info and click a sector or the site centre to open the cell table.
+Download, unzip, and open `Bogura_DriveTest_Web_v1.69.html`. Site names are white with a dark edge so they stay readable on the satellite picture. Sector names on this map stay small. The larger sector names are on the bad-spot maps only. With KPI set to Blank, turn on Info and click a sector or the site centre to open the cell table. The coverage dots are unchanged from v1.67. This publish only moves the version.
 
-**v1.67 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.67.zip
+**v1.69 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.69.zip
 
-Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.66.zip
+Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.67.zip
 
 Previous web: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.63.zip
 
@@ -138,31 +138,43 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
-## Download Excel report (v1.67)
+## Download Excel report (v1.69)
 
-**v1.67 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.67.xlsx
+**v1.69 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.69.xlsx
 
 Latest copy: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report.xlsx
 
-GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.67.xlsx
+GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/blob/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.69.xlsx
 
-Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.66.xlsx
+Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.67.xlsx
 
-The web map is v1.67. The summary presentation is v1.68.
+The web map is v1.69. The summary presentation is v1.69.
 
-## Summary presentation (v1.68)
+## Summary presentation (v1.69)
 
-The deck opens with the drive summary, then the RSRP, RSRQ and SINR plots with the plotted-sample shares. The bad-spot summary comes next. Active then has 5 azimuth, 5 tilt, 5 fourth-sector and 5 new-site examples. Idle has every azimuth turn (4), 5 tilts, 5 fourth sectors and every new site (3). One slide named Annex follows the last example. The slides after it hold the rounding rule, how a solution is chosen, the map key, and the check that every red sample inside the circle is included.
+The first slide is a report page: the DT route table, then RSRP, RSRQ and SINR each as a short table and a share chart. The bad-spot summary is the second slide. The geographic RSRP, RSRQ and SINR maps follow. Active then has 5 azimuth, 5 tilt, 5 fourth-sector and 5 new-site examples. Idle has 5 of 7 azimuth turns, all 4 tilt-only spots, 5 fourth sectors and all 3 new sites. One slide named Annex follows the last example. The slides after it hold the rounding rule, how a solution is chosen, the map key, and the check that every red sample inside the circle is included.
 
-Proposed azimuth, E_tilt and M_tilt on these slides are the nearest whole degree. Half a degree rounds up. The next workbook publish must use that same rounding on the proposed value. The dump value stays as measured. Later report builds also keep the check on every red bin inside the orange circle.
+Proposed azimuth, E_tilt and M_tilt are the nearest whole degree in the workbook and on the slides. Half a degree rounds up. The dump value stays as measured. Later report builds also keep the check on every red bin inside the orange circle.
 
-**v1.68 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.68.pptx
+**v1.69 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.69.pptx
 
-Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.67.pptx
+Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.68.pptx
 
 ## Excel report
 
-`output/Bogura_DriveTest_Report_v1.67.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+`output/Bogura_DriveTest_Report_v1.69.xlsx` (also saved as `output/Bogura_DriveTest_Report.xlsx`)
+
+### What changed in v1.69
+
+Counts stay 26 idle and 99 active: idle 11 tune, 12 fourth, 3 new; active 42 tune, 45 fourth, 12 new. Inside the tune group the idle split moved. Idle azimuth turns are now 7, and idle tilt-only spots are 4, because a far L2600 cell is no longer downtilted and the nearest site is tuned instead.
+
+- A 4th sector turns the closest existing sector when the gap is under 30°, until the gap is about 45° and at least 30°. Active Bad Spot 1 turns BOSRK11C from 310° to 284°. The turned arm is drawn in gold.
+- A far cell on the piece that new sector already covers is seen and left in place. Active Bad Spot 5 leaves GBSGT12C. The separate 50 m sample on Idle Bad Spot 12 is still downtilted: BOSBG03A L2100, E_tilt 2° to 4°.
+- Idle L2600 is not downtilted. Idle Bad Spot 1 leaves BOSDR56A and uptilts BOGBT18C from 3° to 2°. Its azimuth already faces the road.
+- A blank of at least 1.5 km can also turn the nearest other sector toward the far end. Active Bad Spot 5 turns GBGBD15A from 25° to 41°.
+- Two or more cell actions are numbered. Active Bad Spot 7 has three points.
+- Every bad-spot map keeps at least the nearest site in the frame. Active Bad Spot 27 shows JYPBB01.
+- Proposed degrees in the workbook are whole numbers, the same rule as the slides.
 
 ### Every red piece in the circle (v1.67)
 

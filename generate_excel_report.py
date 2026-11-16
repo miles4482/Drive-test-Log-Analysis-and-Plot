@@ -88,7 +88,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.67"
+REPORT_VERSION = "1.69"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -1612,7 +1612,7 @@ def build_kpi_bad_spot_sheet(
     listed = spots if spots is None or len(spots) <= BAD_SPOT_TABLE_MAX else spots.head(BAD_SPOT_TABLE_MAX)
     plans = None
     if samples is not None and listed is not None and not listed.empty:
-        plans = [bad_spot_advice(samples, kpi, listed.iloc[i]) for i in range(len(listed))]
+        plans = [bad_spot_advice(samples, kpi, listed.iloc[i], mode=mode) for i in range(len(listed))]
     maps = [p for p in (serial_maps or []) if p is not None and p.exists()]
     for i, path in enumerate(maps, start=1):
         section_bar(ws, cursor, f"Bad Spot {i}", 1, map_span)
@@ -2266,8 +2266,8 @@ def _render_mode(df: pd.DataFrame, tag: str, extent, mode_label: str | None) -> 
         discrete = int(spots.attrs.get("total_discrete", 0)) if spots is not None else 0
         print(f"{kpi} {tag or 'idle'}: {total} poor runs, {discrete} discrete", flush=True)
         extra = {}
+        mode_name = "Active" if tag == "active" else "Idle"
         if kpi != "SINR":
-            mode_name = "Active" if tag == "active" else "Idle"
             extra["legend_title"] = f"{mode_name} by {kpi}"
         bad_maps[kpi] = plot_map(
             map_df, spots, PLOTS_DIR / f"excel_bad_spots_{key}{suffix}.png",
@@ -2279,6 +2279,7 @@ def _render_mode(df: pd.DataFrame, tag: str, extent, mode_label: str | None) -> 
             kpi, classify(map_df[kpi]), labels, colors,
             basemap_style="satellite",
             route_casing=True,
+            mode=mode_name,
         )
     rsrp_bad, rsrq_bad, sinr_bad = bad_maps["RSRP"], bad_maps["RSRQ"], bad_maps["SINR"]
     rsrp_zooms, rsrq_zooms, sinr_zooms = zoom_maps["RSRP"], zoom_maps["RSRQ"], zoom_maps["SINR"]
@@ -2594,17 +2595,19 @@ def refresh_bad_spot_pies(src: Path | None = None) -> Path:
         ):
             print(f"Drawing {kpi} bad spots ({tag or 'idle'})", flush=True)
             spots = find_bad_spots(frame, kpi)
+            mode_name = "Active" if tag == "active" else "Idle"
             paths = plot_bad_spot_serial_maps(
                 frame, spots, PLOTS_DIR, f"excel_bad_spots_{kpi.lower()}_spot{suffix}",
                 kpi, classify(frame[kpi]), labels, colors,
                 basemap_style="satellite",
                 route_casing=True,
+                mode=mode_name,
             )
             sheet = f"Bad Spot {kpi}" + ("_Active" if tag else "")
             zoom_for_sheet[sheet] = paths
             shown = spots.head(len(paths))
             plans_for_sheet[sheet] = [
-                bad_spot_advice(frame, kpi, shown.iloc[i]) for i in range(len(shown))
+                bad_spot_advice(frame, kpi, shown.iloc[i], mode=mode_name) for i in range(len(shown))
             ]
             print(f"  {sheet}: {len(paths)} maps", flush=True)
 
@@ -3677,7 +3680,10 @@ def write_bad_spot_advice(src: Path | None = None) -> Path:
         spots = find_bad_spots(frame, kpi)
         if len(spots) > BAD_SPOT_TABLE_MAX:
             spots = spots.head(BAD_SPOT_TABLE_MAX)
-        advice_for[sheet] = [bad_spot_advice(frame, kpi, spots.iloc[i]) for i in range(len(spots))]
+        mode_name = "Active" if "Active" in sheet else "Idle"
+        advice_for[sheet] = [
+            bad_spot_advice(frame, kpi, spots.iloc[i], mode=mode_name) for i in range(len(spots))
+        ]
         kinds: dict[str, int] = {}
         for plan in advice_for[sheet]:
             kinds[plan["kind"]] = kinds.get(plan["kind"], 0) + 1

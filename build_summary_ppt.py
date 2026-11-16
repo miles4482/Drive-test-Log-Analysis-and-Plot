@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Bogura summary deck: cover, KPI maps, bad-spot counts, and examples of each solution.
+"""Bogura summary deck: route and radio KPIs, bad-spot counts, maps, and examples.
 
-Proposed azimuth, E_tilt and M_tilt on these slides are the nearest whole degree.
-Half a degree rounds up. A later workbook publish must use that same rounding on
-the proposed value. The value stored in the dump stays as it was measured.
+The first slide is the drive-test route and the radio KPI tables with a share chart
+for RSRP, RSRQ and SINR. The bad-spot summary is the second slide. Proposed azimuth,
+E_tilt and M_tilt are the nearest whole degree. Half a degree rounds up. The workbook
+uses the same rounding. The value stored in the dump stays as it was measured.
 """
 from __future__ import annotations
 
@@ -25,9 +26,9 @@ from pptx.util import Emu, Inches, Pt
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
-REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.67.xlsx"
+REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.69.xlsx"
 PLOTS = OUTPUT / "plots"
-DEST = OUTPUT / "Bogura_DriveTest_Summary_v1.68.pptx"
+DEST = OUTPUT / "Bogura_DriveTest_Summary_v1.69.pptx"
 CIRCLES = PLOTS / "bad_spot_circles.json"
 
 NAVY = RGBColor(0x1B, 0x4F, 0x72)
@@ -84,9 +85,9 @@ GROUPS = [
         "items": [
             {"n": 16, "why": "PBCTM14C is uptilted from 2° to 1°. The azimuth stays 240°."},
             {"n": 37, "why": "PBSTH22A is uptilted from 2° to 1°. The azimuth stays 60°."},
-            {"n": 27, "why": "JYPBB01C is uptilted. The calculated 0.9° is shown as 1°. The azimuth stays 335°."},
+            {"n": 27, "why": "JYPBB01C is uptilted from 3° to 1°. The azimuth stays 335°. The map is wide enough to show the site."},
             {"n": 34, "why": "BOSDR78B serves the road from 5.2 km and is downtilted from 4° to 6°. The nearer sector is uptilted, shown as 2° to 1°."},
-            {"n": 7, "why": "Two far cells serve red samples in this circle. Both are downtilted. The nearer sector is uptilted, shown as 2° to 1°."},
+            {"n": 7, "why": "Three cells change, so the solution is numbered. JYKLI02C and JYSDR26A are downtilted. JYKTL08B is uptilted from 2° to 1°."},
         ],
     },
     {
@@ -94,9 +95,9 @@ GROUPS = [
         "mode": "Active",
         "spots": 45,
         "items": [
-            {"n": 4, "why": "The red road is 0.2 km from GBPLS02 and sits in the null, so a new L900 sector is aimed through it. Far cells on other red samples in the circle are downtilted too."},
-            {"n": 1, "why": "BOSRK11 is 2.6 km away, inside 3 km, so a 4th L900 sector replaces a new site. It also covers the 1,301 m blank."},
-            {"n": 5, "why": "GBGBD24 is 0.4 km away and the spot is in the null. GBSGT12C serves a red sample from 6.1 km and is downtilted from 3° to 5°."},
+            {"n": 4, "why": "GBPLS02 is 0.2 km away and the spot is in the null. The far cells on that same piece are left in place, because the new sector covers them."},
+            {"n": 1, "why": "BOSRK11 is 2.6 km away, so a 4th L900 sector at 329° replaces a new site. BOSRK11C was 19° from it, so that sector turns from 310° to 284° and the gap is 45°."},
+            {"n": 5, "why": "GBGBD24 is 0.4 km away and the spot is in the null, so the 4th sector covers it. GBSGT12C is not downtilted. GBGBD15A turns from 25° to 41° toward the far end of the blank."},
             {"n": 66, "why": "PBSTH27 is 0.2 km away. A new L900 sector at 255°, E_tilt 7°, fills the null. Existing sectors stay."},
             {"n": 14, "why": "GBSDR46 is 0.7 km away. A new L900 sector at 136°, E_tilt 3°, is aimed at the spot."},
         ],
@@ -116,24 +117,24 @@ GROUPS = [
     {
         "solution": "Azimuth",
         "mode": "Idle",
-        "spots": 4,
+        "spots": 7,
         "items": [
             {"n": 2, "why": "BOSDR52A turns from 355° to 9°. BOSDR76A keeps azimuth 40°, and its tilt is shown as 2° to 1°."},
             {"n": 13, "why": "SGTRS15C turns from 270° to 295°. E_tilt 4° to 0.9° is shown as 4° to 1°."},
-            {"n": 17, "why": "The far cell is downtilted from 3° to 5°. SGROY05C also turns, from 350° to 328°, and its tilt is shown as 3° to 1°."},
+            {"n": 17, "why": "SGROY03B L2600 is not downtilted. SGROY05C turns from 350° to 328°, and its tilt is shown as 3° to 1°."},
+            {"n": 20, "why": "DPFLB01B L2600 is left in place. It is the idle priority layer. DPFLB03C at 0.4 km turns from 280° to 289°, and E_tilt goes from 2° to 4°."},
             {"n": 26, "why": "DPGRT02B turns from 170° to 151°. The tilts are shown as 4° to 5° and 4° to 1°."},
         ],
     },
     {
         "solution": "Tilt",
         "mode": "Idle",
-        "spots": 7,
+        "spots": 4,
         "items": [
-            {"n": 20, "why": "DPFLB01B serves this short road from 7.3 km, so E_tilt goes from 2° to 4°. DPFLB03, 0.4 km away, is not moved."},
-            {"n": 1, "why": "The far cell is downtilted from 3° to 5°. The nearer sector is uptilted, and 1.8° is shown as 2°."},
+            {"n": 1, "why": "BOSDR56A L2600 serves from 6.6 km and is not downtilted. L2600 stays the idle priority layer. BOGBT18C at 1.1 km is uptilted from 3° to 2°. Its azimuth already faces the road and stays 240°."},
             {"n": 14, "why": "DPHKM11B is uptilted from 3° to 1°. The azimuth stays 120°."},
             {"n": 8, "why": "JYKTL02A is uptilted. The calculated 0.8° is shown as 1°. The azimuth stays 50°."},
-            {"n": 3, "why": "BOSJP16B serves the road from 4.1 km and is downtilted from 2° to 4°. The nearer site is not moved."},
+            {"n": 3, "why": "BOSJP16B L2600 is not downtilted. BOSJP24A and BOSDR54B are uptilted from 3° to 1°. Both azimuths stay."},
         ],
     },
     {
@@ -141,11 +142,11 @@ GROUPS = [
         "mode": "Idle",
         "spots": 12,
         "items": [
-            {"n": 12, "why": "The 4th L900 sector on BOSBG02 aims at the 123 m piece. BOSBG26B serves that piece from about 4.9 km. BOSBG03A serves the separate 50 m sample from about 6.2 km. Both are downtilted, E_tilt 2° to 4°."},
+            {"n": 12, "why": "The 4th L900 sector on BOSBG02 aims at the 123 m piece. BOSBG02C turns from 250° to 214° so the gap is 45°. BOSBG26B L2600 on that piece is not downtilted. BOSBG03A serves the separate 50 m sample and is still downtilted, E_tilt 2° to 4°."},
             {"n": 11, "why": "BOSRP22 is 1.1 km away and the spot is in the null. A new L900 sector at 359°, E_tilt 2°, is aimed through it."},
             {"n": 16, "why": "SGROY15 is 0.1 km from the spot. A new L900 sector at 118°, E_tilt 10°, covers it. Existing sectors stay."},
             {"n": 22, "why": "DPHKM12 is 1.7 km away. A new L900 sector at 213°, E_tilt 1°, fills the gap."},
-            {"n": 24, "why": "JYKTL09 is 2.9 km away, inside 3 km, so a 4th sector is used instead of a new site. The far cell is downtilted as well."},
+            {"n": 24, "why": "JYKTL09 is 2.9 km away, so a 4th sector is used. JYKTL09C turns from 350° to 309° to open a 45° gap. DPGRT04B L2600 is not downtilted."},
         ],
     },
     {
@@ -306,7 +307,7 @@ def _text(slide, left, top, width, height, text: str, size: int, color: RGBColor
 def _footer(slide, page: int, pages: int) -> None:
     _text(
         slide, Inches(0.4), Inches(7.18), Inches(10), Inches(0.24),
-        "Bogura drive test  ·  Summary v1.68  ·  Excel v1.67  ·  Web v1.67",
+        "Bogura drive test  ·  Summary v1.69  ·  Excel v1.69  ·  Web v1.69",
         11, MUTED,
     )
     _text(
@@ -326,52 +327,93 @@ def _stat(slide, left, top, width, label, value) -> None:
     _text(slide, Inches(left + 2.35), Inches(top), Inches(width - 2.35), Inches(0.28), value, 13, INK)
 
 
-def _cover(prs: Presentation) -> None:
+def _share_bar(slide, left: float, top: float, width: float, height: float, parts: list[tuple[float, str]]) -> None:
+    """Horizontal share chart. parts are (percent, hex colour)."""
+    used = left
+    for percent, hex_color in parts:
+        span = width * percent / 100.0
+        if span < 0.02:
+            continue
+        red = int(hex_color[1:3], 16)
+        green = int(hex_color[3:5], 16)
+        blue = int(hex_color[5:7], 16)
+        _box(slide, Inches(used), Inches(top), Inches(span), Inches(height), RGBColor(red, green, blue))
+        used += span
+
+
+def _report(prs: Presentation, pages: int) -> None:
+    """First slide: drive-test route, then RSRP, RSRQ and SINR as a table and a chart."""
     slide = prs.slides.add_slide(prs.slide_layouts[6])
-    _box(slide, 0, 0, prs.slide_width, prs.slide_height, NAVY)
-    _box(slide, 0, 0, Inches(0.16), prs.slide_height, GOLD)
-    _text(slide, Inches(0.55), Inches(0.28), Inches(8), Inches(0.28), "BOGURA DRIVE TEST", 14, RGBColor(0xF5, 0xC4, 0x00), True)
-    _text(slide, Inches(0.55), Inches(0.55), Inches(8), Inches(0.55), "Summary report", 36, WHITE, True)
-    _text(slide, Inches(8.4), Inches(0.42), Inches(4.5), Inches(0.5), "11–21 May 2026\nSummary v1.68", 16, RGBColor(0xD6, 0xE4, 0xF0), align=PP_ALIGN.RIGHT)
+    _box(slide, 0, 0, prs.slide_width, prs.slide_height, WHITE)
+    _heading(slide, "Summary report")
+    _text(slide, Inches(8.4), Inches(0.12), Inches(4.6), Inches(0.38), "11–21 May 2026    ·    v1.69", 14, WHITE, align=PP_ALIGN.RIGHT)
 
-    cards = [
-        ("Idle", "Borga_Idle_V2.0, scanner. Unchanged.\n60,957 plotted samples, best server.\nRSRP median −78.8 dBm."),
-        ("Active", "Borga_Active_mode_11Nov26.\nRobi, M-PCell, one band per location.\n288,308 plotted samples. RSRP median −98.1 dBm."),
+    _text(slide, Inches(0.32), Inches(0.7), Inches(4), Inches(0.26), "DT route", 15, NAVY, True)
+    headers = ["Mode", "Source", "Plotted", "What is drawn"]
+    values = [
+        ["Idle", "Borga_Idle_V2.0", "60,957", "Scanner, best server. Unchanged."],
+        ["Active", "Borga_Active_mode_11Nov26", "288,308", "Robi M-PCell, strongest RSRP per location."],
     ]
-    for index, (title, body) in enumerate(cards):
-        left = 0.55 + index * 6.3
-        _box(slide, Inches(left), Inches(1.4), Inches(6.0), Inches(1.45), RGBColor(0x15, 0x3E, 0x5A))
-        _text(slide, Inches(left + 0.22), Inches(1.5), Inches(5.5), Inches(0.3), title, 16, RGBColor(0xF5, 0xC4, 0x00), True)
-        _text(slide, Inches(left + 0.22), Inches(1.84), Inches(5.55), Inches(0.9), body, 14, WHITE)
+    widths = [1.35, 3.5, 1.7, 6.05]
+    top = 1.0
+    x = 0.32
+    for header, width in zip(headers, widths):
+        _box(slide, Inches(x), Inches(top), Inches(width), Inches(0.32), NAVY)
+        _text(slide, Inches(x + 0.08), Inches(top + 0.02), Inches(width - 0.1), Inches(0.28), header, 12, WHITE, True)
+        x += width
+    for row_index, row in enumerate(values):
+        y = top + 0.32 + row_index * 0.36
+        x = 0.32
+        fill = PAPER if row_index % 2 == 0 else WHITE
+        for value, width in zip(row, widths):
+            _box(slide, Inches(x), Inches(y), Inches(width), Inches(0.36), fill, LINE)
+            _text(slide, Inches(x + 0.08), Inches(y + 0.04), Inches(width - 0.1), Inches(0.28), value, 12, INK)
+            x += width
+    _text(
+        slide, Inches(0.32), Inches(2.08), Inches(12.6), Inches(0.24),
+        "Drive 11 May 2026 13:01 to 21 May 2026 14:07. A bad spot is a 50 m bin whose median RSRP is below −120 dBm.",
+        12, MUTED,
+    )
 
-    _text(slide, Inches(0.55), Inches(3.05), Inches(12), Inches(0.3), "Bad spots: 26 idle and 99 active. A 50 m bin is poor when its median RSRP is below −120 dBm.", 15, RGBColor(0xD6, 0xE4, 0xF0))
-    counts = [
-        ("11 + 42", "Tilt and azimuth", "4 idle and 25 active turn an azimuth"),
-        ("12 + 45", "4th sector, L900", "A host inside 3 km, aimed at the spot"),
-        ("3 + 12", "New 3-sector site", "Only when the nearest site is past 3 km"),
+    _text(slide, Inches(0.32), Inches(2.36), Inches(6), Inches(0.26), "Radio KPI", 15, NAVY, True)
+    blocks = [
+        (
+            "RSRP",
+            "Idle median −78.8 dBm. Poor 142 samples, 0.2%.",
+            "Active median −98.1 dBm. Poor 1,077 samples, 0.4%.",
+            [("#008000", 90.2), ("#00FF00", 9.0), ("#FFFF00", 0.3), ("#FF6666", 0.2), ("#FF0000", 0.2)],
+            [("#008000", 40.6), ("#00FF00", 46.4), ("#FFFF00", 9.3), ("#FF6666", 3.3), ("#FF0000", 0.4)],
+            "−95 to 0   ·   −110 to −95   ·   −115 to −110   ·   −120 to −115   ·   below −120",
+        ),
+        (
+            "RSRQ",
+            "Idle median −11.8 dB. At or below −20: 1.7%.",
+            "Active median −9.7 dB. At or below −20: 0.2%.",
+            [("#00FF00", 4.0), ("#FFFF00", 92.8), ("#FF0000", 3.2)],
+            [("#00FF00", 55.4), ("#FFFF00", 43.2), ("#FF0000", 1.4)],
+            "−10 to 0   ·   −17 to −10   ·   −30 to −17",
+        ),
+        (
+            "SINR",
+            "Idle median 9.9 dB. At or below 0: 10.0%.",
+            "Active median 8.1 dB. At or below 0: 13.1%.",
+            [("#0070C0", 27.4), ("#00B050", 22.2), ("#00B0F0", 23.0), ("#FFFF00", 17.5), ("#FF6600", 7.6), ("#FF0000", 2.3)],
+            [("#0070C0", 20.8), ("#00B050", 20.5), ("#00B0F0", 24.2), ("#FFFF00", 21.8), ("#FF6600", 10.9), ("#FF0000", 1.8)],
+            "15 and above   ·   10 to 15   ·   5 to 10   ·   0 to 5   ·   −5 to 0   ·   below −5",
+        ),
     ]
-    colors = [GOLD, ORANGE, PURPLE]
-    for index, ((count, label, note), color) in enumerate(zip(counts, colors)):
-        left = 0.55 + index * 4.2
-        _box(slide, Inches(left), Inches(3.5), Inches(4.0), Inches(1.45), RGBColor(0x15, 0x3E, 0x5A))
-        _box(slide, Inches(left), Inches(3.5), Inches(0.1), Inches(1.45), color)
-        _text(slide, Inches(left + 0.25), Inches(3.6), Inches(3.6), Inches(0.4), count, 22, WHITE, True)
-        _text(slide, Inches(left + 0.25), Inches(4.05), Inches(3.6), Inches(0.3), label, 14, WHITE, True)
-        _text(slide, Inches(left + 0.25), Inches(4.4), Inches(3.6), Inches(0.42), note, 12, RGBColor(0xD6, 0xE4, 0xF0))
-
-    _text(
-        slide, Inches(0.55), Inches(5.15), Inches(12.2), Inches(0.85),
-        "This deck has the RSRP, RSRQ and SINR plots, the bad-spot counts, then the examples. "
-        "Active shows 5 azimuth, 5 tilt, 5 fourth-sector and 5 new-site maps. "
-        "Idle shows all 4 azimuth turns, 5 tilts, 5 fourth sectors and all 3 new sites.",
-        15, RGBColor(0xD6, 0xE4, 0xF0),
-    )
-    _text(
-        slide, Inches(0.55), Inches(6.15), Inches(12.2), Inches(0.7),
-        "Proposed azimuth, E_tilt and M_tilt are the nearest whole degree. Half a degree rounds up. "
-        "Slides after the Annex hold the rules, the map key, and the check that every red sample inside the circle is included.",
-        14, RGBColor(0xAE, 0xC6, 0xD6),
-    )
+    y = 2.68
+    for title, idle_line, active_line, idle_parts, active_parts, legend in blocks:
+        _box(slide, Inches(0.32), Inches(y), Inches(12.7), Inches(1.38), PAPER, LINE)
+        _text(slide, Inches(0.46), Inches(y + 0.08), Inches(1.3), Inches(0.28), title, 14, NAVY, True)
+        _text(slide, Inches(1.8), Inches(y + 0.08), Inches(5.3), Inches(0.48), idle_line + "\n" + active_line, 12, INK)
+        _text(slide, Inches(7.2), Inches(y + 0.06), Inches(0.7), Inches(0.22), "Idle", 11, MUTED, True)
+        _share_bar(slide, 7.95, y + 0.08, 4.8, 0.18, [(part, color) for color, part in idle_parts])
+        _text(slide, Inches(7.2), Inches(y + 0.32), Inches(0.7), Inches(0.22), "Active", 11, MUTED, True)
+        _share_bar(slide, 7.95, y + 0.34, 4.8, 0.18, [(part, color) for color, part in active_parts])
+        _text(slide, Inches(0.46), Inches(y + 0.95), Inches(12.3), Inches(0.32), legend, 11, MUTED)
+        y += 1.46
+    _footer(slide, 1, pages)
 
 
 def _kpi(prs: Presentation, spec: dict, page: int, pages: int) -> None:
@@ -418,8 +460,8 @@ def _bad_summary(prs: Presentation, page: int, pages: int) -> None:
     _heading(slide, "Bad spot summary")
     headers = ["Solution", "Idle spots", "Idle shown", "Active spots", "Active shown"]
     rows = [
-        ("Azimuth", "4", "4", "25", "5", GOLD),
-        ("Tilt, azimuth unchanged", "7", "5", "17", "5", GREEN),
+        ("Azimuth", "7", "5", "25", "5", GOLD),
+        ("Tilt, azimuth unchanged", "4", "4", "17", "5", GREEN),
         ("4th sector, L900", "12", "5", "45", "5", ORANGE),
         ("New 3-sector site", "3", "3", "12", "5", PURPLE),
         ("All bad spots", "26", "", "99", "", NAVY),
@@ -453,9 +495,9 @@ def _bad_summary(prs: Presentation, page: int, pages: int) -> None:
         slide, Inches(0.45), Inches(5.2), Inches(12.4), Inches(1.7),
         "Tilt and azimuth together are 11 idle and 42 active. The table splits that group. "
         "An azimuth row is a spot where an existing azimuth is turned. Most of those also change tilt. "
-        "A tilt row leaves the azimuth as it is.\n"
-        "Idle has 4 azimuth turns and 3 new sites, so those examples are the full set. "
-        "Every other group shows 5. The other spots stay in the Excel workbook and use the same rules.\n"
+        "A tilt row leaves the azimuth as it is. Idle now has 7 azimuth turns, because a far L2600 cell is no longer downtilted and the nearest site is tuned instead.\n"
+        "Idle tilt and Idle new site are the full set, 4 and 3. Idle azimuth shows 5 of 7. "
+        "Every active group shows 5. When a spot changes more than one cell, the solution is numbered.\n"
         "On the example slides, a tenth of a degree is shown as the nearest whole degree. 0.5 rounds up.",
         15, INK,
     )
@@ -521,7 +563,7 @@ def _annex(prs: Presentation, page: int, pages: int) -> None:
         "how a solution is chosen, how to read a map, and the check that every red sample inside the circle is included.",
         20, RGBColor(0xD6, 0xE4, 0xF0),
     )
-    _text(slide, Inches(0.7), Inches(6.9), Inches(10), Inches(0.28), "Bogura drive test  ·  Summary v1.68", 14, RGBColor(0xAE, 0xC6, 0xD6))
+    _text(slide, Inches(0.7), Inches(6.9), Inches(10), Inches(0.28), "Bogura drive test  ·  Summary v1.69", 14, RGBColor(0xAE, 0xC6, 0xD6))
     _text(slide, Inches(11.2), Inches(6.9), Inches(1.6), Inches(0.28), f"{page}  /  {pages}", 14, RGBColor(0xAE, 0xC6, 0xD6), align=PP_ALIGN.RIGHT)
 
 
@@ -532,7 +574,7 @@ def _annex_rounding(prs: Presentation, page: int, pages: int) -> None:
         ("What is rounded", "The proposed azimuth, E_tilt and M_tilt. The measured value in the dump is not changed."),
         ("Which way", "The nearest whole degree. 0.5 rounds up. 1.8° is shown as 2°. 0.9° is shown as 1°. 1.2° is shown as 1°."),
         ("A very small change", "If the nearest degree is the same as the degree it already has, the line says the tilt or azimuth stays."),
-        ("Where it applies", "Every example in this deck. The next workbook publish uses the same rounding on the proposed value."),
+        ("Where it applies", "Every example in this deck, and the proposed value in the Excel workbook. The dump value is unchanged."),
         ("What does not move", "A 4th-sector azimuth and a new-site azimuth were already whole degrees. Downtilt of a far cell stays a step of 2°."),
     ]
     top = 0.95
@@ -548,9 +590,9 @@ def _annex_rules(prs: Presentation, page: int, pages: int) -> None:
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _heading(slide, "Annex  ·  how a solution is chosen")
     cards = [
-        (GOLD, "Azimuth", "A sector inside 2.5 km can be turned when it does not already face the spot. The turn is kept when the customers on the new bearing are still served. A turn under 15° on the nearest sector is not added just because a far cell was downtilted."),
-        (GREEN, "Tilt", "Downtilt of an existing sector is at most 2°. A cell that serves a red sample from at least 4 km, and much farther than the nearest site, is downtilted first. The nearest sector is uptilted only when its own beam falls short."),
-        (ORANGE, "4th sector", "Used when the spot sits in the null inside 1.5 km, when one or two sites inside 2 km leave it in the null, when the required downtilt would pass 2°, or when a host inside 3 km can aim at the spot. Existing sectors are not moved for that new sector."),
+        (GOLD, "Azimuth", "A sector inside 2.5 km can be turned when it does not already face the spot. Beside a new 4th sector, the closest existing sector is turned away until the gap is 30° to 60°. On a long blank, the nearest other sector can turn toward the far end."),
+        (GREEN, "Tilt", "Downtilt of an existing sector is at most 2°. A far cell is downtilted when it serves a red sample the new sector does not cover. Idle L2600 is not downtilted. The nearest site is tuned instead. A far cell on the piece the new sector already covers is left in place."),
+        (ORANGE, "4th sector", "Used when the spot sits in the null inside 1.5 km, when one or two sites inside 2 km leave it in the null, when the required downtilt would pass 2°, or when a host inside 3 km can aim at the spot. The closest existing sector moves when it would sit within 30° of the new one."),
         (PURPLE, "New site", "Used only when the nearest existing site is farther than 3 km. Three L900 sectors are drawn at the spot. The sector toward the red road is long enough to cross it, and every sector shows its azimuth."),
     ]
     for index, (color, title, body) in enumerate(cards):
@@ -573,7 +615,7 @@ def _annex_read(prs: Presentation, page: int, pages: int) -> None:
         ("Orange circle", "The bad spot. A blank with no plot inside the circle is part of the same spot."),
         ("Yellow dashed line", "The cell that served the red samples. It starts at the end of that sector. It is not the proposed sector. The length is from the arm tip, so it is shorter than the site-centre distance."),
         ("Tilt on the dashed line", "When that cell is an overshooter, the line also carries the E_tilt change."),
-        ("Orange arm", "A proposed 4th L900 sector, drawn from the existing site toward the spot. The words sit along the arm."),
+        ("Orange arm", "A proposed 4th L900 sector, drawn from the existing site toward the spot. A gold arm is an existing sector that was turned."),
         ("Purple arms", "A proposed new 3-sector site. Every arm is labeled with its azimuth."),
     ]
     for index, (title, body) in enumerate(items):
@@ -592,14 +634,14 @@ def _annex_circle(prs: Presentation, page: int, pages: int) -> None:
     _heading(slide, "Annex  ·  every red sample inside the circle")
     _text(
         slide, Inches(0.45), Inches(0.85), Inches(12.4), Inches(0.7),
-        "A far cell is downtilted when it serves any red sample inside the orange circle, including a short piece that is not the longest run. Later report builds keep this check.",
+        "Every red sample inside the orange circle is still checked. A far cell is downtilted when the new sector does not cover that piece. Idle L2600 is not downtilted. A far cell on the piece the new sector already aims at is left in place.",
         16, INK,
     )
     rows = [
-        ("Idle 12", "BOSBG03A L2100 serves the separate 50 m sample from 6,238 m. E_tilt 2° to 4°. The map line reads 5,853 m because it starts at the arm tip. BOSBG26B still covers the 123 m piece."),
-        ("Idle 5", "BOSJP30B L2600 from 5,720 m, E_tilt 4° to 6°."),
-        ("Active 4, 5, 6", "GBPLS12A, GBSGT12C, and on Active 6 the cells BODNT08B L1800, BODNT08B L900 and SGKZP18C."),
-        ("Active 7, 9, 19, 25, 31", "JYKLI02C, both DPHKM12A layers, DPBRM24C, BOSRP16A and JYAKL20A. Each is downtilted, and the dashed line carries that change."),
+        ("Idle 12", "BOSBG03A L2100 serves the separate 50 m sample, about 64° off the new sector, so it is still downtilted, E_tilt 2° to 4°. The map line reads 5,853 m because it starts at the arm tip. BOSBG26B L2600 is on the piece the 4th sector aims at, so it is not downtilted."),
+        ("Idle 1", "BOSDR56A L2600 serves from 6,563 m and is not downtilted. BOGBT18C at 1.1 km is uptilted from 3° to 2°. Its azimuth already faces the road."),
+        ("Active 5", "GBSGT12C L1800 serves the piece the new sector covers, so it is not downtilted. GBGBD15A turns from 25° to 41° toward the far end of the blank."),
+        ("Active 7", "JYKLI02C and JYSDR26A serve red samples no new sector covers, so both are still downtilted. The solution numbers the three cells."),
     ]
     top = 1.7
     for label, body in rows:
@@ -614,9 +656,9 @@ def _annex_workbook(prs: Presentation, page: int, pages: int) -> None:
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _heading(slide, "Annex  ·  where the full set is")
     rows = [
-        ("Excel v1.67", "A map, a suggestion table and a movable circle for all 26 idle spots and all 99 active spots. The Cover sheet lists every spot. EP Details has the existing and proposed height, azimuth, E_tilt and M_tilt."),
-        ("This deck", "The examples above. Idle azimuth and Idle new site are complete. The other groups are 5 examples each."),
-        ("Web v1.67", "The live map. Site names are white with a dark edge. Sector names on that map stay small. With KPI set to Blank, Info on a sector or the site centre opens the cell table."),
+        ("Excel v1.69", "A map, a suggestion table and a movable circle for all 26 idle spots and all 99 active spots. The Cover sheet lists every spot. EP Details has the existing and proposed height, azimuth, E_tilt and M_tilt."),
+        ("This deck", "The examples above. Idle tilt and Idle new site are the full set. Idle azimuth shows 5 of 7. Each active group shows 5."),
+        ("Web v1.69", "The live map. Site names are white with a dark edge. Sector names on that map stay small. With KPI set to Blank, Info on a sector or the site centre opens the cell table."),
         ("RSRQ and SINR", "The coverage maps are in this deck. The workbook no longer has separate RSRQ or SINR bad-spot sheets. Poor RSRQ is at or below −20 dB. Poor SINR is at or below 0 dB."),
     ]
     top = 0.95
@@ -683,15 +725,15 @@ def build() -> Path:
     prs = Presentation()
     prs.slide_width = Inches(13.333)
     prs.slide_height = Inches(7.5)
-    prs.core_properties.title = "Bogura Drive Test Summary v1.68"
-    prs.core_properties.subject = "Summary report, KPI plots, and bad-spot examples"
-    _cover(prs)
+    prs.core_properties.title = "Bogura Drive Test Summary v1.69"
+    prs.core_properties.subject = "Route, radio KPIs, bad-spot summary, and examples"
+    _report(prs, pages)
     page = 2
+    _bad_summary(prs, page, pages)
+    page += 1
     for spec in KPI_SLIDES:
         _kpi(prs, spec, page, pages)
         page += 1
-    _bad_summary(prs, page, pages)
-    page += 1
     for group in GROUPS:
         for ordinal, item in enumerate(group["items"], start=1):
             _example(prs, group, item, rows[(group["mode"], item["n"])], ordinal, page, pages)

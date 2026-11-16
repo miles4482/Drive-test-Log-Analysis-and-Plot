@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import math
+import re
 import subprocess
 import sys
 import urllib.request
@@ -531,9 +532,8 @@ def _tilt_step(
 def _deg_text(value: float | None) -> str:
     """Degrees for a solution sentence.
 
-    The summary deck shows a proposed azimuth, E_tilt and M_tilt as the nearest
-    whole degree, and half a degree rounds up. The next workbook publish must
-    apply that same rounding to the proposed value. The dump value stays as measured.
+    Proposed azimuth, E_tilt and M_tilt are then rounded to the nearest whole
+    degree, and half a degree rounds up. The dump value stays as measured.
     """
     if value is None:
         return "blank"
@@ -1220,7 +1220,14 @@ def _served_slots(bins: list[dict]) -> list[dict]:
         cell = max(slot["by"].values(), key=lambda item: item["n"])["cell"]
         dist = float(_equirect_km(cell["lat"], cell["lon"], slat, slon))
         off = abs(_signed_deg(cell["azimuth"], _bearing_deg(cell["lat"], cell["lon"], slat, slon)))
-        rows.append({"cell": cell, "n": slot["n"], "dist": dist, "off": off})
+        rows.append({
+            "cell": cell,
+            "n": slot["n"],
+            "dist": dist,
+            "off": off,
+            "lat": slat,
+            "lon": slon,
+        })
     rows.sort(key=lambda item: (-item["n"], -item["dist"]))
     return rows
 
@@ -1306,33 +1313,110 @@ def _overshoot_mark(row: dict) -> str:
     return _tilt_bit("E_tilt", old_e, new_e)
 
 
-def _prefer_overshoot(choice: dict, slots: list[dict], sites: list[dict], spot_pop: float) -> dict:
-    """Downtilt a far serving cell before moving the nearest sector."""
+def _on_planned_piece(row: dict, choice: dict) -> bool:
+    """True when this far cell's samples sit on the piece the 4th sector or new site aims at."""
+    if choice.get("kind") not in ("fourth", "new"):
+        return False
+    draw = choice.get("draw") or {}
+    azimuths = draw.get("azimuths") or []
+    if row.get("lat") is None or not azimuths or draw.get("lat") is None:
+        return False
+    bearing = _bearing_deg(float(draw["lat"]), float(draw["lon"]), float(row["lat"]), float(row["lon"]))
+    off = abs(_signed_deg(float(azimuths[0]), bearing))
+    apart = float(_equirect_km(
+        float(draw["target_lat"]), float(draw["target_lon"]), float(row["lat"]), float(row["lon"]),
+    ))
+    # Same piece: the aim is within 40° or the sample is within 500 m of the aim point.
+    # A separate red sample, such as the 50 m piece, stays outside this and is still downtilted.
+    return off <= 40.0 or apart <= 0.50
+
+
+def _idle_l2600(row: dict, mode: str) -> bool:
+    """Idle keeps L2600 as the priority layer, so a far L2600 cell is not downtilted."""
+    return mode == "Idle" and str(row["cell"].get("layer") or "") == "L2600"
+
+
+def _spared_sentence(row: dict, mode: str) -> str:
+    cell = row["cell"]
+    name = f"{cell.get('sector')} {cell.get('layer')}".strip()
+    dist_m = row["dist"] * 1000.0
+    if _idle_l2600(row, mode):
+        return (
+            f"{name} serves this road from {dist_m:,.0f} m and is not downtilted. "
+            f"L2600 is the idle priority layer, so a downtilt from that distance would shrink coverage elsewhere."
+        )
+    return (
+        f"{name} serves this road from {dist_m:,.0f} m and is not downtilted. "
+        f"The new sector covers that piece, so the far cell is left as it is."
+    )
+
+
+def _prefer_overshoot(
+    choice: dict,
+    slots: list[dict],
+    sites: list[dict],
+    spot_pop: float,
+    mode: str = "",
+) -> dict:
+    """Downtilt a far serving cell, except where a new sector already covers that piece.
+
+    Every red bin is still checked. A far cell is left in place when the 4th sector
+    or the new site is aimed at the same piece, and when the cell is L2600 in idle.
+    A far cell on a different red piece is still downtilted.
+    """
     far = _overshoot_rows(slots, sites)
     if not far:
+        choice = dict(choice)
+        choice["overshoot_marks"] = {}
+        choice["spared"] = []
         return choice
-    sentences = [_overshoot_sentence(row) for row in far]
-    extra_actions = [_tune_action(_overshoot_item(row)) for row in far]
+    kept = [row for row in far if not _on_planned_piece(row, choice) and not _idle_l2600(row, mode)]
+    kept_ids = {id(row) for row in kept}
+    spared = [row for row in far if id(row) not in kept_ids]
+    spared_lines = [_spared_sentence(row, mode) for row in spared]
+    marks = {
+        (row["cell"].get("sector"), row["cell"].get("layer")): _overshoot_mark(row)
+        for row in kept
+    }
     if choice.get("kind") in ("fourth", "new"):
-        choice["final"] = f"{choice['final']} {' '.join(sentences)}"
-        choice["actions"] = list(choice.get("actions") or []) + extra_actions
-        if choice.get("steps"):
-            choice["steps"][0]["proposal"] = " ".join(sentences)
+        choice = dict(choice)
+        sentences = [_overshoot_sentence(row) for row in kept] + spared_lines
+        if sentences:
+            choice["final"] = f"{choice['final']} {' '.join(sentences)}"
+        if kept:
+            choice["actions"] = list(choice.get("actions") or []) + [
+                _tune_action(_overshoot_item(row)) for row in kept
+            ]
+            if choice.get("steps"):
+                choice["steps"][0]["proposal"] = " ".join(_overshoot_sentence(row) for row in kept)
+        choice["overshoot_marks"] = marks
+        choice["spared"] = spared
         return choice
+    if not kept:
+        # The nearest-site plan stays. The far L2600 cell is reported and not moved.
+        choice = dict(choice)
+        if spared_lines:
+            choice["final"] = f"{choice['final']} {' '.join(spared_lines)}"
+        choice["overshoot_marks"] = {}
+        choice["spared"] = spared
+        return choice
+    sentences = [_overshoot_sentence(row) for row in kept]
+    extra_actions = [_tune_action(_overshoot_item(row)) for row in kept]
     companions = _local_companion(sites, spot_pop)
     bits = list(sentences)
     actions = list(extra_actions)
     if companions:
         _tilt, _azimuth, _site, companion_final = _companion_final(companions)
-        bits.append(f"The nearest sector also needs a change. {companion_final}")
+        bits.append(companion_final)
         actions.extend(_tune_action(item) for item in companions)
     else:
         near = sites[0]["name"] if sites else "The nearest sector"
         nearest_km = sites[0]["dist"] if sites else 99.0
         bits.append(f"{near} at {nearest_km:.1f} km is not moved. The bad samples come from the overshooting cell.")
+    bits.extend(spared_lines)
     final = " ".join(bits)
     names = []
-    for item in [_overshoot_item(row) for row in far] + companions:
+    for item in [_overshoot_item(row) for row in kept] + companions:
         if item["site"] not in names:
             names.append(item["site"])
     steps = [
@@ -1362,9 +1446,280 @@ def _prefer_overshoot(choice: dict, slots: list[dict], sites: list[dict], spot_p
         "site": ", ".join(names),
         "final": final,
         "steps": steps,
-        "draw": None,
+        "draw": choice.get("draw"),
         "actions": actions,
+        "azimuth_overrides": dict(choice.get("azimuth_overrides") or {}),
+        "overshoot_marks": marks,
+        "spared": spared,
     }
+
+
+def _host_site(choice: dict, sites: list[dict]) -> dict | None:
+    draw = choice.get("draw") or {}
+    if draw.get("lat") is None:
+        return None
+    for site in sites:
+        if abs(site["lat"] - float(draw["lat"])) < 0.0008 and abs(site["lon"] - float(draw["lon"])) < 0.0008:
+            return site
+    return None
+
+
+def _note_azimuth_step(choice: dict, sentence: str) -> None:
+    for step in choice.get("steps") or []:
+        if step.get("action") == "Azimuth":
+            text = step.get("proposal") or ""
+            if "not moved" in text or text.startswith("Not required") or "not the chosen" in text:
+                step["proposal"] = sentence
+            elif sentence not in text:
+                step["proposal"] = f"{text} {sentence}"
+            return
+
+
+def _separate_fourth_sector(choice: dict, sites: list[dict], spot_pop: float) -> dict:
+    """Turn the existing sector that sits closest to a new 4th sector, until the gap is 30–60°.
+
+    Only that one sector moves. The new sector stays aimed at the bad spot. The
+    turn goes away from the new azimuth, and it stops short of the next sector.
+    """
+    if choice.get("kind") != "fourth":
+        return choice
+    host = _host_site(choice, sites)
+    draw = choice.get("draw") or {}
+    azimuths = draw.get("azimuths") or []
+    if host is None or not azimuths:
+        return choice
+    new_az = float(azimuths[0])
+    recs = [rec for rec in host["recs"] if rec.get("azimuth") is not None and rec.get("sector")]
+    if not recs:
+        return choice
+    closest = min(recs, key=lambda rec: abs(_signed_deg(new_az, float(rec["azimuth"]))))
+    current = abs(_signed_deg(new_az, float(closest["azimuth"])))
+    if current >= 30.0:
+        return choice
+    signed = _signed_deg(new_az, float(closest["azimuth"]))
+    direction = 1.0 if signed >= 0 else -1.0
+    if abs(signed) < 0.5:
+        left = (float(closest["azimuth"]) - 45.0) % 360.0
+        right = (float(closest["azimuth"]) + 45.0) % 360.0
+        pop_left = _wedge_population(closest["lat"], closest["lon"], left)
+        pop_right = _wedge_population(closest["lat"], closest["lon"], right)
+        direction = -1.0 if pop_left >= pop_right else 1.0
+    room = 80.0
+    for rec in recs:
+        if rec is closest:
+            continue
+        delta = _signed_deg(float(closest["azimuth"]), float(rec["azimuth"]))
+        if direction > 0 and delta > 0:
+            room = min(room, delta - 30.0)
+        elif direction < 0 and delta < 0:
+            room = min(room, abs(delta) - 30.0)
+    room = max(0.0, room)
+    needed = 45.0 - current
+    minimum = 30.0 - current
+    turn = min(needed, room)
+    if turn + 0.5 < minimum:
+        if room < 8.0:
+            return choice
+        turn = room
+    old_az = float(closest["azimuth"])
+    new_bearing = (old_az + direction * turn) % 360.0
+    old_pop = _wedge_population(closest["lat"], closest["lon"], old_az)
+    new_pop = _wedge_population(closest["lat"], closest["lon"], new_bearing)
+    if new_pop + 0.5 * spot_pop < old_pop * 0.60 and turn > minimum + 0.5 and room >= minimum:
+        turn = minimum
+        new_bearing = (old_az + direction * turn) % 360.0
+    if turn < 8.0:
+        return choice
+    item = {
+        "rec": closest,
+        "dist": host["dist"],
+        "off": current,
+        "delta": 0.0,
+        "turn": direction * turn,
+        "old_pop": old_pop,
+        "new_pop": new_pop,
+        "overshoot": False,
+        "site": host["name"],
+    }
+    action = _tune_action(item)
+    action["action"] = "Azimuth, open a gap"
+    gap = current + turn
+    sentence = (
+        f"{closest.get('sector')} turns from {old_az:.0f}° to {new_bearing:.0f}° "
+        f"so the gap to the new sector is {gap:.0f}°. It was {current:.0f}° off that new azimuth."
+    )
+    choice = dict(choice)
+    text = choice["final"]
+    if "Existing sectors are not moved." in text:
+        text = text.replace("Existing sectors are not moved.", sentence)
+    else:
+        text = f"{text} {sentence}"
+    choice["final"] = text
+    choice["actions"] = list(choice.get("actions") or []) + [action]
+    overrides = dict(choice.get("azimuth_overrides") or {})
+    overrides[str(closest.get("sector")).strip()] = new_bearing
+    choice["azimuth_overrides"] = overrides
+    _note_azimuth_step(choice, sentence)
+    return choice
+
+
+def _turn_neighbor_to_long_end(
+    choice: dict,
+    sites: list[dict],
+    blanks: list[dict],
+    spot_pop: float,
+    red_lat: float,
+    red_lon: float,
+    blank_m: float = 0.0,
+) -> dict:
+    """Turn the nearest other sector toward the far end of a long bad spot.
+
+    Used when the blank is at least 1.5 km and that end sits about 2 km from the
+    site that hosts the new sector. The new sector stays. This adds an azimuth
+    on the neighbour, such as GBGBD15A toward the long blank past GBGBD24.
+    """
+    if choice.get("kind") not in ("fourth", "new") or blank_m < 1500:
+        return choice
+    host = _host_site(choice, sites)
+    if host is None:
+        return choice
+    points = [(red_lat, red_lon)]
+    for gap in blanks:
+        points.append((float(gap["lat1"]), float(gap["lon1"])))
+        points.append((float(gap["lat2"]), float(gap["lon2"])))
+    far = max(points, key=lambda point: float(_equirect_km(host["lat"], host["lon"], point[0], point[1])))
+    far_km = float(_equirect_km(host["lat"], host["lon"], far[0], far[1]))
+    if far_km < 2.0:
+        return choice
+    others = []
+    for site in sites:
+        if abs(site["lat"] - host["lat"]) < 0.0008 and abs(site["lon"] - host["lon"]) < 0.0008:
+            continue
+        dist = float(_equirect_km(site["lat"], site["lon"], far[0], far[1]))
+        if dist <= 3.2:
+            others.append((dist, site))
+    if not others:
+        return choice
+    dist, site = min(others, key=lambda item: item[0])
+    bearing = _bearing_deg(site["lat"], site["lon"], far[0], far[1])
+    best = None
+    best_off = 999.0
+    for rec in site["recs"]:
+        if rec.get("azimuth") is None or not rec.get("sector"):
+            continue
+        off = abs(_signed_deg(float(rec["azimuth"]), bearing))
+        if off < best_off:
+            best_off = off
+            best = rec
+    if best is None or best_off < 12.0:
+        return choice
+    name = str(best.get("sector")).strip()
+    if name in (choice.get("azimuth_overrides") or {}):
+        return choice
+    signed = _signed_deg(float(best["azimuth"]), bearing)
+    # Point the sector at the far end. Cap the turn so a large swing is not proposed.
+    turn = math.copysign(min(best_off, 25.0), signed)
+    if abs(turn) < 10.0:
+        return choice
+    new_az = (float(best["azimuth"]) + turn) % 360.0
+    old_pop = _wedge_population(best["lat"], best["lon"], best["azimuth"])
+    new_pop = _wedge_population(best["lat"], best["lon"], new_az)
+    if new_pop + 0.5 * spot_pop < old_pop * 0.90:
+        return choice
+    item = {
+        "rec": best,
+        "dist": dist,
+        "off": best_off,
+        "delta": 0.0,
+        "turn": turn,
+        "old_pop": old_pop,
+        "new_pop": new_pop,
+        "overshoot": False,
+        "site": site["name"],
+    }
+    action = _tune_action(item)
+    action["action"] = "Azimuth toward the far end"
+    sentence = (
+        f"{name} at {dist:.1f} km from the far end turns from {float(best['azimuth']):.0f}° to {new_az:.0f}° "
+        f"toward that part of the bad spot."
+    )
+    choice = dict(choice)
+    text = choice["final"]
+    if "Existing sectors are not moved." in text:
+        text = text.replace("Existing sectors are not moved.", sentence)
+    else:
+        text = f"{text} {sentence}"
+    choice["final"] = text
+    choice["actions"] = list(choice.get("actions") or []) + [action]
+    overrides = dict(choice.get("azimuth_overrides") or {})
+    overrides[name] = new_az
+    choice["azimuth_overrides"] = overrides
+    _note_azimuth_step(choice, sentence)
+    return choice
+
+
+def _whole_degrees(text: str) -> str:
+    """Nearest whole degree. Half a degree rounds up. A move that lands on the same degree stays."""
+    if not text:
+        return text
+
+    def _repl(match: re.Match) -> str:
+        return f"{math.floor(float(match.group(1)) + 0.5):.0f}°"
+
+    text = re.sub(r"(\d+\.\d+)\s*°", _repl, text)
+    text = re.sub(
+        r"(E_tilt|M_tilt|azimuth) (\d+)° to \2°",
+        lambda match: f"{match.group(1)} stays {match.group(2)}°",
+        text,
+    )
+    return text
+
+
+_ACTION_START = re.compile(r"^(?:New L900|New 3-sector|[A-Z]{2,}[A-Z0-9]*\d[A-Z0-9]*)\b")
+
+
+def _number_actions(text: str) -> str:
+    """Number the cell actions when a spot changes more than one cell.
+
+    Tilt and azimuth sentences that belong to the same cell stay in one point.
+    A new point starts at the next cell, new sector, or new site.
+    """
+    parts = [part.strip() for part in re.split(r"(?<=\.)\s+", text.strip()) if part.strip()]
+    points: list[str] = []
+    tail: list[str] = []
+    for part in parts:
+        sentence = part if part.endswith(".") else part + "."
+        if sentence.startswith("This covers") or sentence.startswith("A foot inside"):
+            tail.append(sentence)
+            continue
+        if points and not _ACTION_START.match(sentence):
+            points[-1] = points[-1].rstrip(".") + ". " + sentence
+        else:
+            points.append(sentence)
+    if len(points) < 2:
+        return text.strip()
+    numbered = " ".join(f"{number}. {sentence}" for number, sentence in enumerate(points, start=1))
+    if tail:
+        numbered += " " + " ".join(tail)
+    return numbered
+
+
+def _round_proposed(row: dict) -> dict:
+    """Proposed azimuth and tilt become whole degrees. A rounded no-change keeps the dump value."""
+    row = dict(row)
+    for src, dst in (("azimuth", "p_azimuth"), ("et", "p_et"), ("mt", "p_mt")):
+        if row.get(dst) is None:
+            continue
+        proposed = float(math.floor(float(row[dst]) + 0.5))
+        if row.get(src) is None:
+            row[dst] = proposed
+            continue
+        current = float(row[src])
+        if float(math.floor(current + 0.5)) == proposed:
+            row[dst] = current
+        else:
+            row[dst] = proposed
+    return row
 
 
 def _companion_final(chosen: list[dict]) -> tuple[str, str, str, str]:
@@ -1384,7 +1739,7 @@ def _companion_final(chosen: list[dict]) -> tuple[str, str, str, str]:
     return "", "", "", "; ".join(bits) + "."
 
 
-def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series) -> dict:
+def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series, mode: str = "") -> dict:
     """Finding and one final solution for a bad spot, including a blank inside the circle.
 
     Inside about 2.5 km the final step can retune azimuth and tilt. Downtilt is
@@ -1466,38 +1821,50 @@ def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series) -> dict
     choice = _choose_coverage_fix(
         sites, sectors, spot_pop, target_lat, target_lon, red_lat, red_lon,
     )
+    choice = _separate_fourth_sector(choice, sites, spot_pop)
+    choice = _turn_neighbor_to_long_end(
+        choice, sites, blanks, spot_pop, red_lat, red_lon, blank_m,
+    )
     # All red bins in the circle. The longest run alone would drop a far cell
     # on a shorter piece, such as BOSBG03A on the 50 m sample.
     served = _served_slots(bins) if bins else []
     far = _overshoot_rows(served, sites)
+    plan_mode = "Active" if "active" in str(mode).lower() else ("Idle" if "idle" in str(mode).lower() else "")
+    choice = _prefer_overshoot(choice, served, sites, spot_pop, plan_mode)
+    spared = choice.get("spared") or []
     if far:
-        finding_lines.append(
-            "Overshooting cell on this red road: "
-            + "; ".join(
-                f"{row['cell'].get('sector')} {row['cell'].get('layer')} at {row['dist'] * 1000:,.0f} m"
-                for row in far
-            )
-            + ". Downtilt that cell first."
+        names = "; ".join(
+            f"{row['cell'].get('sector')} {row['cell'].get('layer')} at {row['dist'] * 1000:,.0f} m"
+            for row in far
         )
-    choice = _prefer_overshoot(choice, served, sites, spot_pop)
-    overshoot_marks = {
-        (row["cell"].get("sector"), row["cell"].get("layer")): _overshoot_mark(row)
-        for row in far
-    }
+        line = f"Far server inside this circle: {names}."
+        if spared:
+            left = ", ".join(
+                f"{row['cell'].get('sector')} {row['cell'].get('layer')}".strip() for row in spared
+            )
+            line += f" Left in place: {left}."
+        finding_lines.append(line)
     final = choice["final"]
     if blank_m >= 80:
         final = f"{final} This covers the red road and the {blank_m:,.0f} m blank."
+    final = _whole_degrees(_number_actions(final))
+    steps = []
+    for step in choice.get("steps") or []:
+        step = dict(step)
+        step["proposal"] = _whole_degrees(step.get("proposal") or "")
+        steps.append(step)
     return {
         "finding": " ".join(finding_lines),
         "blank_m": blank_m,
-        "steps": choice["steps"],
+        "steps": steps,
         "kind": choice["kind"],
         "site": choice["site"],
         "population": _people(spot_pop),
         "final": final,
         "draw": choice.get("draw"),
-        "actions": choice.get("actions") or [],
-        "overshoot_marks": overshoot_marks,
+        "actions": [_round_proposed(row) for row in (choice.get("actions") or [])],
+        "overshoot_marks": choice.get("overshoot_marks") or {},
+        "azimuth_overrides": choice.get("azimuth_overrides") or {},
     }
 
 
@@ -1933,6 +2300,7 @@ def draw_bad_spot_sector_pies(
     column: str | None = None,
     proposal: dict | None = None,
     overshoot: dict | None = None,
+    turns: dict | None = None,
 ) -> None:
     """Transparent sector marks for every site that touches this bad-spot view.
 
@@ -1945,6 +2313,7 @@ def draw_bad_spot_sector_pies(
     sectors = load_site_sectors()
     if sectors.empty:
         return
+    turns = turns or {}
     xlim, ylim = ax.get_xlim(), ax.get_ylim()
     spot_lat = float(spot["lat"])
     spot_lon = float(spot["lon"])
@@ -1973,14 +2342,16 @@ def draw_bad_spot_sector_pies(
         bearing = _bearing_deg(lat, lon, spot_lat, spot_lon)
         facing: list[float] = []
         for _, sec in part.iterrows():
-            az = float(sec["azimuth"]) % 360.0
+            name = str(sec["Sector"]).strip()
+            moved = name in turns
+            az = float(turns.get(name, sec["azimuth"])) % 360.0
             rad = np.radians(az)
             if _ang_diff(az, bearing) <= BAD_SPOT_AIM_DEG:
                 facing.append(az)
             ax.plot(
                 [lon, lon + r_deg * np.sin(rad)],
                 [lat, lat + r_deg * np.cos(rad)],
-                color="#8FD8E0",
+                color="#E1B84A" if moved else "#8FD8E0",
                 linewidth=3.0,
                 solid_capstyle="round",
                 zorder=24,
@@ -1989,7 +2360,7 @@ def draw_bad_spot_sector_pies(
             ax.plot(
                 [lon, lon + r_deg * np.sin(rad)],
                 [lat, lat + r_deg * np.cos(rad)],
-                color="#E7FBFD",
+                color="#FFF6D8" if moved else "#E7FBFD",
                 linewidth=1.5,
                 solid_capstyle="round",
                 zorder=25,
@@ -3795,6 +4166,52 @@ def plot_bad_spot_zoom_grid(
     return path
 
 
+def _extent_around(extent: tuple[float, float, float, float], lat: float, lon: float, pad_km: float = 0.95) -> tuple[float, float, float, float]:
+    """Widen a view so a site centre and its sector arms stay inside the frame."""
+    pad_lon = pad_km / _km_per_deg_lon(lat)
+    pad_lat = pad_km / 111.32
+    return (
+        min(extent[0], lon - pad_lon),
+        max(extent[1], lon + pad_lon),
+        min(extent[2], lat - pad_lat),
+        max(extent[3], lat + pad_lat),
+    )
+
+
+def _extent_with_nearest_site(
+    extent: tuple[float, float, float, float],
+    lat: float,
+    lon: float,
+    overrides: dict | None = None,
+    names: list[str] | None = None,
+) -> tuple[float, float, float, float]:
+    """Keep at least the nearest site on the map, plus any sector the plan moves."""
+    nearest = _sectors_near(lat, lon, 5.0)
+    if nearest:
+        best = min(nearest, key=lambda rec: float(_equirect_km(rec["lat"], rec["lon"], lat, lon)))
+        extent = _extent_around(extent, float(best["lat"]), float(best["lon"]))
+    wanted = [str(name).strip() for name in (names or []) if str(name).strip()]
+    wanted.extend(str(name).strip() for name in (overrides or {}))
+    if not wanted:
+        return extent
+    sectors = load_site_sectors()
+    if sectors.empty:
+        return extent
+    sector_name = sectors["Sector"].astype(str).str.strip()
+    site_name = sectors["SiteName"].astype(str).str.strip()
+    for name in wanted:
+        hit = sectors[sector_name == name]
+        if hit.empty:
+            hit = sectors[site_name == name]
+        if hit.empty:
+            continue
+        slat, slon = float(hit.iloc[0]["lat"]), float(hit.iloc[0]["lon"])
+        if float(_equirect_km(slat, slon, lat, lon)) > 5.0:
+            continue
+        extent = _extent_around(extent, slat, slon)
+    return extent
+
+
 def plot_bad_spot_serial_maps(
     df: pd.DataFrame,
     spots: pd.DataFrame,
@@ -3807,6 +4224,7 @@ def plot_bad_spot_serial_maps(
     *,
     basemap_style: str = "satellite",
     route_casing: bool = True,
+    mode: str = "",
 ) -> list[Path]:
     """One large map per bad spot, longest first.
 
@@ -3832,11 +4250,22 @@ def plot_bad_spot_serial_maps(
         arm_lon = arm_km / _km_per_deg_lon(mid_lat)
         arm_lat = arm_km / 111.32
         zext = (zext[0] - arm_lon, zext[1] + arm_lon, zext[2] - arm_lat, zext[3] + arm_lat)
-        plan = bad_spot_advice(df, column, spot)
+        plan = bad_spot_advice(df, column, spot, mode=mode)
         proposal = plan.get("draw")
         overshoot = plan.get("overshoot_marks") or {}
         if proposal:
             zext = _extent_with_proposal(zext, proposal)
+        plan_names = []
+        for row in plan.get("actions") or []:
+            plan_names.append(str(row.get("site") or ""))
+            plan_names.append(str(row.get("sector") or ""))
+        zext = _extent_with_nearest_site(
+            zext,
+            float(spot["lat"]),
+            float(spot["lon"]),
+            plan.get("azimuth_overrides") or {},
+            plan_names,
+        )
         local = geo[
             geo["Longitude"].between(zext[0], zext[1])
             & geo["Latitude"].between(zext[2], zext[3])
@@ -3875,7 +4304,9 @@ def plot_bad_spot_serial_maps(
             _add_boundary_basemap(ax)
         else:
             _add_basemap(ax)
-        draw_bad_spot_sector_pies(ax, spot, local, column, proposal, overshoot)
+        draw_bad_spot_sector_pies(
+            ax, spot, local, column, proposal, overshoot, plan.get("azimuth_overrides") or {},
+        )
         _draw_proposal(ax, proposal)
         for gap in blanks:
             ax.plot(
