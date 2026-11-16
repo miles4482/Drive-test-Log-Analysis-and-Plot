@@ -148,17 +148,17 @@ GitHub file page: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/
 
 Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.67.xlsx
 
-The web map is v1.69. The summary presentation is v1.69.
+The web map is v1.69. The summary presentation is v1.70.
 
-## Summary presentation (v1.69)
+## Summary presentation (v1.70)
 
-The first slide is a report page: the DT route table, then RSRP, RSRQ and SINR each as a short table and a share chart. The bad-spot summary is the second slide. The geographic RSRP, RSRQ and SINR maps follow. Active then has 5 azimuth, 5 tilt, 5 fourth-sector and 5 new-site examples. Idle has 5 of 7 azimuth turns, all 4 tilt-only spots, 5 fourth sectors and all 3 new sites. One slide named Annex follows the last example. The slides after it hold the rounding rule, how a solution is chosen, the map key, and the check that every red sample inside the circle is included.
+The first slide is a report page: the DT route table, then RSRP, RSRQ and SINR each as a short table and a share chart. The bad-spot summary is the second slide. The geographic RSRP, RSRQ and SINR maps follow. Active then has 5 azimuth, 5 tilt, 5 fourth-sector and 5 new-site examples. Idle has 5 of 7 azimuth turns, all 4 tilt-only spots, 5 fourth sectors and all 3 new sites. One slide named Annex follows the last example. The first annex slide draws the 12° angle on Idle Bad Spot 2: the antenna, the direction to the red road, and the gap between them. The slides after it hold the rounding rule, how a solution is chosen, the map key, and the check that every red sample inside the circle is included.
 
 Proposed azimuth, E_tilt and M_tilt are the nearest whole degree in the workbook and on the slides. Half a degree rounds up. The dump value stays as measured. Later report builds also keep the check on every red bin inside the orange circle.
 
-**v1.69 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.69.pptx
+**v1.70 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.70.pptx
 
-Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.68.pptx
+Previous: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.69.pptx
 
 ## Excel report
 

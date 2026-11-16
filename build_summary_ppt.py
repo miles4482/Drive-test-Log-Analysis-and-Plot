@@ -28,7 +28,8 @@ ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
 REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.69.xlsx"
 PLOTS = OUTPUT / "plots"
-DEST = OUTPUT / "Bogura_DriveTest_Summary_v1.69.pptx"
+SUMMARY_VERSION = "1.70"
+DEST = OUTPUT / f"Bogura_DriveTest_Summary_v{SUMMARY_VERSION}.pptx"
 CIRCLES = PLOTS / "bad_spot_circles.json"
 
 NAVY = RGBColor(0x1B, 0x4F, 0x72)
@@ -307,7 +308,7 @@ def _text(slide, left, top, width, height, text: str, size: int, color: RGBColor
 def _footer(slide, page: int, pages: int) -> None:
     _text(
         slide, Inches(0.4), Inches(7.18), Inches(10), Inches(0.24),
-        "Bogura drive test  ·  Summary v1.69  ·  Excel v1.69  ·  Web v1.69",
+        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.69  ·  Web v1.69",
         11, MUTED,
     )
     _text(
@@ -346,7 +347,7 @@ def _report(prs: Presentation, pages: int) -> None:
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _box(slide, 0, 0, prs.slide_width, prs.slide_height, WHITE)
     _heading(slide, "Summary report")
-    _text(slide, Inches(8.4), Inches(0.12), Inches(4.6), Inches(0.38), "11–21 May 2026    ·    v1.69", 14, WHITE, align=PP_ALIGN.RIGHT)
+    _text(slide, Inches(8.4), Inches(0.12), Inches(4.6), Inches(0.38), f"11–21 May 2026    ·    v{SUMMARY_VERSION}", 14, WHITE, align=PP_ALIGN.RIGHT)
 
     _text(slide, Inches(0.32), Inches(0.7), Inches(4), Inches(0.26), "DT route", 15, NAVY, True)
     headers = ["Mode", "Source", "Plotted", "What is drawn"]
@@ -559,12 +560,143 @@ def _annex(prs: Presentation, page: int, pages: int) -> None:
     _text(slide, Inches(0.7), Inches(2.15), Inches(12), Inches(0.9), "Annex", 60, WHITE, True)
     _text(
         slide, Inches(0.7), Inches(3.3), Inches(11.5), Inches(1.4),
-        "The report ends on the previous slide. The slides after this one add the rounding rule, "
-        "how a solution is chosen, how to read a map, and the check that every red sample inside the circle is included.",
+        "The report ends on the previous slide. The slides after this one show what 12° off the red road means, "
+        "the rounding rule, how a solution is chosen, how to read a map, and the check that every red sample inside the circle is included.",
         20, RGBColor(0xD6, 0xE4, 0xF0),
     )
-    _text(slide, Inches(0.7), Inches(6.9), Inches(10), Inches(0.28), "Bogura drive test  ·  Summary v1.69", 14, RGBColor(0xAE, 0xC6, 0xD6))
+    _text(slide, Inches(0.7), Inches(6.9), Inches(10), Inches(0.28), f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}", 14, RGBColor(0xAE, 0xC6, 0xD6))
     _text(slide, Inches(11.2), Inches(6.9), Inches(1.6), Inches(0.28), f"{page}  /  {pages}", 14, RGBColor(0xAE, 0xC6, 0xD6), align=PP_ALIGN.RIGHT)
+
+
+def _off_angle_png() -> BytesIO:
+    """Idle Bad Spot 2: the angle at each site between the antenna and the red road."""
+    import matplotlib
+
+    matplotlib.use("Agg", force=False)
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Wedge
+
+    sites = [
+        {"name": "BOSDR07C", "dist": 0.80, "bearing": 346, "azimuth": 350, "off": 4, "note": "azimuth stays", "change": False},
+        {"name": "BOSDR52A", "dist": 1.11, "bearing": 17, "azimuth": 355, "off": 22, "new_az": 9, "note": "turns to 9°", "change": True},
+        {"name": "BOSDR76A", "dist": 1.94, "bearing": 46, "azimuth": 40, "off": 6, "note": "azimuth stays", "change": False},
+    ]
+
+    def from_road(dist: float, bearing: float) -> tuple[float, float]:
+        back = math.radians((bearing + 180.0) % 360.0)
+        return dist * math.sin(back), dist * math.cos(back)
+
+    def step(azimuth: float, length: float) -> tuple[float, float]:
+        rad = math.radians(azimuth % 360.0)
+        return length * math.sin(rad), length * math.cos(rad)
+
+    fig = plt.figure(figsize=(7.7, 6.28), dpi=160, facecolor="#f7f9fb")
+    ax = fig.add_axes([0.02, 0.08, 0.96, 0.90])
+    ax.set_facecolor("#f7f9fb")
+    ax.set_aspect("equal")
+    ax.set_xlim(-3.05, 1.85)
+    ax.set_ylim(-2.85, 1.15)
+    ax.axis("off")
+
+    for site in sites:
+        sx, sy = from_road(site["dist"], site["bearing"])
+        reach = site["dist"] * 0.92
+        ax.add_patch(Wedge(
+            (sx, sy), reach,
+            90 - (site["azimuth"] + 12),
+            90 - (site["azimuth"] - 12),
+            facecolor="#c5ddc0", edgecolor="#6fa36a", linewidth=0.7, alpha=0.72, zorder=2,
+        ))
+        ax.plot([sx, 0], [sy, 0], color="#8a8175", lw=1.2, ls=(0, (4, 3)), zorder=3)
+        dx, dy = step(site["azimuth"], 0.58)
+        ax.annotate(
+            "", xy=(sx + dx, sy + dy), xytext=(sx, sy),
+            arrowprops=dict(arrowstyle="-|>", color="#1f4e79", lw=2.3, mutation_scale=14), zorder=5,
+        )
+        if site["change"]:
+            gx, gy = step(site["new_az"], 0.82)
+            ax.annotate(
+                "", xy=(sx + gx, sy + gy), xytext=(sx, sy),
+                arrowprops=dict(arrowstyle="-|>", color="#c48a12", lw=2.3, mutation_scale=14), zorder=5,
+            )
+        delta = (site["bearing"] - site["azimuth"] + 180) % 360 - 180
+        color = "#c0392b" if site["off"] > 12 else "#1e7a34"
+        theta_az = 90 - site["azimuth"]
+        theta_road = 90 - (site["azimuth"] + delta)
+        ax.add_patch(Wedge(
+            (sx, sy), 0.36, min(theta_az, theta_road), max(theta_az, theta_road),
+            width=0.075, facecolor=color, edgecolor=color, zorder=6,
+        ))
+        mid = site["azimuth"] + delta / 2.0
+        lx, ly = step(mid, 0.46)
+        # A small gap sits on the antenna arrow, so the number sits beside the arc.
+        side = 90 if delta >= 0 else -90
+        ox, oy = step(mid + side, 0.28)
+        ax.text(
+            sx + lx + ox, sy + ly + oy, f"{site['off']}°", ha="center", va="center", fontsize=10,
+            fontweight="bold", color=color, zorder=7,
+            bbox=dict(boxstyle="round,pad=0.12", fc="white", ec=color, lw=0.6),
+        )
+        ax.scatter([sx], [sy], s=32, color="#1d3557", zorder=8)
+
+    labels = [
+        ("BOSDR07C", 0.80, 346, (1.05, -0.35), "4°\nazimuth stays", "#1e7a34"),
+        ("BOSDR52A", 1.11, 17, (-0.95, -2.15), "22°\nturns to 9°", "#c0392b"),
+        ("BOSDR76A", 1.94, 46, (-2.55, -0.85), "6°\nazimuth stays", "#1e7a34"),
+    ]
+    for name, dist, bearing, (tx, ty), note, color in labels:
+        sx, sy = from_road(dist, bearing)
+        ax.annotate(
+            f"{name}\n{note}", xy=(sx, sy - 0.08), xytext=(tx, ty),
+            fontsize=8, color="#1d3557", fontweight="bold", ha="center", va="center", zorder=9,
+            bbox=dict(boxstyle="round,pad=0.28", fc="white", ec=color, lw=1.1),
+            arrowprops=dict(arrowstyle="-", color=color, lw=0.7),
+        )
+
+    ax.plot([0, 0], [-0.14, 0.14], color="#c0392b", lw=6, solid_capstyle="round", zorder=6)
+    ax.annotate(
+        "red road\n(the bad samples)", xy=(0.02, 0.14), xytext=(0.42, 0.72),
+        fontsize=9, color="#7b1e16", fontweight="bold", ha="left", va="center", zorder=9,
+        arrowprops=dict(arrowstyle="-", color="#c0392b", lw=0.8),
+    )
+    ax.annotate(
+        "", xy=(1.55, 0.95), xytext=(1.55, 0.55),
+        arrowprops=dict(arrowstyle="-|>", color="#222", lw=1.3, mutation_scale=11),
+    )
+    ax.text(1.55, 1.02, "N", ha="center", va="bottom", fontsize=11, fontweight="bold", color="#222")
+    ax.plot([-2.85, -1.85], [-2.62, -2.62], color="#222", lw=1.8)
+    ax.plot([-2.85, -2.85], [-2.68, -2.56], color="#222", lw=1.2)
+    ax.plot([-1.85, -1.85], [-2.68, -2.56], color="#222", lw=1.2)
+    ax.text(-2.35, -2.74, "1 km", ha="center", va="top", fontsize=8, color="#222")
+    buf = BytesIO()
+    fig.savefig(buf, format="png", dpi=160, facecolor=fig.get_facecolor())
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
+def _annex_off_angle(prs: Presentation, page: int, pages: int) -> None:
+    """One annex slide: the 12° angle, drawn for Idle Bad Spot 2."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _heading(slide, "Annex  ·  12° off the red road")
+    slide.shapes.add_picture(_off_angle_png(), Inches(0.18), Inches(0.72), Inches(7.7), Inches(6.28))
+    left = 8.02
+    width = 4.98
+    cards = [
+        (0.76, 1.52, "The angle",
+         "Stand at the site. The blue arrow is where the antenna points. The dashed line is the direction from that site to the middle of the red road. The red road is the bad samples. The gap between the two lines is the angle."),
+        (2.38, 1.42, "The green wedge",
+         "The wedge is 12° to either side of the antenna. A dashed line inside it means the antenna already faces the red road, and the azimuth stays. A dashed line outside it means the azimuth turns toward the red road."),
+        (3.90, 2.95, "Idle Bad Spot 2",
+         "BOSDR07C is 0.8 km away. Azimuth 350°. The red road is at 346°. The gap is 4°, so the azimuth stays.\n\n"
+         "BOSDR52A is 1.1 km away. Azimuth 355°. The red road is at 17°. The gap is 22°, so it turns to 9°. The gold arrow is the new azimuth. The turn leaves about 8°.\n\n"
+         "BOSDR76A is 1.9 km away. Azimuth 40°. The red road is at 46°. The gap is 6°, so the azimuth stays. E_tilt goes from 2° to 1°."),
+    ]
+    for top, height, title, body in cards:
+        _box(slide, Inches(left), Inches(top), Inches(width), Inches(height), PAPER, LINE)
+        _text(slide, Inches(left + 0.16), Inches(top + 0.08), Inches(width - 0.32), Inches(0.32), title, 15, NAVY, True)
+        _text(slide, Inches(left + 0.16), Inches(top + 0.42), Inches(width - 0.32), Inches(height - 0.52), body, 12, INK)
+    _footer(slide, page, pages)
 
 
 def _annex_rounding(prs: Presentation, page: int, pages: int) -> None:
@@ -720,12 +852,12 @@ def build() -> Path:
         raise SystemExit("Missing example data: " + ", ".join(missing))
 
     example_count = sum(len(group["items"]) for group in GROUPS)
-    # cover, 3 KPI, bad-spot summary, examples, annex, 5 annex detail slides
-    pages = 1 + len(KPI_SLIDES) + 1 + example_count + 1 + 5
+    # cover, 3 KPI, bad-spot summary, examples, annex, 6 annex detail slides
+    pages = 1 + len(KPI_SLIDES) + 1 + example_count + 1 + 6
     prs = Presentation()
     prs.slide_width = Inches(13.333)
     prs.slide_height = Inches(7.5)
-    prs.core_properties.title = "Bogura Drive Test Summary v1.69"
+    prs.core_properties.title = f"Bogura Drive Test Summary v{SUMMARY_VERSION}"
     prs.core_properties.subject = "Route, radio KPIs, bad-spot summary, and examples"
     _report(prs, pages)
     page = 2
@@ -739,6 +871,8 @@ def build() -> Path:
             _example(prs, group, item, rows[(group["mode"], item["n"])], ordinal, page, pages)
             page += 1
     _annex(prs, page, pages)
+    page += 1
+    _annex_off_angle(prs, page, pages)
     page += 1
     _annex_rounding(prs, page, pages)
     page += 1
