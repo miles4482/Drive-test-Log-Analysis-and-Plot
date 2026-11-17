@@ -26,10 +26,10 @@ from pptx.util import Emu, Inches, Pt
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
-REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.74.xlsx"
+REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.75.xlsx"
 PLOTS = OUTPUT / "plots"
 DESCRIPTIONS = OUTPUT / "bad_spot_descriptions.json"
-SUMMARY_VERSION = "1.74"
+SUMMARY_VERSION = "1.75"
 DEST = OUTPUT / f"Bogura_DriveTest_Summary_v{SUMMARY_VERSION}.pptx"
 CIRCLES = PLOTS / "bad_spot_circles.json"
 
@@ -278,7 +278,7 @@ def _text(slide, left, top, width, height, text: str, size: int, color: RGBColor
 def _footer(slide, page: int, pages: int) -> None:
     _text(
         slide, Inches(0.4), Inches(7.18), Inches(10), Inches(0.24),
-        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.74  ·  Web v1.73",
+        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.75  ·  Web v1.73",
         11, MUTED,
     )
     _text(
@@ -392,7 +392,7 @@ def _kpi(prs: Presentation, spec: dict, page: int, pages: int) -> None:
     _heading(slide, spec["title"] + "  ·  plot and summary")
     _text(slide, Inches(0.36), Inches(0.66), Inches(12.6), Inches(0.42), spec["rule"], 13, MUTED)
     left = 0.28
-    for path, caption in ((spec["idle"], "Idle"), (spec["active"], "Active")):
+    for path, caption in ((spec["active"], "Active"), (spec["idle"], "Idle")):
         with Image.open(path) as source:
             aspect = source.width / source.height
         height = 4.95
@@ -402,15 +402,15 @@ def _kpi(prs: Presentation, spec: dict, page: int, pages: int) -> None:
         left += width + 0.16
     panel = left
     panel_w = 13.05 - panel
-    _text(slide, Inches(panel), Inches(1.12), Inches(panel_w), Inches(0.26), "IDLE", 12, NAVY, True)
+    _text(slide, Inches(panel), Inches(1.12), Inches(panel_w), Inches(0.26), "ACTIVE", 12, NAVY, True)
     top = 1.38
-    for label, value in spec["idle_stats"]:
+    for label, value in spec["active_stats"]:
         _stat(slide, panel, top, panel_w, label, value)
         top += 0.28
     top += 0.08
-    _text(slide, Inches(panel), Inches(top), Inches(panel_w), Inches(0.26), "ACTIVE", 12, NAVY, True)
+    _text(slide, Inches(panel), Inches(top), Inches(panel_w), Inches(0.26), "IDLE", 12, NAVY, True)
     top += 0.28
-    for label, value in spec["active_stats"]:
+    for label, value in spec["idle_stats"]:
         _stat(slide, panel, top, panel_w, label, value)
         top += 0.28
     top += 0.12
@@ -436,7 +436,7 @@ def _group_count(groups: list[dict], mode: str, solution: str) -> tuple[int, int
 def _bad_summary(prs: Presentation, page: int, pages: int, groups: list[dict]) -> None:
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _heading(slide, "Bad spot summary")
-    headers = ["Solution", "Idle spots", "Idle shown", "Active spots", "Active shown"]
+    headers = ["Solution", "Active spots", "Active shown", "Idle spots", "Idle shown"]
     labels = [
         ("Azimuth", "Azimuth", GOLD),
         ("Tilt, azimuth unchanged", "Tilt", GREEN),
@@ -448,10 +448,10 @@ def _bad_summary(prs: Presentation, page: int, pages: int, groups: list[dict]) -
     for label, key, color in labels:
         idle_n, idle_shown = _group_count(groups, "Idle", key)
         active_n, active_shown = _group_count(groups, "Active", key)
-        rows.append((label, str(idle_n), str(idle_shown), str(active_n), str(active_shown), color))
+        rows.append((label, str(active_n), str(active_shown), str(idle_n), str(idle_shown), color))
     idle_all = sum(_group_count(groups, "Idle", key)[0] for _label, key, _color in labels)
     active_all = sum(_group_count(groups, "Active", key)[0] for _label, key, _color in labels)
-    rows.append(("All bad spots", str(idle_all), "", str(active_all), "", NAVY))
+    rows.append(("All bad spots", str(active_all), "", str(idle_all), "", NAVY))
     widths = [4.3, 1.9, 1.9, 2.1, 2.1]
     left0 = 0.45
     top = 0.78
@@ -461,9 +461,9 @@ def _bad_summary(prs: Presentation, page: int, pages: int, groups: list[dict]) -
         _box(slide, Inches(x), Inches(top), Inches(width), Inches(0.42), NAVY)
         _text(slide, Inches(x), Inches(top + 0.06), Inches(width), Inches(0.3), header, 13, WHITE, True, PP_ALIGN.CENTER)
         x += width
-    for row_index, (label, idle, idle_shown, active, active_shown, color) in enumerate(rows):
+    for row_index, (label, active, active_shown, idle, idle_shown, color) in enumerate(rows):
         y = top + 0.42 + row_index * row_h
-        values = [label, idle, idle_shown, active, active_shown]
+        values = [label, active, active_shown, idle, idle_shown]
         x = left0
         fill = RGBColor(0xEE, 0xF3, 0xF7) if row_index % 2 == 0 else WHITE
         if row_index == len(rows) - 1:
@@ -484,9 +484,9 @@ def _bad_summary(prs: Presentation, page: int, pages: int, groups: list[dict]) -
     active_ep, _shown = _group_count(groups, "Active", "On site EP Check")
     _text(
         slide, Inches(0.45), Inches(4.7), Inches(12.4), Inches(2.2),
-        f"Tilt and azimuth together are {idle_tune} idle and {active_tune} active. The table splits that group. "
+        f"Tilt and azimuth together are {active_tune} active and {idle_tune} idle. The table splits that group. "
         "An azimuth row is a spot where an existing azimuth is turned. A tilt row leaves the azimuth as it is.\n"
-        f"On site EP Check is {idle_ep} idle and {active_ep} active. The nearest site already faces the red road, "
+        f"On site EP Check is {active_ep} active and {idle_ep} idle. The nearest site already faces the red road, "
         "within 12°, but that sector is missing from the log while another sector of the same site is on air. "
         "The azimuth is not changed. The site is checked.\n"
         "A group of 5 or fewer shows every spot. A larger group shows the first 5. "
@@ -892,7 +892,7 @@ def _annex_workbook(prs: Presentation, page: int, pages: int, groups: list[dict]
     if partial:
         deck += "Samples: " + ", ".join(partial) + "."
     rows = [
-        ("Excel v1.74", "The map has the same header, legend and dashed circle as the Excel sheet. The four blocks match. The parameter table lists azimuth and tilt changes. A new site leaves Existing blank and fills New Plan."),
+        ("Excel v1.75", "The map has the same header, legend and dashed circle as the Excel sheet. Active is on the left of the KPI sheets and Idle is on the right. A red-and-blank pocket off the first beam gets its own sector. The parameter table lists azimuth and tilt changes. A new site leaves Existing blank and fills New Plan."),
         ("This deck", deck),
         ("Web v1.69", "The live map is unchanged. Site names are white with a dark edge. Sector names on that map stay small. With KPI set to Blank, Info on a sector or the site centre opens the cell table."),
         ("RSRQ and SINR", "The coverage maps are in this deck. The workbook no longer has separate RSRQ or SINR bad-spot sheets. Poor RSRQ is at or below −20 dB. Poor SINR is at or below 0 dB."),

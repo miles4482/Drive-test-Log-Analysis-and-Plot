@@ -89,7 +89,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.74"
+REPORT_VERSION = "1.75"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -1226,8 +1226,8 @@ def build_cover(
 
     write_cell(ws, 18, 1, "How to read this workbook", size=14, bold=True)
     notes = [
-        "Cover \u2014 Idle dataset and plots on top. Active Mode dataset, histograms and the DT route are below.",
-        "RSRP / RSRQ / SINR \u2014 Idle scanner on the left (combined all-band map with bad spots, then L900 / L1800 / L2100 / L2600). Active Mode Robi UE on the right, same layers. No site pies.",
+        "Cover \u2014 Active Mode first, then Idle. The bad-spot summary lists Active, then Idle.",
+        "RSRP / RSRQ / SINR \u2014 Active Mode Robi UE on the left (combined all-band map with bad spots, then L900 / L1800 / L2100 / L2600). Idle scanner on the right, same layers. No site pies.",
         "Bad Spot RSRP / RSRQ / SINR are Idle. Bad Spot RSRP_Active / RSRQ_Active / SINR_Active apply the same poor-run rules to the Active Robi track. Each bad spot is its own large map, in order. The combined view has no circles.",
         "Poor is RSRP below -120 dBm (red only; -115 through -120 is light red and is not poor), RSRQ at or below -20 dB (inside red -30 to -17), SINR at or below 0 dB (orange/red); every poor run is circled, however short.",
         "RSRP vs KPIs is Idle. RSRP vs KPIs_Active is the same chart set for the Active Robi UE.",
@@ -1323,28 +1323,28 @@ def build_kpi_sheet(
 ):
     last_col = 18
     em = "\u2014"
-    banner(ws, f"  {name} Report", f"  Unit: {unit}  |  IDLE and Active coverage maps  |  Gridlines off", last_col=last_col)
+    banner(ws, f"  {name} Report", f"  Unit: {unit}  |  Active and Idle coverage maps  |  Gridlines off", last_col=last_col)
     set_widths(ws, {get_column_letter(i): 14 for i in range(1, last_col + 1)})
-    section_bar(ws, 4, f"{name} coverage map {em} IDLE Mode  |  Combined view  |  bad spots", 1, 8)
-    section_bar(ws, 4, f"{name} coverage map {em} Active Mode  |  {ACTIVE_OPERATOR}", 10, 18)
-    if map_path and map_path.exists():
-        add_image(ws, map_path, "A6", width=620, height=760)
+    section_bar(ws, 4, f"{name} coverage map {em} Active Mode  |  {ACTIVE_OPERATOR}", 1, 8)
+    section_bar(ws, 4, f"{name} coverage map {em} IDLE Mode  |  Combined view  |  bad spots", 10, 18)
     if active_map and active_map.exists():
-        add_image(ws, active_map, "J6", width=620, height=760)
+        add_image(ws, active_map, "A6", width=620, height=760)
+    if map_path and map_path.exists():
+        add_image(ws, map_path, "J6", width=620, height=760)
 
     start_row = 6 + 760 // 20 + 3
     block = 700 // 20 + 5
     active_band_maps = active_band_maps or {}
     for i, layer in enumerate(REPORT_LAYERS):
         row = start_row + i * block
-        section_bar(ws, row, f"{name} coverage map {em} IDLE Mode_{layer}", 1, 8)
-        section_bar(ws, row, f"{name} coverage map {em} Active Mode_{layer}", 10, 18)
-        band_path = band_maps.get(layer)
-        if band_path and band_path.exists():
-            add_image(ws, band_path, f"A{row + 2}", width=560, height=700)
+        section_bar(ws, row, f"{name} coverage map {em} Active Mode_{layer}", 1, 8)
+        section_bar(ws, row, f"{name} coverage map {em} IDLE Mode_{layer}", 10, 18)
         active_path = active_band_maps.get(layer)
         if active_path and active_path.exists():
-            add_image(ws, active_path, f"J{row + 2}", width=560, height=700)
+            add_image(ws, active_path, f"A{row + 2}", width=560, height=700)
+        band_path = band_maps.get(layer)
+        if band_path and band_path.exists():
+            add_image(ws, band_path, f"J{row + 2}", width=560, height=700)
 
 
 def _kind_label(kind: object, kpi: object = None) -> str:
@@ -2161,7 +2161,7 @@ def add_active_cover_extras(cover, data_ws, blocks, route_path: Path, active: pd
     )
     write_cell(
         cover, 19, 1,
-        "Cover — Idle dataset and plots on top. Active Mode dataset, histograms and the DT route are below.",
+        "Cover — Active Mode first, then Idle. The bad-spot summary lists Active, then Idle.",
         wrap=True,
     )
 
@@ -2437,8 +2437,8 @@ def build_report(df: pd.DataFrame, active: pd.DataFrame | None = None, out_path:
     wb.properties.title = "Bogura Drive-Test Report IDLE and Active Mode"
     wb.properties.subject = "IDLE and Active Mode"
     wb.properties.description = (
-        "Bogura drive-test report. Idle scanner on the left and on Bad Spot RSRP/RSRQ/SINR. "
-        "Active Mode Robi UE on the right and on Bad Spot *_Active and RSRP vs KPIs_Active. "
+        "Bogura drive-test report. Active Mode Robi UE on the left of RSRP, RSRQ and SINR. "
+        "Idle scanner on the right and on Bad Spot RSRP. Active bad spots are on Bad Spot RSRP_Active. "
         "Poor runs use the same thresholds in both modes."
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -3435,8 +3435,8 @@ def _graft_cover_summary(xml: str, idle_plans: list[dict], active_plans: list[di
     rows.append(
         f'<row r="{row}" ht="18" customHeight="1">'
         f'{_inline_cell(f"A{row}", 7, "Solution")}'
-        f'{_inline_cell(f"B{row}", 7, "Idle")}'
-        f'{_inline_cell(f"C{row}", 7, "Active")}</row>'
+        f'{_inline_cell(f"B{row}", 7, "Active")}'
+        f'{_inline_cell(f"C{row}", 7, "Idle")}</row>'
     )
     row += 1
     for label, key in (
@@ -3452,8 +3452,8 @@ def _graft_cover_summary(xml: str, idle_plans: list[dict], active_plans: list[di
         rows.append(
             f'<row r="{row}" ht="18" customHeight="1">'
             f'{_inline_cell(f"A{row}", style, label)}'
-            f'{_inline_cell(f"B{row}", style, idle_value)}'
-            f'{_inline_cell(f"C{row}", style, active_value)}</row>'
+            f'{_inline_cell(f"B{row}", style, active_value)}'
+            f'{_inline_cell(f"C{row}", style, idle_value)}</row>'
         )
         row += 1
     row += 1
@@ -3470,7 +3470,7 @@ def _graft_cover_summary(xml: str, idle_plans: list[dict], active_plans: list[di
     )
     merges.append(f"H{row}:T{row}")
     row += 1
-    for mode, plans in (("Idle", idle_plans), ("Active", active_plans)):
+    for mode, plans in (("Active", active_plans), ("Idle", idle_plans)):
         for index, plan in enumerate(plans, 1):
             sector, _proposed_cell = _plan_sector_cell(plan)
             cell = str(plan.get("serving") or "")
@@ -3544,8 +3544,8 @@ def _place_cover_summary_beside_route(xml: str, idle_plans: list[dict], active_p
     write(74, title)
     write(76, {
         "P": _inline_cell("P76", 7, "Solution"),
-        "Q": _inline_cell("Q76", 7, "Idle"),
-        "R": _inline_cell("R76", 7, "Active"),
+        "Q": _inline_cell("Q76", 7, "Active"),
+        "R": _inline_cell("R76", 7, "Idle"),
     })
     data_rows = (
         (77, "Tilt and azimuth", idle_counts["tune"], active_counts["tune"], 20),
@@ -3557,8 +3557,8 @@ def _place_cover_summary_beside_route(xml: str, idle_plans: list[dict], active_p
     for row, label, idle_n, active_n, style in data_rows:
         write(row, {
             "P": _inline_cell(f"P{row}", style, label),
-            "Q": _inline_cell(f"Q{row}", style, str(idle_n)),
-            "R": _inline_cell(f"R{row}", style, str(active_n)),
+            "Q": _inline_cell(f"Q{row}", style, str(active_n)),
+            "R": _inline_cell(f"R{row}", style, str(idle_n)),
         })
     if 'ref="P74:T74"' not in xml:
         xml = re.sub(
@@ -3970,14 +3970,15 @@ def write_bad_spot_advice(src: Path | None = None) -> Path:
         advice_for["Bad Spot RSRP_Active"],
     ).encode("utf-8")
     parts[_EP_SHEET] = _ep_sheet_xml(
-        _ep_rows("Idle", advice_for["Bad Spot RSRP"])
-        + _ep_rows("Active", advice_for["Bad Spot RSRP_Active"])
+        _ep_rows("Active", advice_for["Bad Spot RSRP_Active"])
+        + _ep_rows("Idle", advice_for["Bad Spot RSRP"])
     )
     _ensure_ep_sheet(parts)
     parts["xl/styles.xml"] = _add_advice_styles(parts["xl/styles.xml"].decode("utf-8")).encode("utf-8")
     for name, body in drawings_before.items():
         if parts.get(name) != body:
             raise SystemExit(f"Drawing changed while adding advice: {name}")
+    _put_active_on_the_left(parts)
     _drop_workbook_sheets(parts, _DROP_BAD_SPOT_SHEETS)
     tmp = src.with_suffix(".tmp.xlsx")
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -3992,6 +3993,59 @@ def write_bad_spot_advice(src: Path | None = None) -> Path:
         shutil.copy2(VERSIONED_XLSX, REPORT_XLSX)
     print(f"Wrote {VERSIONED_XLSX}", flush=True)
     return VERSIONED_XLSX
+
+
+def _put_active_on_the_left(parts: dict[str, bytes]) -> None:
+    """Active Mode maps on the left of RSRP, RSRQ and SINR. Idle maps move to the right."""
+    main = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    rel_ns = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+    wb = ET.fromstring(parts["xl/workbook.xml"])
+    book_rels = ET.fromstring(parts["xl/_rels/workbook.xml.rels"])
+    rid_target = {rel.attrib["Id"]: rel.attrib["Target"].lstrip("/") for rel in book_rels}
+    drawings = _sheet_drawings(parts)
+    for node in wb.find(f"{main}sheets"):
+        name = node.attrib["name"]
+        if name not in ("RSRP", "RSRQ", "SINR"):
+            if name == "Cover":
+                path = rid_target[node.attrib[f"{rel_ns}id"]]
+                text = parts[path].decode("utf-8")
+                text = text.replace(
+                    "Cover — Idle dataset and plots on top. Active Mode dataset, histograms and the DT route are below.",
+                    "Cover — Active Mode first, then Idle. The bad-spot summary lists Active, then Idle.",
+                )
+                text = text.replace(
+                    "RSRP / RSRQ / SINR — Idle scanner on the left (combined all-band map with bad spots, then L900 / L1800 / L2100 / L2600). Active Mode Robi UE on the right, same layers. No site pies.",
+                    "RSRP / RSRQ / SINR — Active Mode Robi UE on the left (combined all-band map with bad spots, then L900 / L1800 / L2100 / L2600). Idle scanner on the right, same layers. No site pies.",
+                )
+                parts[path] = text.encode("utf-8")
+            continue
+        path = rid_target[node.attrib[f"{rel_ns}id"]]
+        xml = parts[path].decode("utf-8")
+        if xml.find("coverage map — Active Mode") < xml.find("coverage map — IDLE Mode"):
+            continue
+        xml = xml.replace(
+            f"{name} coverage map — IDLE Mode  |  Combined view  |  bad spots",
+            f"{name} coverage map — MODEHOLD",
+        )
+        xml = xml.replace(
+            f"{name} coverage map — Active Mode  |  {ACTIVE_OPERATOR}",
+            f"{name} coverage map — IDLE Mode  |  Combined view  |  bad spots",
+        )
+        xml = xml.replace(
+            f"{name} coverage map — MODEHOLD",
+            f"{name} coverage map — Active Mode  |  {ACTIVE_OPERATOR}",
+        )
+        xml = xml.replace(f"{name} coverage map — IDLE Mode_", f"{name} coverage map — MODEHOLD_")
+        xml = xml.replace(f"{name} coverage map — Active Mode_", f"{name} coverage map — IDLE Mode_")
+        xml = xml.replace(f"{name} coverage map — MODEHOLD_", f"{name} coverage map — Active Mode_")
+        xml = xml.replace("IDLE and Active coverage maps", "Active and Idle coverage maps")
+        parts[path] = xml.encode("utf-8")
+        drawing_name = drawings[name]
+        drawing = parts[drawing_name].decode("utf-8")
+        drawing = drawing.replace("<from><col>0</col>", "<from><col>TMP</col>")
+        drawing = drawing.replace("<from><col>9</col>", "<from><col>0</col>")
+        drawing = drawing.replace("<from><col>TMP</col>", "<from><col>9</col>")
+        parts[drawing_name] = drawing.encode("utf-8")
 
 
 def _map_content_start(image) -> int:
@@ -4015,7 +4069,7 @@ def _map_content_start(image) -> int:
     return 70
 
 
-def frame_bad_spot_maps() -> int:
+def frame_bad_spot_maps(only: set[str] | None = None) -> int:
     """Add the sample header and legend to every serial map without resizing it.
 
     The Excel circle is a fraction of this picture, so the pixel size stays put.
@@ -4038,6 +4092,8 @@ def frame_bad_spot_maps() -> int:
     framed = 0
     for path in sorted(PLOTS_DIR.glob("excel_bad_spots_rsrp_spot_*.png")):
         name = path.name
+        if only is not None and name not in only:
+            continue
         if name.startswith("excel_bad_spots_rsrp_spot_active_"):
             mode, number = "Active", int(name.rsplit("_", 1)[-1].split(".")[0])
         else:

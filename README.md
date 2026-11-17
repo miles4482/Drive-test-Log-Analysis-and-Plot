@@ -138,9 +138,19 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
+## Download Excel report (v1.75)
+
+**v1.75 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.75.xlsx
+
+Active Mode is on the left of the RSRP, RSRQ and SINR sheets. Idle is on the right. The Cover summary lists Active, then Idle. A red run and a blank that sit off the first beam get their own sector. Active Bad Spot 11 keeps the SGSDR03 4th sector at 258° and turns SGKMK01A from 0° to 25° for the other side of the circle.
+
+**v1.75 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.75.pptx
+
+The web map stays v1.73: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.73.zip
+
 ## Download Excel report (v1.74)
 
-**v1.74 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.74.xlsx
+**v1.74:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.74.xlsx
 
 Each bad-spot map uses the sample header, legend, and dashed circle, and the PPT uses that same picture. Under the four text blocks, a parameter table lists every azimuth or tilt change. Existing is blank for a new site. New Plan is filled.
 

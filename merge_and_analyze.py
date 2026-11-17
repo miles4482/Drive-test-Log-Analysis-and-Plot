@@ -1910,6 +1910,230 @@ def _ep_check_choice(hit: dict, spot_pop: float, mode: str) -> dict:
     }
 
 
+def _proposed_beams(choice: dict, sites: list[dict]) -> list[tuple[float, float, float]]:
+    """Origin and azimuth of every beam this solution already draws."""
+    beams: list[tuple[float, float, float]] = []
+    draw = choice.get("draw") or {}
+    if draw.get("lat") is not None and draw.get("azimuths"):
+        for azimuth in draw["azimuths"]:
+            beams.append((float(draw["lat"]), float(draw["lon"]), float(azimuth)))
+    by_name = {site["name"]: site for site in sites}
+    for action in choice.get("actions") or []:
+        azimuth = action.get("p_azimuth")
+        site = by_name.get(str(action.get("site") or ""))
+        if site is None or azimuth is None:
+            continue
+        beams.append((float(site["lat"]), float(site["lon"]), float(azimuth)))
+    for extra in draw.get("more") or []:
+        beams.append((float(extra["lat"]), float(extra["lon"]), float(extra["azimuth"])))
+    return beams
+
+
+def _offbeam_pockets(samples: pd.DataFrame, column: str, spot: pd.Series, beams: list[tuple[float, float, float]]) -> list[dict]:
+    """Red samples and a blank inside the circle that sit well off every planned beam.
+
+    Active Bad Spot 11 is the pattern: the 4th sector covers one red bin and the
+    blank beside it, while another red bin and a long blank sit about 45° away
+    and have no solution.
+    """
+    if not beams:
+        return []
+    bins = _red_bins_inside(samples, column, spot)
+    runs = _red_runs(bins) if bins else []
+    points = []
+    for run in runs:
+        points.append({
+            "lat": sum(item["lat"] for item in run) / len(run),
+            "lon": sum(item["lon"] for item in run) / len(run),
+            "red": _run_length_m(run),
+            "blank": 0.0,
+        })
+    for gap in _blank_segments(samples, spot):
+        points.append({
+            "lat": (float(gap["lat1"]) + float(gap["lat2"])) / 2.0,
+            "lon": (float(gap["lon1"]) + float(gap["lon2"])) / 2.0,
+            "red": 0.0,
+            "blank": float(gap["length_m"]),
+        })
+    uncovered = []
+    for point in points:
+        offset = min(
+            abs(_signed_deg(azimuth, _bearing_deg(lat, lon, point["lat"], point["lon"])))
+            for lat, lon, azimuth in beams
+        )
+        if offset > 35.0:
+            uncovered.append({**point, "off": offset})
+    groups: list[dict] = []
+    for point in uncovered:
+        placed = False
+        for group in groups:
+            if float(_equirect_km(group["lat"], group["lon"], point["lat"], point["lon"])) <= 1.0:
+                count = group["n"] + 1
+                group["lat"] = (group["lat"] * group["n"] + point["lat"]) / count
+                group["lon"] = (group["lon"] * group["n"] + point["lon"]) / count
+                group["n"] = count
+                group["red"] += point["red"]
+                group["blank"] += point["blank"]
+                group["off"] = max(group["off"], point["off"])
+                placed = True
+                break
+        if not placed:
+            groups.append({**point, "n": 1})
+    kept = [group for group in groups if group["red"] >= 50.0 and group["blank"] >= 150.0]
+    kept.sort(key=lambda group: group["red"] + group["blank"], reverse=True)
+    return kept[:2]
+
+
+def _cover_offbeam_pocket(
+    choice: dict,
+    samples: pd.DataFrame,
+    column: str,
+    spot: pd.Series,
+    sites: list[dict],
+    spot_pop: float,
+) -> dict:
+    """Add a beam for a red-and-blank pocket the first solution does not cover."""
+    if choice.get("kind") == "ep":
+        return choice
+    beams = _proposed_beams(choice, sites)
+    pockets = _offbeam_pockets(samples, column, spot, beams)
+    if not pockets:
+        return choice
+    choice = dict(choice)
+    choice["actions"] = list(choice.get("actions") or [])
+    choice["azimuth_overrides"] = dict(choice.get("azimuth_overrides") or {})
+    if choice.get("draw"):
+        choice["draw"] = dict(choice["draw"])
+        choice["draw"]["azimuths"] = list(choice["draw"].get("azimuths") or [])
+        choice["draw"]["arm_targets"] = dict(choice["draw"].get("arm_targets") or {})
+        choice["draw"]["more"] = list(choice["draw"].get("more") or [])
+    sentences = []
+    for pocket in pockets:
+        beams = _proposed_beams(choice, sites)
+        still = min(
+            abs(_signed_deg(azimuth, _bearing_deg(lat, lon, pocket["lat"], pocket["lon"])))
+            for lat, lon, azimuth in beams
+        ) if beams else 999.0
+        if still <= 35.0:
+            continue
+        fix = _pocket_beam(choice, pocket, spot_pop)
+        if fix is None:
+            continue
+        sentences.append(fix)
+    if not sentences:
+        return choice
+    choice["final"] = (choice.get("final") or "").rstrip() + " " + " ".join(sentences)
+    return choice
+
+
+def _pocket_beam(choice: dict, pocket: dict, spot_pop: float) -> str | None:
+    """One extra sector, or one turn, aimed at the uncovered pocket. None when no host is inside 3 km."""
+    del spot_pop
+    near = _sites_around(_sectors_near(pocket["lat"], pocket["lon"], 8.5), pocket["lat"], pocket["lon"])
+    near = [site for site in near if site["dist"] <= FOURTH_SAVE_KM]
+    if not near:
+        return None
+    taken: dict[str, list[float]] = {}
+    draw = choice.get("draw") or {}
+    if choice.get("kind") in ("fourth", "new") and draw.get("azimuths"):
+        taken.setdefault(str(choice.get("site") or ""), []).extend(float(az) for az in draw["azimuths"])
+    for action in choice.get("actions") or []:
+        if action.get("p_azimuth") is None:
+            continue
+        taken.setdefault(str(action.get("site") or ""), []).append(float(action["p_azimuth"]))
+
+    facing = None
+    for site in near:
+        for rec in site["recs"]:
+            if rec.get("azimuth") is None or not rec.get("sector"):
+                continue
+            off = abs(_signed_deg(float(rec["azimuth"]), site["bearing"]))
+            if off > 12.0:
+                continue
+            score = (site["dist"], 0 if rec.get("layer") == "L900" else 1, off)
+            if facing is None or score < facing[0]:
+                facing = (score, site, rec)
+    if facing is not None:
+        _score, site, rec = facing
+        return (
+            f"{rec.get('sector')} {rec.get('layer')} already faces this side of the circle, "
+            f"azimuth {float(rec['azimuth']):.0f}°, {site['dist']:.1f} km away. "
+            f"It covers the red samples and the {pocket['blank']:,.0f} m blank there."
+        )
+
+    turn = None
+    for site in near:
+        if site["dist"] > TUNE_KM:
+            continue
+        for rec in site["recs"]:
+            if rec.get("azimuth") is None or rec.get("layer") not in ("L900", "L1800"):
+                continue
+            sector = str(rec.get("sector") or "").strip()
+            if not sector or sector in choice.get("azimuth_overrides", {}):
+                continue
+            off = abs(_signed_deg(float(rec["azimuth"]), site["bearing"]))
+            if not 12.0 < off <= 32.0:
+                continue
+            score = (0 if rec.get("layer") == "L900" else 1, site["dist"], off)
+            if turn is None or score < turn[0]:
+                turn = (score, site, rec, off)
+    if turn is not None:
+        _score, site, rec, off = turn
+        signed = _signed_deg(float(rec["azimuth"]), site["bearing"])
+        delta = math.copysign(min(off, 25.0), signed)
+        new_az = (float(rec["azimuth"]) + delta) % 360.0
+        item = {
+            "rec": rec, "dist": site["dist"], "off": off, "delta": 0.0, "turn": delta,
+            "old_pop": None, "new_pop": None, "overshoot": False, "site": site["name"],
+        }
+        action = _tune_action(item)
+        action["action"] = "Azimuth toward the other side"
+        choice["actions"].append(action)
+        choice["azimuth_overrides"][str(rec.get("sector")).strip()] = new_az
+        return (
+            f"{rec.get('sector')} turns from {float(rec['azimuth']):.0f}° to {new_az:.0f}° "
+            f"to cover the red samples and the {pocket['blank']:,.0f} m blank "
+            f"on the other side of the circle."
+        )
+
+    for site in near:
+        bearing = float(site["bearing"])
+        existing = [float(rec["azimuth"]) for rec in site["recs"] if rec.get("azimuth") is not None]
+        blocked = existing + taken.get(site["name"], [])
+        if any(_azimuth_gap(bearing, azimuth) < 40.0 for azimuth in blocked):
+            continue
+        tilt = int(round(min(10.0, max(0.0, _ground_tilt_deg(site.get("height"), site["dist"])))))
+        action = _fourth_action(site)
+        action["p_azimuth"] = _ep_num(bearing)
+        action["p_et"] = float(tilt)
+        choice["actions"].append(action)
+        if (
+            choice.get("draw")
+            and choice.get("kind") == "fourth"
+            and abs(float(choice["draw"]["lat"]) - site["lat"]) < 1e-4
+            and abs(float(choice["draw"]["lon"]) - site["lon"]) < 1e-4
+        ):
+            choice["draw"]["azimuths"].append(bearing)
+            choice["draw"]["arm_targets"][round(bearing, 1)] = (pocket["lat"], pocket["lon"])
+        elif choice.get("draw") is None:
+            choice["draw"] = _proposal_draw(
+                "fourth", site["lat"], site["lon"], [bearing], pocket["lat"], pocket["lon"], "4th L900",
+            )
+            choice["draw"]["arm_targets"] = {round(bearing, 1): (pocket["lat"], pocket["lon"])}
+            choice["draw"]["more"] = []
+        else:
+            choice["draw"].setdefault("more", []).append({
+                "lat": site["lat"], "lon": site["lon"], "azimuth": bearing,
+                "target_lat": pocket["lat"], "target_lon": pocket["lon"],
+            })
+        return (
+            f"New L900 sector on {site['name']}, azimuth {bearing:.0f}°, E_tilt {tilt}°, M_tilt 0°, "
+            f"covers the red samples and the {pocket['blank']:,.0f} m blank "
+            f"{pocket['off']:.0f}° off the first beam."
+        )
+    return None
+
+
 def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series, mode: str = "") -> dict:
     """Finding and one final solution for a bad spot, including a blank inside the circle.
 
@@ -2007,6 +2231,8 @@ def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series, mode: s
         silent = _facing_for_ep_check(sites, seen)
         if silent is not None:
             choice = _ep_check_choice(silent, spot_pop, plan_mode)
+    if choice.get("kind") != "ep":
+        choice = _cover_offbeam_pocket(choice, samples, column, spot, sites, spot_pop)
     serving_names: list[str] = []
     for row in served:
         name = str(row["cell"].get("name") or "").strip()
@@ -2535,7 +2761,12 @@ def _draw_serving_spider(
 
 def _proposal_arm_km(ax, lat: float, draw: dict, azimuth: float, facing: bool) -> float:
     """Arm length for a proposed sector. The arm toward the bad spot reaches past it."""
-    del ax, lat, azimuth
+    del ax
+    targets = draw.get("arm_targets") or {}
+    hit = targets.get(round(float(azimuth), 1))
+    if hit is not None:
+        reach = float(_equirect_km(float(draw["lat"]), float(draw["lon"]), float(hit[0]), float(hit[1])))
+        return max(0.9, reach * 1.15)
     side_km = 1.35 if draw.get("kind") == "new" else 0.9
     if not facing:
         return side_km
@@ -2561,6 +2792,12 @@ def _extent_with_proposal(extent: tuple[float, float, float, float], draw: dict)
     tip_pad_lat = overshoot_km / 111.32
     lons = [float(draw["lon"]), float(draw["target_lon"])]
     lats = [lat, float(draw["target_lat"])]
+    for point in (draw.get("arm_targets") or {}).values():
+        lats.append(float(point[0]))
+        lons.append(float(point[1]))
+    for extra in draw.get("more") or []:
+        lats.extend((float(extra["lat"]), float(extra["target_lat"])))
+        lons.extend((float(extra["lon"]), float(extra["target_lon"])))
     return (
         min(extent[0], min(lons) - pad_lon, min(lons) - tip_pad_lon),
         max(extent[1], max(lons) + pad_lon, max(lons) + tip_pad_lon),
@@ -2601,6 +2838,19 @@ def _draw_proposal(ax, draw: dict | None) -> None:
             ax, lon, lat, tip_lon, tip_lat, (0.62, 0.50, 0.74), pixels=40, side=-1.0, clear_px=56,
         )
         _ink(ax, lx, ly, str(draw.get("label") or "Proposed"), 8, "#F7FEFF")
+    for extra in draw.get("more") or []:
+        elat, elon = float(extra["lat"]), float(extra["lon"])
+        reach = float(_equirect_km(elat, elon, float(extra["target_lat"]), float(extra["target_lon"])))
+        length = max(0.9, reach * 1.15)
+        az = float(extra["azimuth"])
+        rad = np.radians(az % 360.0)
+        x1 = elon + (length / _km_per_deg_lon(elat)) * np.sin(rad)
+        y1 = elat + (length / 111.32) * np.cos(rad)
+        ax.plot([elon, x1], [elat, y1], color="white", linewidth=6.0, solid_capstyle="round", zorder=31, clip_on=True)
+        ax.plot([elon, x1], [elat, y1], color="#D35400", linewidth=3.2, solid_capstyle="round", zorder=32, clip_on=True)
+        mx, my = _label_on_segment(ax, elon, elat, x1, y1, (0.86, 0.74, 0.94), pixels=32, side=1.0, clear_px=48)
+        _ink(ax, mx, my, f"{az:.0f}°", 8, "#F7FEFF")
+        ax.scatter([elon], [elat], s=42, c="#D35400", marker="o", zorder=36, edgecolors="white", linewidths=0.9)
 
 
 def draw_bad_spot_sector_pies(
@@ -4581,6 +4831,7 @@ def plot_bad_spot_serial_maps(
     basemap_style: str = "satellite",
     route_casing: bool = True,
     mode: str = "",
+    only: set[int] | None = None,
 ) -> list[Path]:
     """One large map per bad spot, longest first.
 
@@ -4597,6 +4848,8 @@ def plot_bad_spot_serial_maps(
     total = len(work)
     for i, (_, spot) in enumerate(work.iterrows(), start=1):
         path = directory / f"{stem}_{i:02d}.png"
+        if only is not None and i not in only:
+            continue
         print(f"  {stem} bad spot {i}/{total}", flush=True)
         fig, ax = plt.subplots(figsize=(9.4, 8.6))
         zext = _zoom_extent(spot)
