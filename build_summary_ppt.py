@@ -26,10 +26,10 @@ from pptx.util import Emu, Inches, Pt
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
-REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.73.xlsx"
+REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.74.xlsx"
 PLOTS = OUTPUT / "plots"
 DESCRIPTIONS = OUTPUT / "bad_spot_descriptions.json"
-SUMMARY_VERSION = "1.73"
+SUMMARY_VERSION = "1.74"
 DEST = OUTPUT / f"Bogura_DriveTest_Summary_v{SUMMARY_VERSION}.pptx"
 CIRCLES = PLOTS / "bad_spot_circles.json"
 
@@ -278,7 +278,7 @@ def _text(slide, left, top, width, height, text: str, size: int, color: RGBColor
 def _footer(slide, page: int, pages: int) -> None:
     _text(
         slide, Inches(0.4), Inches(7.18), Inches(10), Inches(0.24),
-        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.73  ·  Web v1.73",
+        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.74  ·  Web v1.73",
         11, MUTED,
     )
     _text(
@@ -530,13 +530,17 @@ def _example(prs: Presentation, group: dict, item: dict, record: dict[str, str],
     with Image.open(picture) as source:
         aspect = source.width / source.height
     image = _jpeg(picture)
-    max_w, max_h = 6.7, 6.35
+    change_count = len((_description(group["mode"], item["n"]).get("changes") or []))
+    table_rows = 2 + min(4, change_count or 1)
+    table_h = 0.30 * table_rows
+    max_w, max_h = 6.55, min(4.70, 6.85 - 0.74 - table_h)
     width = max_w
     height = width / aspect
     if height > max_h:
         height = max_h
         width = height * aspect
     slide.shapes.add_picture(image, Inches(0.16), Inches(0.68), Inches(width), Inches(height))
+    _change_table(slide, group["mode"], item["n"], 0.16, 0.68 + height + 0.05, 6.7, table_h)
 
     panel = 7.05
     panel_w = 5.95
@@ -568,7 +572,65 @@ def _example(prs: Presentation, group: dict, item: dict, record: dict[str, str],
     _footer(slide, page, pages)
 
 
-def _description(mode: str, number: int) -> dict[str, str]:
+def _change_table(slide, mode: str, number: int, left: float, top: float, width: float, height: float) -> None:
+    """Existing versus New Plan for the azimuth and tilt rows on this spot."""
+    record = _description(mode, number)
+    changes = list(record.get("changes") or [])[:4]
+    headers = ("Site", "Cell", "Sector", "H", "Az", "E", "M", "H", "Az", "E", "M")
+    body = changes or [{"site": "No azimuth or tilt change", "cell": "", "sector": "", "height": None,
+                        "azimuth": None, "et": None, "mt": None, "p_height": None, "p_azimuth": None,
+                        "p_et": None, "p_mt": None}]
+    rows = 2 + len(body)
+    table_shape = slide.shapes.add_table(rows, len(headers), Inches(left), Inches(top), Inches(width), Inches(height))
+    table = table_shape.table
+    for row in table.rows:
+        row.height = Inches(height / rows)
+    widths = (1.25, 1.15, 0.95, 0.36, 0.40, 0.32, 0.32, 0.36, 0.40, 0.32, 0.32)
+    scale = width / sum(widths)
+    for index, col_width in enumerate(widths):
+        table.columns[index].width = Inches(col_width * scale)
+
+    def write(cell, text, size, bold, fill, color, center=False):
+        cell.text = ""
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = fill
+        frame = cell.text_frame
+        frame.word_wrap = False
+        frame.margin_left = Emu(10000)
+        frame.margin_right = Emu(10000)
+        frame.margin_top = Emu(2000)
+        frame.margin_bottom = Emu(2000)
+        paragraph = frame.paragraphs[0]
+        paragraph.alignment = PP_ALIGN.CENTER if center else PP_ALIGN.LEFT
+        _set_run(paragraph.add_run(), "" if text is None else str(text), size, color, bold)
+
+    group = table.rows[0]
+    for index in range(len(headers)):
+        label = "Existing" if index == 3 else "New Plan" if index == 7 else ""
+        write(group.cells[index], label, 9, True, NAVY, WHITE, True)
+    # Merge the group labels. PowerPoint needs the cells spanned, not just the text.
+    group.cells[3].merge(group.cells[6])
+    group.cells[7].merge(group.cells[10])
+    write(group.cells[3], "Existing", 9, True, NAVY, WHITE, True)
+    write(group.cells[7], "New Plan", 9, True, NAVY, WHITE, True)
+    for index, label in enumerate(headers):
+        write(table.rows[1].cells[index], label, 8, True, PAPER, NAVY, True)
+    keys = ("site", "cell", "sector", "height", "azimuth", "et", "mt", "p_height", "p_azimuth", "p_et", "p_mt")
+    for row_index, item in enumerate(body):
+        if item.get("site") == "No azimuth or tilt change":
+            table.rows[row_index + 2].cells[0].merge(table.rows[row_index + 2].cells[10])
+            write(table.rows[row_index + 2].cells[0], "No azimuth or tilt change", 9, False, WHITE, INK, False)
+            continue
+        for col_index, key in enumerate(keys):
+            value = item.get(key)
+            if key == "site" and str(value).startswith("New site"):
+                value = "New site"
+            if isinstance(value, float):
+                value = str(int(round(value))) if abs(value - round(value)) < 0.05 else f"{value:.1f}"
+            write(table.rows[row_index + 2].cells[col_index], value or "", 8, False, WHITE, INK, col_index >= 3)
+
+
+def _description(mode: str, number: int) -> dict:
     """The four blocks written beside the same bad spot in the Excel workbook."""
     if not DESCRIPTIONS.exists():
         return {}
@@ -830,7 +892,7 @@ def _annex_workbook(prs: Presentation, page: int, pages: int, groups: list[dict]
     if partial:
         deck += "Samples: " + ", ".join(partial) + "."
     rows = [
-        ("Excel v1.73", "A map and the same four blocks for every idle and active bad spot: serving cells, geography, root cause, and suggestions. The PPT example uses those blocks. A turned sector keeps its current arm. The proposed azimuth is a blue dashed arm."),
+        ("Excel v1.74", "The map has the same header, legend and dashed circle as the Excel sheet. The four blocks match. The parameter table lists azimuth and tilt changes. A new site leaves Existing blank and fills New Plan."),
         ("This deck", deck),
         ("Web v1.69", "The live map is unchanged. Site names are white with a dark edge. Sector names on that map stay small. With KPI set to Blank, Info on a sector or the site centre opens the cell table."),
         ("RSRQ and SINR", "The coverage maps are in this deck. The workbook no longer has separate RSRQ or SINR bad-spot sheets. Poor RSRQ is at or below −20 dB. Poor SINR is at or below 0 dB."),

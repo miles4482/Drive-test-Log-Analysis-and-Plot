@@ -89,7 +89,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.73"
+REPORT_VERSION = "1.74"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -1511,6 +1511,32 @@ def place_bad_spot_advice(ws, header_row: int, plan: dict) -> None:
         ws.cell(row, 9).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         ws.cell(row, 10).alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
         row += span + 1
+    table_at = header_row + 32
+    changes = plan.get("changes") or _parameter_changes(plan)
+    ws.merge_cells(start_row=table_at, start_column=9, end_row=table_at, end_column=11)
+    ws.merge_cells(start_row=table_at, start_column=12, end_row=table_at, end_column=15)
+    ws.merge_cells(start_row=table_at, start_column=16, end_row=table_at, end_column=19)
+    write_cell(ws, table_at, 9, "Parameter change", size=11, bold=True, color=NAVY, fill_color=LIGHT, align="center")
+    write_cell(ws, table_at, 12, "Existing", size=11, bold=True, color=NAVY, fill_color=LIGHT, align="center")
+    write_cell(ws, table_at, 16, "New Plan", size=11, bold=True, color=NAVY, fill_color=LIGHT, align="center")
+    labels = ("Site", "Cell", "Sector", "Height", "Azimuth", "ET", "MT", "Height", "Azimuth", "ET", "MT")
+    for index, text in enumerate(labels):
+        write_cell(ws, table_at + 1, 9 + index, text, size=10, bold=True, color=NAVY, fill_color=LIGHT, align="center")
+    shown = changes[:7]
+    if not shown:
+        ws.merge_cells(start_row=table_at + 2, start_column=9, end_row=table_at + 2, end_column=19)
+        write_cell(ws, table_at + 2, 9, "No azimuth or tilt change.", size=10, color=NAVY, align="left")
+        return
+    for offset, item in enumerate(shown):
+        values = (
+            item.get("site") or "", item.get("cell") or "", item.get("sector") or "",
+            _sheet_number(item.get("height")), _sheet_number(item.get("azimuth")),
+            _sheet_number(item.get("et")), _sheet_number(item.get("mt")),
+            _sheet_number(item.get("p_height")), _sheet_number(item.get("p_azimuth")),
+            _sheet_number(item.get("p_et")), _sheet_number(item.get("p_mt")),
+        )
+        for index, text in enumerate(values):
+            write_cell(ws, table_at + 2 + offset, 9 + index, text, size=10, color=NAVY, align="center" if index >= 3 else "left")
 
 
 def build_kpi_bad_spot_sheet(
@@ -2924,6 +2950,7 @@ def _advice_sheet_rows(header: int, plan: dict) -> tuple[dict[int, str], list[st
         ("Suggestions", sections.get("suggestions") or plan.get("final") or ""),
     )
     spans = (8, 5, 5, 6)
+    changes = plan.get("changes") or []
 
     def cell(ref: str, style: int, text: str | None = None) -> str:
         if text is None:
@@ -2951,12 +2978,74 @@ def _advice_sheet_rows(header: int, plan: dict) -> tuple[dict[int, str], list[st
         merges.append(f"I{row}:I{row + span}")
         merges.append(f"J{row}:P{row + span}")
         row += span + 1
+    # The next bad-spot title is 41 rows down. The table stays in the gap.
+    table_at = header + 32
+    rows[table_at] = styled_row(table_at, [
+        cell(f"I{table_at}", 32, "Parameter change"),
+        cell(f"J{table_at}", 32),
+        cell(f"K{table_at}", 32),
+        cell(f"L{table_at}", 32, "Existing"),
+        cell(f"M{table_at}", 32),
+        cell(f"N{table_at}", 32),
+        cell(f"O{table_at}", 32),
+        cell(f"P{table_at}", 32, "New Plan"),
+        cell(f"Q{table_at}", 32),
+        cell(f"R{table_at}", 32),
+        cell(f"S{table_at}", 32),
+    ])
+    merges.append(f"I{table_at}:K{table_at}")
+    merges.append(f"L{table_at}:O{table_at}")
+    merges.append(f"P{table_at}:S{table_at}")
+    labels = ("Site", "Cell", "Sector", "Height", "Azimuth", "ET", "MT", "Height", "Azimuth", "ET", "MT")
+    head = table_at + 1
+    rows[head] = styled_row(head, [
+        cell(f"{get_column_letter(9 + index)}{head}", 36, text)
+        for index, text in enumerate(labels)
+    ])
+    shown = changes[:7]
+    if not shown:
+        note = head + 1
+        rows[note] = styled_row(note, [
+            cell(f"I{note}", 37, "No azimuth or tilt change."),
+        ])
+        merges.append(f"I{note}:S{note}")
+        return rows, merges
+    for offset, item in enumerate(shown):
+        data = head + 1 + offset
+        values = (
+            item.get("site") or "",
+            item.get("cell") or "",
+            item.get("sector") or "",
+            _sheet_number(item.get("height")),
+            _sheet_number(item.get("azimuth")),
+            _sheet_number(item.get("et")),
+            _sheet_number(item.get("mt")),
+            _sheet_number(item.get("p_height")),
+            _sheet_number(item.get("p_azimuth")),
+            _sheet_number(item.get("p_et")),
+            _sheet_number(item.get("p_mt")),
+        )
+        rows[data] = styled_row(data, [
+            cell(f"{get_column_letter(9 + index)}{data}", 37, text)
+            for index, text in enumerate(values)
+        ])
     return rows, merges
+
+
+def _sheet_number(value) -> str:
+    """Blank when the dump has no value. A new site leaves Existing empty."""
+    if value is None or value == "":
+        return ""
+    number = float(value)
+    if abs(number - round(number)) < 0.05:
+        return str(int(round(number)))
+    return f"{number:.1f}"
 
 
 def _strip_advice_rows(xml: str, headers: list[tuple[int, int]]) -> str:
     """Remove a previous suggestion block so the new table can take its rows."""
-    drop = {row for header, _number in headers for row in range(header + 2, header + 32)}
+    # Through the parameter table, and short of the next bad-spot title.
+    drop = {row for header, _number in headers for row in range(header + 2, header + 41)}
 
     def keep_row(match: re.Match) -> str:
         number = int(re.search(r'\br="(\d+)"', match.group(0)).group(1))
@@ -3646,6 +3735,93 @@ def _ensure_ep_sheet(parts: dict[str, bytes]) -> None:
         parts["[Content_Types].xml"] = content.encode("utf-8")
 
 
+def _values_differ(old, new) -> bool:
+    if old is None and new is None:
+        return False
+    if old is None or new is None:
+        return True
+    return abs(float(old) - float(new)) >= 0.5
+
+
+def _parameter_changes(plan: dict) -> list[dict]:
+    """Rows where azimuth or tilt changes. A new site has no existing values."""
+    rows = []
+    for row in plan.get("actions") or []:
+        if row.get("p_azimuth") is None and row.get("p_et") is None and row.get("p_mt") is None:
+            continue
+        if not (
+            _values_differ(row.get("azimuth"), row.get("p_azimuth"))
+            or _values_differ(row.get("et"), row.get("p_et"))
+            or _values_differ(row.get("mt"), row.get("p_mt"))
+        ):
+            continue
+        rows.append({
+            "site": row.get("site") or "",
+            "cell": row.get("cell") or "",
+            "sector": row.get("sector") or "",
+            "height": row.get("height"),
+            "azimuth": row.get("azimuth"),
+            "et": row.get("et"),
+            "mt": row.get("mt"),
+            "p_height": row.get("p_height"),
+            "p_azimuth": row.get("p_azimuth"),
+            "p_et": row.get("p_et"),
+            "p_mt": row.get("p_mt"),
+            "action": row.get("action") or "",
+        })
+    return rows
+
+
+def _map_caption(changes: list[dict], kind: str) -> tuple[str, str]:
+    """Short header line and the badge on the bad-spot map."""
+    def degree(value) -> str:
+        return "" if value is None else f"{float(value):.0f}"
+
+    new_site = [row for row in changes if "New 3-sector" in row.get("action", "")]
+    fourth = [row for row in changes if "4th" in row.get("action", "")]
+    used = set(id(row) for row in new_site + fourth)
+    turns = [
+        row for row in changes
+        if id(row) not in used and row.get("azimuth") is not None and _values_differ(row.get("azimuth"), row.get("p_azimuth"))
+    ]
+    tilts = [row for row in changes if id(row) not in used and row not in turns]
+    bits = []
+    if new_site:
+        azimuths = " / ".join(f"{float(row['p_azimuth']):.0f}°" for row in new_site if row.get("p_azimuth") is not None)
+        bits.append(f"New 3-sector L900 ({azimuths})")
+    for row in fourth:
+        bits.append(f"{row.get('site')} 4th L900 ({degree(row.get('p_azimuth'))}°)")
+    for row in turns:
+        delta = (float(row["p_azimuth"]) - float(row["azimuth"]) + 180.0) % 360.0 - 180.0
+        bits.append(f"Turn {row.get('sector')} to {float(row['p_azimuth']):.0f}° ({delta:+.0f}°)")
+    for row in tilts:
+        who = row.get("cell") or row.get("sector")
+        if _values_differ(row.get("et"), row.get("p_et")):
+            bits.append(f"{who} E_tilt {degree(row.get('et'))}° to {degree(row.get('p_et'))}°")
+        elif _values_differ(row.get("mt"), row.get("p_mt")):
+            bits.append(f"{who} M_tilt {degree(row.get('mt'))}° to {degree(row.get('p_mt'))}°")
+    proposed = " + ".join(bits) if bits else "No azimuth or tilt change"
+    if new_site:
+        badge = "New 3-Sector Site"
+    elif fourth and turns:
+        badge = "4th L900 + Azimuth Turn"
+    elif fourth and tilts:
+        badge = "4th L900 + Tilt"
+    elif fourth:
+        badge = "4th L900"
+    elif turns and tilts:
+        badge = "Azimuth + Tilt"
+    elif turns:
+        badge = "Azimuth"
+    elif tilts:
+        badge = "Tilt"
+    elif kind == "ep":
+        badge = "On site EP Check"
+    else:
+        badge = "Parameter change"
+    return badge, proposed
+
+
 def _write_bad_spot_descriptions(advice_for: dict[str, list[dict]]) -> Path:
     """Same four sections for the PPT and the web. The Excel sheet is grafted separately."""
     import json
@@ -3656,10 +3832,15 @@ def _write_bad_spot_descriptions(advice_for: dict[str, list[dict]]) -> Path:
         for index, plan in enumerate(plans, start=1):
             sections = plan.get("sections") or {}
             outline = plan.get("outline") or {}
+            changes = _parameter_changes(plan)
+            plan["changes"] = changes
+            badge, proposed = _map_caption(changes, str(plan.get("kind") or ""))
             records.append({
                 "mode": mode,
                 "n": index,
                 "kind": plan.get("kind"),
+                "badge": badge,
+                "proposed": proposed,
                 "lat": outline.get("lat"),
                 "lon": outline.get("lon"),
                 "width_km": outline.get("width_km"),
@@ -3668,6 +3849,7 @@ def _write_bad_spot_descriptions(advice_for: dict[str, list[dict]]) -> Path:
                 "geography": sections.get("geography") or "",
                 "rca": sections.get("rca") or "",
                 "suggestions": sections.get("suggestions") or plan.get("final") or "",
+                "changes": changes,
             })
     dest = OUTPUT_DIR / "bad_spot_descriptions.json"
     dest.write_text(json.dumps(records, ensure_ascii=False))
@@ -3737,6 +3919,10 @@ def write_bad_spot_advice(src: Path | None = None) -> Path:
         ]
         if len(headers) != len(pairs):
             raise SystemExit(f"{sheet}: {len(headers)} headers, {len(pairs)} advice rows")
+        ordered = sorted(row for row, _number in headers)
+        for earlier, later in zip(ordered, ordered[1:]):
+            if later - earlier < 41:
+                raise SystemExit(f"{sheet}: bad spots at rows {earlier} and {later} are too close for the parameter table")
         map_plans = pairs
         rows: dict[int, str] = {}
         merges: list[str] = []
@@ -3808,6 +3994,151 @@ def write_bad_spot_advice(src: Path | None = None) -> Path:
     return VERSIONED_XLSX
 
 
+def _map_content_start(image) -> int:
+    """First satellite row, below the title band and any header already drawn."""
+    width, height = image.size
+    for y in range(min(height, 160)):
+        photo = 0
+        samples = 0
+        for x in range(0, width, 6):
+            red, green, blue = image.getpixel((x, y))
+            samples += 1
+            if red > 245 and green > 245 and blue > 245:
+                continue
+            if abs(red - green) < 24 and abs(green - blue) < 24:
+                continue
+            if abs(red - 14) < 16 and abs(green - 42) < 16 and abs(blue - 74) < 16:
+                continue
+            photo += 1
+        if samples and photo > samples * 0.28:
+            return y
+    return 70
+
+
+def frame_bad_spot_maps() -> int:
+    """Add the sample header and legend to every serial map without resizing it.
+
+    The Excel circle is a fraction of this picture, so the pixel size stays put.
+    The PPT reads the same file and paints the same circle.
+    """
+    import json
+    from PIL import Image, ImageDraw, ImageFont
+
+    records = {
+        (item["mode"], int(item["n"])): item
+        for item in json.loads((OUTPUT_DIR / "bad_spot_descriptions.json").read_text())
+    }
+    bold = ImageFont.truetype("/usr/share/fonts/truetype/macos/Inter-Bold.ttf", 22)
+    regular = ImageFont.truetype("/usr/share/fonts/truetype/macos/Inter-Medium.ttf", 15)
+    small = ImageFont.truetype("/usr/share/fonts/truetype/macos/Inter-Medium.ttf", 13)
+    tiny = ImageFont.truetype("/usr/share/fonts/truetype/macos/Inter-Medium.ttf", 12)
+    navy = (14, 42, 74)
+    white = (255, 255, 255)
+    gold = (232, 168, 56)
+    framed = 0
+    for path in sorted(PLOTS_DIR.glob("excel_bad_spots_rsrp_spot_*.png")):
+        name = path.name
+        if name.startswith("excel_bad_spots_rsrp_spot_active_"):
+            mode, number = "Active", int(name.rsplit("_", 1)[-1].split(".")[0])
+        else:
+            mode, number = "Idle", int(name.rsplit("_", 1)[-1].split(".")[0])
+        record = records.get((mode, number))
+        if record is None:
+            continue
+        image = Image.open(path).convert("RGB")
+        draw = ImageDraw.Draw(image)
+        start = _map_content_start(image)
+        header_h = max(34, min(start, 78))
+        draw.rectangle((0, 0, image.width, header_h), fill=navy)
+        draw.rectangle((0, 0, 8, header_h), fill=gold)
+        geography = record.get("geography") or ""
+        poor = re.search(r"Poor run [\d,]+ m", geography)
+        blank = re.search(r"Blank inside the circle [\d,]+ m", geography)
+        caption = poor.group(0) if poor else "Bad spot"
+        if blank:
+            caption += "  +  " + blank.group(0).replace("Blank inside the circle", "blank")
+        title = f"{mode} Bad Spot {number}   ·   {caption}"
+        proposed = str(record.get("proposed") or "")
+        badge = str(record.get("badge") or "")
+        if header_h >= 58:
+            draw.text((18, 6), title, font=bold, fill=white)
+            draw.text((18, 32), "Proposed: " + proposed, font=regular, fill=(214, 228, 240))
+        else:
+            draw.text((18, max(4, (header_h - 22) // 2)), title, font=small, fill=white)
+        if badge:
+            box = small.getbbox(badge)
+            badge_w = (box[2] - box[0]) + 22
+            badge_h = 24
+            left = image.width - badge_w - 14
+            top = max(6, (header_h - badge_h) // 2)
+            draw.rounded_rectangle((left, top, left + badge_w, top + badge_h), radius=11, outline=gold, width=2)
+            draw.text((left + 11, top + 3), badge, font=small, fill=white)
+        footer_h = 30
+        top = image.height - footer_h
+        draw.rectangle((0, top, image.width, image.height), fill=navy)
+        legend = [
+            ((214, 48, 49), "Poor RSRP (< −120)"),
+            ((244, 168, 168), "−120 to −115"),
+            ((255, 255, 255), "Blank road"),
+            ((255, 102, 0), "Bad-spot circle"),
+            ((245, 196, 0), "Serving cell"),
+            ((143, 216, 224), "Existing sector"),
+            ((211, 84, 0), "Proposed 4th L900"),
+            ((108, 52, 131), "New L900 site"),
+            ((61, 126, 255), "Proposed azimuth"),
+        ]
+        x = 12
+        for color, label in legend:
+            draw.rectangle((x, top + 9, x + 14, top + 21), fill=color)
+            draw.text((x + 18, top + 7), label, font=tiny, fill=white)
+            x += 18 + tiny.getbbox(label)[2] + 14
+            if x > image.width - 40:
+                break
+        image.save(path, format="PNG")
+        framed += 1
+    print(f"Framed {framed} bad-spot maps", flush=True)
+    return framed
+
+
+def swap_framed_maps(src: Path | None = None) -> Path:
+    """Replace the serial-map pictures inside the workbook. Drawings stay put."""
+    import io
+    from PIL import Image
+
+    src = src or VERSIONED_XLSX
+    with zipfile.ZipFile(src) as zf:
+        names = zf.namelist()
+        parts = {name: zf.read(name) for name in names}
+    replaced = 0
+    for sheet, stem in (
+        ("Bad Spot RSRP", "excel_bad_spots_rsrp_spot_"),
+        ("Bad Spot RSRP_Active", "excel_bad_spots_rsrp_spot_active_"),
+    ):
+        pictures = _sheet_pictures(parts, sheet)
+        serial = [media for _row, col, media in pictures if col == 0][1:]
+        pngs = sorted(
+            path for path in PLOTS_DIR.glob(stem + "*.png")
+            if path.name.startswith(stem) and path.stem[len(stem):].isdigit()
+        )
+        if len(serial) != len(pngs):
+            raise SystemExit(f"{sheet}: {len(serial)} pictures, {len(pngs)} framed maps")
+        for media, png in zip(serial, pngs):
+            image = Image.open(png).convert("RGB")
+            buf = io.BytesIO()
+            image.save(buf, "JPEG", quality=70, optimize=True)
+            parts[media] = buf.getvalue()
+            replaced += 1
+    tmp = src.with_suffix(".tmp.xlsx")
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name in names:
+            zf.writestr(name, parts[name])
+    tmp.replace(src)
+    if src.resolve() != REPORT_XLSX.resolve():
+        shutil.copy2(src, REPORT_XLSX)
+    print(f"Swapped {replaced} framed maps into {src}", flush=True)
+    return src
+
+
 if __name__ == "__main__":
     import sys
 
@@ -3822,6 +4153,10 @@ if __name__ == "__main__":
             "A full rebuild (no arguments) writes the Cover histograms and DT route with every sheet. "
             "A Cover-only update has to be grafted into the xlsx zip."
         )
+    if len(sys.argv) > 1 and sys.argv[1] == "frame-maps":
+        frame_bad_spot_maps()
+        swap_framed_maps()
+        raise SystemExit(0)
     if len(sys.argv) > 1 and sys.argv[1] == "advise":
         path = write_bad_spot_advice()
         result = verify_report(path)

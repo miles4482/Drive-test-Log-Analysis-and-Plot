@@ -138,9 +138,19 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
+## Download Excel report (v1.74)
+
+**v1.74 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.74.xlsx
+
+Each bad-spot map uses the sample header, legend, and dashed circle, and the PPT uses that same picture. Under the four text blocks, a parameter table lists every azimuth or tilt change. Existing is blank for a new site. New Plan is filled.
+
+**v1.74 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.74.pptx
+
+The web map stays v1.73: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.73.zip
+
 ## Download Excel report (v1.73)
 
-**v1.73 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.73.xlsx
+**v1.73:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.73.xlsx
 
 Each bad-spot map is paired with Serving Cells details, Bad Spot Details, Root Cause Analysis, and Suggestions. The summary deck and the web info panel use the same four blocks. The web map is v1.73.
 

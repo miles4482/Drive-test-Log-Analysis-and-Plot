@@ -1781,12 +1781,18 @@ def _number_actions(text: str) -> str:
 
 
 def _round_proposed(row: dict) -> dict:
-    """Proposed azimuth and tilt become whole degrees. A rounded no-change keeps the dump value."""
+    """Proposed azimuth and tilt become whole degrees. A rounded no-change keeps the dump value.
+
+    The whole degree is the one printed in the suggestion, so the parameter table
+    matches that sentence.
+    """
     row = dict(row)
     for src, dst in (("azimuth", "p_azimuth"), ("et", "p_et"), ("mt", "p_mt")):
         if row.get(dst) is None:
             continue
-        proposed = float(math.floor(float(row[dst]) + 0.5))
+        # Same whole degree the suggestion sentence prints, so the table does not
+        # disagree with the text on an exact half (82.5° is written 82°).
+        proposed = float(f"{float(row[dst]):.0f}")
         if row.get(src) is None:
             row[dst] = proposed
             continue
