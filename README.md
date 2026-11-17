@@ -138,9 +138,19 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
+## Download Excel report (v1.80)
+
+**v1.80 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.80.xlsx
+
+The idle map under each Active bad spot is a bit smaller than the active map. It keeps the same orange circle, and it now shows the existing sites in that area and a yellow dashed line from each idle serving cell. A note to the right of the idle map compares idle and active coverage, and names the serving cells when they differ. The web map stays v1.73.
+
+**v1.80 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.80.pptx
+
+The web map stays v1.73: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.73.zip
+
 ## Download Excel report (v1.79)
 
-**v1.79 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.79.xlsx
+**v1.79:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.79.xlsx
 
 Each Active bad spot has two maps. The active map is on its own again. Under it, an idle coverage map shows only that bad-spot area, with the same RSRP colours. Idle bad spots, the KPI sheets, and the web map are unchanged.
 

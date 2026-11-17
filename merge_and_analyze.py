@@ -3144,6 +3144,7 @@ def draw_bad_spot_sector_pies(
     proposal: dict | None = None,
     overshoot: dict | None = None,
     turns: dict | None = None,
+    serving: bool = True,
 ) -> None:
     """Transparent sector marks for every site that touches this bad-spot view.
 
@@ -3285,7 +3286,7 @@ def draw_bad_spot_sector_pies(
             my = (y0 + spot_lat) / 2.0
             lx, ly = _label_on_segment(ax, spot_lon, spot_lat, x0, y0, avoid=name_points)
             _ink(ax, lx, ly, text, 8, "#F7FEFF")
-    if samples is not None and column:
+    if serving and samples is not None and column:
         _draw_serving_spider(ax, samples, column, spot, avoid=name_points, overshoot=overshoot)
 
 
@@ -5275,6 +5276,210 @@ def _paint_idle_area_caption(path: Path) -> None:
     canvas.save(path)
 
 
+def _area_serving_cells(samples: pd.DataFrame, spot: pd.Series, limit: int = 2) -> list[dict]:
+    """The cells that serve the most samples inside this bad-spot circle."""
+    inside = _samples_inside_outline(samples, spot)
+    if inside is None or inside.empty or "Cell Id" not in inside.columns:
+        return []
+    work = inside.dropna(subset=["Cell Id"]).copy()
+    work["Cell Id"] = pd.to_numeric(work["Cell Id"], errors="coerce")
+    work = work.dropna(subset=["Cell Id"])
+    if work.empty:
+        return []
+    ear_col = "DL EARFCN" if "DL EARFCN" in work.columns else None
+    grouped: dict[tuple, dict] = {}
+    for eci, ear, lat, lon, rsrp in zip(
+        work["Cell Id"],
+        work[ear_col] if ear_col else [None] * len(work),
+        work["Latitude"],
+        work["Longitude"],
+        work["RSRP"],
+    ):
+        cell = _resolve_serving_cell(eci, ear)
+        if cell is None:
+            continue
+        key = (cell.get("name") or cell.get("sector"), cell.get("layer"))
+        slot = grouped.setdefault(key, {"cell": cell, "n": 0, "lat": 0.0, "lon": 0.0, "rsrp": []})
+        slot["n"] += 1
+        slot["lat"] += float(lat)
+        slot["lon"] += float(lon)
+        if pd.notna(rsrp):
+            slot["rsrp"].append(float(rsrp))
+    ranked = sorted(grouped.values(), key=lambda item: -item["n"])
+    if len(ranked) > 1 and ranked[1]["n"] < ranked[0]["n"] * 0.15:
+        ranked = ranked[:1]
+    out = []
+    for slot in ranked[:limit]:
+        cell = slot["cell"]
+        lat = slot["lat"] / slot["n"]
+        lon = slot["lon"] / slot["n"]
+        dist = float(_equirect_km(cell["lat"], cell["lon"], lat, lon))
+        bearing = _bearing_deg(cell["lat"], cell["lon"], lat, lon)
+        off = None if cell.get("azimuth") is None else abs(_signed_deg(cell["azimuth"], bearing))
+        name = cell.get("name") or f"{cell.get('sector')} {cell.get('layer')}".strip()
+        out.append({
+            "name": name,
+            "sector": cell.get("sector") or "",
+            "layer": cell.get("layer") or "",
+            "site": cell.get("site") or "",
+            "lat": float(cell["lat"]),
+            "lon": float(cell["lon"]),
+            "azimuth": cell.get("azimuth"),
+            "sample_lat": lat,
+            "sample_lon": lon,
+            "n": slot["n"],
+            "dist_km": dist,
+            "off": off,
+            "median": float(np.median(slot["rsrp"])) if slot["rsrp"] else None,
+        })
+    return out
+
+
+def _coverage_word(median: float | None) -> str:
+    if median is None:
+        return "unknown"
+    if median >= -95:
+        return "good"
+    if median >= -110:
+        return "fair"
+    if median >= -120:
+        return "weak"
+    return "poor"
+
+
+def _circle_median(samples: pd.DataFrame, spot: pd.Series) -> float | None:
+    inside = _samples_inside_outline(samples, spot)
+    if inside is None or inside.empty or "RSRP" not in inside.columns:
+        return None
+    values = pd.to_numeric(inside["RSRP"], errors="coerce").dropna()
+    if values.empty:
+        return None
+    return float(values.median())
+
+
+def idle_vs_active_note(active: pd.DataFrame, idle: pd.DataFrame, spot: pd.Series) -> tuple[str, str]:
+    """Two short lines: coverage difference, then serving-cell difference."""
+    active_median = _circle_median(active, spot)
+    idle_median = _circle_median(idle, spot)
+    active_cells = _area_serving_cells(active, spot)
+    idle_cells = _area_serving_cells(idle, spot)
+
+    def level(median: float | None, mode: str) -> str:
+        if median is None:
+            return f"No {mode} drive in this circle"
+        return f"{mode} median {median:.0f} dBm ({_coverage_word(median)})"
+
+    if active_median is None and idle_median is None:
+        coverage = "Idle vs active coverage: no drive in this circle in either mode."
+    elif idle_median is None:
+        coverage = f"Idle vs active coverage: no idle drive in this circle. {level(active_median, 'Active')}."
+    elif active_median is None:
+        coverage = f"Idle vs active coverage: no active drive in this circle. {level(idle_median, 'Idle')}."
+    else:
+        gap = idle_median - active_median
+        if abs(gap) < 3:
+            relation = "The two modes are about the same level."
+        elif gap > 0:
+            relation = f"Idle is {gap:.0f} dB stronger on this road."
+        else:
+            relation = f"Active is {-gap:.0f} dB stronger on this road."
+        coverage = (
+            f"Idle vs active coverage: {level(active_median, 'Active')}. "
+            f"{level(idle_median, 'Idle')}. {relation}"
+        )
+
+    def names(cells: list[dict]) -> str:
+        return ", ".join(item["name"] for item in cells) if cells else "not known"
+
+    def where(cell: dict) -> str:
+        off = "" if cell["off"] is None else f", {cell['off']:.0f}° off the road"
+        return f"{cell['name']} at {cell['dist_km']:.1f} km{off}"
+
+    if not active_cells and not idle_cells:
+        serving = "Serving cells: neither mode has a decoded serving cell in this circle."
+    elif not idle_cells:
+        serving = f"Serving cells: idle is not known. Active is served by {names(active_cells)}."
+    elif not active_cells:
+        serving = f"Serving cells: active is not known. Idle is served by {names(idle_cells)}."
+    else:
+        same = {item["name"] for item in active_cells} & {item["name"] for item in idle_cells}
+        if same and {item["name"] for item in active_cells} == {item["name"] for item in idle_cells}:
+            serving = f"Serving cells: both modes are served by {names(active_cells)}."
+        else:
+            idle_cell = idle_cells[0]
+            active_cell = active_cells[0]
+            if idle_cell["site"] and idle_cell["site"] == active_cell["site"] and idle_cell["name"] != active_cell["name"]:
+                why = (
+                    f"They differ. Both are on {idle_cell['site']}, but idle locks to {idle_cell['name']} "
+                    f"and the active call stays on {active_cell['name']}."
+                )
+            elif idle_cell["dist_km"] + 0.4 < active_cell["dist_km"]:
+                why = (
+                    f"They differ. Idle locks to the nearer cell, {where(idle_cell)}. "
+                    f"Active stays on {where(active_cell)}."
+                )
+            elif (
+                active_cell["off"] is not None
+                and idle_cell["off"] is not None
+                and active_cell["off"] >= 25
+                and idle_cell["off"] + 10 < active_cell["off"]
+            ):
+                why = (
+                    f"They differ. Active is {active_cell['off']:.0f}° off {active_cell['name']}, outside the main beam. "
+                    f"Idle is {idle_cell['off']:.0f}° off {idle_cell['name']}."
+                )
+            elif active_cell["layer"] and active_cell["layer"] != "L900" and idle_cell["layer"] == "L900" and active_cell["dist_km"] > _layer_reach_km(active_cell["layer"]):
+                why = (
+                    f"They differ. Active is on {active_cell['layer']} at {active_cell['dist_km']:.1f} km, "
+                    f"past the {_layer_reach_km(active_cell['layer']):.1f} km reach. Idle is on L900, {where(idle_cell)}."
+                )
+            else:
+                why = (
+                    f"They differ. The idle scanner locks to {where(idle_cell)}. "
+                    f"The active call stays on {where(active_cell)}."
+                )
+            serving = f"Serving cells: Active {names(active_cells)}. Idle {names(idle_cells)}. {why}"
+    return coverage, serving
+
+
+def _draw_area_serving_lines(ax, samples: pd.DataFrame, spot: pd.Series) -> None:
+    """Dashed yellow line from each serving cell to the samples inside the circle.
+
+    The same yellow dash as the active map. The cell name stays on the line so a
+    site outside this tight view can still be identified.
+    """
+    cells = _area_serving_cells(samples, spot)
+    if not cells:
+        return
+    spot_lat = float(spot["lat"])
+    arm = _view_arm_deg(ax, spot_lat)
+    segments = []
+    for cell in cells:
+        lat0 = cell["lat"]
+        lon0 = cell["lon"]
+        if cell["azimuth"] is not None:
+            rad = np.radians(float(cell["azimuth"]) % 360.0)
+            lon0 = lon0 + arm * np.sin(rad)
+            lat0 = lat0 + arm * np.cos(rad)
+        lat1 = cell["sample_lat"]
+        lon1 = cell["sample_lon"]
+        segments.append([(lon0, lat0), (lon1, lat1)])
+        dist_m = float(_equirect_km(lat0, lon0, lat1, lon1)) * 1000.0
+        mx, my = _label_on_segment(
+            ax, lon1, lat1, lon0, lat0,
+            fracs=(0.28, 0.42, 0.18), pixels=26,
+        )
+        _ink(ax, mx, my, f"{cell['name']}\n{dist_m:,.0f} m", 8, "#F7FEFF")
+    ax.add_collection(LineCollection(
+        segments,
+        colors="#F5C400",
+        linewidths=1.35,
+        linestyles=(0, (6, 3.5)),
+        capstyle="butt",
+        zorder=23,
+    ))
+
+
 def plot_idle_area_map(idle: pd.DataFrame, spot: pd.Series, path: Path) -> Path:
     """Idle RSRP zoomed to one active bad spot. The active map stays a separate picture."""
     west, east, south, north, _lon0, _lat0 = _idle_area_extent(spot)
@@ -5305,6 +5510,9 @@ def plot_idle_area_map(idle: pd.DataFrame, spot: pd.Series, path: Path) -> Path:
         )
     else:
         ax.text(0.5, 0.5, "No idle drive in this area", transform=ax.transAxes, ha="center", va="center", fontsize=11, color="#14202B")
+    # Existing sites in this view, then the idle serving-cell lines. The circle stays the same orange.
+    draw_bad_spot_sector_pies(ax, spot, samples=local, column="RSRP", serving=False)
+    _draw_area_serving_lines(ax, idle, spot)
     _add_spot_outline(ax, spot)
     _add_basemap(ax)
     add_map_scale_bar(ax, km=0.2)

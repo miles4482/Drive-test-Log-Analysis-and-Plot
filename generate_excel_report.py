@@ -89,7 +89,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.79"
+REPORT_VERSION = "1.80"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -2871,6 +2871,86 @@ def place_active_idle_area_maps(src: Path, dest: Path, pngs: list[Path], clean_f
         for name, blob in parts.items():
             if name not in names:
                 zf.writestr(name, blob)
+    tmp.replace(dest)
+    print(f"Wrote {dest} ({dest.stat().st_size / 1e6:.1f} MB)", flush=True)
+    return dest
+
+
+def refresh_idle_area_maps(src: Path, dest: Path, pngs: list[Path], notes: list[tuple[str, str]]) -> Path:
+    """Replace the idle-area pictures and write the idle-versus-active note beside each one.
+
+    The idle picture is a bit narrower than the active picture. The orange circle
+    stays on the picture. The note sits under the parameter table, to the right
+    of the idle map. Other sheets are copied through.
+    """
+    import io
+    from PIL import Image
+
+    if len(pngs) != 99 or len(notes) != 99:
+        raise SystemExit(f"expected 99 idle maps and notes, got {len(pngs)} and {len(notes)}")
+    with zipfile.ZipFile(src) as zf:
+        names = zf.namelist()
+        parts = {name: zf.read(name) for name in names}
+    drawing = parts["xl/drawings/drawing8.xml"].decode("utf-8")
+    rels = parts["xl/drawings/_rels/drawing8.xml.rels"].decode("utf-8")
+    rid_to = {}
+    for target, rid in re.findall(r'Target="([^"]+)"[^>]*Id="(rId\d+)"', rels):
+        rid_to[rid] = target.lstrip("/")
+    for rid, target in re.findall(r'Id="(rId\d+)"[^>]*Target="([^"]+)"', rels):
+        rid_to[rid] = target.lstrip("/")
+
+    def shrink(block: str) -> str:
+        name = re.search(r'name="(Idle area \d+)"', block)
+        if name is None:
+            return block
+        number = int(name.group(1).split()[-1])
+        png = pngs[number - 1]
+        with Image.open(png) as image:
+            aspect = image.height / image.width
+            buf = io.BytesIO()
+            image.convert("RGB").save(buf, "JPEG", quality=70, optimize=True)
+        rid = re.search(r'r:embed="(rId\d+)"', block).group(1)
+        parts[rid_to[rid]] = buf.getvalue()
+        cx = int(re.search(r'<ext cx="(\d+)"', block).group(1))
+        cx = int(cx * 0.78)
+        cy = max(1, int(cx * aspect))
+        return re.sub(r'<ext cx="\d+" cy="\d+"', f'<ext cx="{cx}" cy="{cy}"', block, count=1)
+
+    drawing = re.sub(r"<oneCellAnchor>.*?</oneCellAnchor>", lambda match: shrink(match.group(0)), drawing, flags=re.S)
+    parts["xl/drawings/drawing8.xml"] = drawing.encode("utf-8")
+
+    sheet_path = _sheet_part_path(parts, "Bad Spot RSRP_Active")
+    xml = parts[sheet_path].decode("utf-8")
+    headers: dict[int, int] = {}
+    for match in re.finditer(r'<t(?: xml:space="preserve")?>Bad Spot (\d+)</t>', xml):
+        start = xml.rfind('<row r="', 0, match.start())
+        row = int(re.match(r'<row r="(\d+)"', xml[start:]).group(1))
+        # The title row is the yellow bar. A mention inside the description is not.
+        if 's="5"' in xml[start:match.start()]:
+            headers[int(match.group(1))] = row
+    if len(headers) != 99:
+        raise SystemExit(f"found {len(headers)} active bad-spot titles, expected 99")
+
+    rows: dict[int, str] = {}
+    merges: list[str] = []
+    for number, (coverage, serving) in enumerate(notes, start=1):
+        start = headers[number] + 42
+        rows[start] = (
+            f'<row r="{start}" ht="20" customHeight="1">'
+            f'{_inline_cell(f"I{start}", 33, "Idle vs active")}</row>'
+        )
+        body = start + 1
+        rows[body] = f'<row r="{body}">{_inline_cell(f"I{body}", 34, coverage + "\n" + serving)}</row>'
+        for extra in range(body + 1, body + 6):
+            rows[extra] = f'<row r="{extra}"/>'
+        merges.append(f"I{start}:S{start}")
+        merges.append(f"I{body}:S{body + 5}")
+    parts[sheet_path] = _insert_sheet_rows(xml, rows, merges).encode("utf-8")
+
+    tmp = dest.with_suffix(".xlsx.tmp")
+    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name in names:
+            zf.writestr(name, parts[name])
     tmp.replace(dest)
     print(f"Wrote {dest} ({dest.stat().st_size / 1e6:.1f} MB)", flush=True)
     return dest
