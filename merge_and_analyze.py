@@ -1984,6 +1984,240 @@ def _offbeam_pockets(samples: pd.DataFrame, column: str, spot: pd.Series, beams:
     return kept[:2]
 
 
+def _landing_km(height: float | None, etilt: float | None) -> float:
+    """Distance where the main beam meets flat ground. A tilt near 0° is the horizon."""
+    if etilt is None:
+        return 0.0
+    tilt = float(etilt)
+    if tilt <= 0.15:
+        return 40.0
+    return float(height or 30.0) / math.tan(math.radians(tilt)) / 1000.0
+
+
+def _tilt_to_reach(rec: dict, dist_km: float) -> float:
+    """Uptilt, as a negative E_tilt change, so the main beam reaches this distance.
+
+    The whole degree is used. When that degree still lands short, E_tilt goes to 0°.
+    A downtilt is never returned: pulling the beam back cannot cover a farther sample.
+    """
+    if rec.get("etilt") is None:
+        return 0.0
+    current = float(rec["etilt"])
+    desired = _ground_tilt_deg(rec.get("height"), dist_km)
+    # 0° puts the main beam on the horizon and drops the near footprint.
+    # 1° still covers a sample out to about twice its landing distance.
+    target = max(1.0, float(f"{desired:.0f}"))
+    delta = target - current
+    if delta > -0.8:
+        return 0.0
+    return max(delta, -6.0)
+
+
+def _planned_beams(choice: dict, sites: list[dict]) -> list[dict]:
+    """Beams this solution draws, excluding a downtilt. Downtilt pulls a far cell back."""
+    beams = []
+    by_name = {site["name"]: site for site in sites}
+    draw = choice.get("draw") or {}
+    for action in choice.get("actions") or []:
+        azimuth = action.get("p_azimuth")
+        if azimuth is None:
+            continue
+        old_et, new_et = action.get("et"), action.get("p_et")
+        if old_et is not None and new_et is not None and float(new_et) > float(old_et) + 0.4:
+            continue
+        site = by_name.get(str(action.get("site") or ""))
+        if site is None and draw.get("lat") is not None and "New" in str(action.get("sector") or ""):
+            lat, lon = float(draw["lat"]), float(draw["lon"])
+        elif site is not None:
+            lat, lon = float(site["lat"]), float(site["lon"])
+        else:
+            continue
+        height = action.get("p_height") or action.get("height") or (site.get("height") if site else None) or 30.0
+        beams.append({
+            "lat": lat, "lon": lon, "azimuth": float(azimuth),
+            "height": height, "et": action.get("p_et"),
+            "sector": str(action.get("sector") or ""),
+        })
+    return beams
+
+
+def _run_is_reached(run_lat: float, run_lon: float, choice: dict, sites: list[dict]) -> bool:
+    """True when a planned beam, or an existing L900 inside 2 km, reaches this red run.
+
+    A neighbor inside 2 km is what makes a downtilt of an overshooting cell useful.
+    Without that neighbor, the downtilt only shortens the far cell.
+    """
+    draw = choice.get("draw") or {}
+    if choice.get("kind") == "new" and draw.get("lat") is not None:
+        if float(_equirect_km(float(draw["lat"]), float(draw["lon"]), run_lat, run_lon)) <= 1.5:
+            return True
+    for beam in _planned_beams(choice, sites):
+        dist = float(_equirect_km(beam["lat"], beam["lon"], run_lat, run_lon))
+        off = abs(_signed_deg(beam["azimuth"], _bearing_deg(beam["lat"], beam["lon"], run_lat, run_lon)))
+        if off <= 30.0 and dist <= 1.2:
+            return True
+        if off <= 25.0 and dist <= 4.2 and _landing_km(beam["height"], beam["et"]) >= dist * 0.90:
+            return True
+    near = _sites_around(_sectors_near(run_lat, run_lon, 2.2), run_lat, run_lon)
+    for site in near:
+        if site["dist"] > 2.0:
+            continue
+        for rec in site["recs"]:
+            if str(rec.get("layer") or "") != "L900" or rec.get("azimuth") is None:
+                continue
+            off = abs(_signed_deg(float(rec["azimuth"]), site["bearing"]))
+            if off <= 20.0 and _landing_km(rec.get("height"), rec.get("etilt")) >= site["dist"] * 0.60:
+                return True
+    return False
+
+
+def _aim_short_run(choice: dict, run_lat: float, run_lon: float, length_m: float) -> str | None:
+    """Turn and uptilt the best L900 inside 3.3 km, or add a 4th sector, for one uncovered run."""
+    sites = _sites_around(_sectors_near(run_lat, run_lon, 8.5), run_lat, run_lon)
+    sites = [site for site in sites if site["dist"] <= 3.3]
+    used = set(choice.get("azimuth_overrides") or {})
+    for action in choice.get("actions") or []:
+        sector = str(action.get("sector") or "").strip()
+        if sector:
+            used.add(sector)
+    planned_on = {}
+    for action in choice.get("actions") or []:
+        if action.get("p_azimuth") is None:
+            continue
+        planned_on.setdefault(str(action.get("site") or ""), []).append(float(action["p_azimuth"]))
+    ranked = []
+    for site in sites:
+        for rec in site["recs"]:
+            if str(rec.get("layer") or "") != "L900" or rec.get("azimuth") is None:
+                continue
+            sector = str(rec.get("sector") or "").strip()
+            if not sector or sector in used:
+                continue
+            off = abs(_signed_deg(float(rec["azimuth"]), site["bearing"]))
+            if off > 35.0:
+                continue
+            ranked.append((site["dist"], off, site, rec))
+    ranked.sort(key=lambda item: (item[0], item[1]))
+    for _dist, off, site, rec in ranked:
+        signed = _signed_deg(float(rec["azimuth"]), site["bearing"])
+        turn = math.copysign(min(off, 25.0), signed) if off > 12.0 else 0.0
+        new_az = (float(rec["azimuth"]) + turn) % 360.0
+        if any(_azimuth_gap(new_az, azimuth) < 40.0 for azimuth in planned_on.get(site["name"], [])):
+            continue
+        up = _tilt_to_reach(rec, site["dist"])
+        if abs(turn) < 8.0 and abs(up) < 0.8:
+            continue
+        item = {
+            "rec": rec, "dist": site["dist"], "off": off, "delta": up, "turn": turn,
+            "old_pop": None, "new_pop": None, "overshoot": False, "site": site["name"],
+        }
+        action = _tune_action(item)
+        action["action"] = "Uptilt toward the red samples"
+        choice["actions"].append(action)
+        new_az = float(action["p_azimuth"])
+        if abs(turn) >= 8.0:
+            choice["azimuth_overrides"][str(rec.get("sector")).strip()] = new_az
+        shown = float(action["p_et"]) if action.get("p_et") is not None else float(rec["etilt"])
+        land_m = _landing_km(rec.get("height"), rec.get("etilt")) * 1000.0
+        new_land = _landing_km(rec.get("height"), shown) * 1000.0
+        if abs(turn) >= 8.0:
+            turn_bit = f"turns from {float(rec['azimuth']):.0f}° to {new_az:.0f}°"
+        else:
+            turn_bit = f"keeps azimuth {float(rec['azimuth']):.0f}°"
+        if abs(up) >= 0.8:
+            tilt_bit = (
+                f" and E_tilt {_deg_text(rec.get('etilt'))}° to {shown:.0f}°. "
+                f"At {_deg_text(rec.get('etilt'))}° the beam lands at {land_m:,.0f} m. "
+                f"At {shown:.0f}° it lands at {new_land:,.0f} m."
+            )
+        else:
+            tilt_bit = "."
+        return (
+            f"{rec.get('sector')} {turn_bit}{tilt_bit} "
+            f"It covers the {length_m:,.0f} m red run {site['dist']:.1f} km away. "
+            f"No L900 inside 2 km faces that run, so a downtilt of a farther cell does not cover it."
+        )
+    for site in sites:
+        if site["dist"] > FOURTH_SAVE_KM:
+            continue
+        bearing = float(site["bearing"])
+        existing = [float(rec["azimuth"]) for rec in site["recs"] if rec.get("azimuth") is not None]
+        taken = [
+            float(action["p_azimuth"]) for action in choice.get("actions") or []
+            if action.get("p_azimuth") is not None and str(action.get("site") or "") == site["name"]
+        ]
+        if any(_azimuth_gap(bearing, azimuth) < 40.0 for azimuth in existing + taken):
+            continue
+        tilt = int(round(min(10.0, max(0.0, _ground_tilt_deg(site.get("height"), site["dist"])))))
+        action = _fourth_action(site)
+        action["p_azimuth"] = _ep_num(bearing)
+        action["p_et"] = float(tilt)
+        choice["actions"].append(action)
+        extra = {
+            "lat": site["lat"], "lon": site["lon"], "azimuth": bearing,
+            "target_lat": run_lat, "target_lon": run_lon,
+        }
+        if not choice.get("draw"):
+            choice["draw"] = _proposal_draw(
+                "fourth", site["lat"], site["lon"], [], run_lat, run_lon, "4th L900",
+            )
+            choice["draw"]["more"] = []
+        choice["draw"].setdefault("more", []).append(extra)
+        return (
+            f"New L900 sector on {site['name']}, azimuth {bearing:.0f}°, E_tilt {tilt}°, M_tilt 0°, "
+            f"covers the {length_m:,.0f} m red run {site['dist']:.1f} km away. "
+            f"No L900 inside 2 km faces that run."
+        )
+    return None
+
+
+def _cover_short_runs(
+    choice: dict,
+    samples: pd.DataFrame,
+    column: str,
+    spot: pd.Series,
+    sites: list[dict],
+) -> dict:
+    """Give every red run a beam that reaches it.
+
+    Downtilt of an overshooting cell is kept for that far cell. It is not treated
+    as the solution for a red run that no neighbor inside 2 km can serve.
+    A new site already covers its own spot, so that plan is left as it is.
+    """
+    if choice.get("kind") in {"ep", "new"}:
+        return choice
+    bins = _red_bins_inside(samples, column, spot)
+    runs = _red_runs(bins) if bins else []
+    pending = []
+    for run in runs:
+        length = _run_length_m(run)
+        if length < 50.0:
+            continue
+        lat = sum(item["lat"] for item in run) / len(run)
+        lon = sum(item["lon"] for item in run) / len(run)
+        if _run_is_reached(lat, lon, choice, sites):
+            continue
+        pending.append((length, lat, lon))
+    if not pending:
+        return choice
+    pending.sort(reverse=True)
+    choice = dict(choice)
+    choice["actions"] = list(choice.get("actions") or [])
+    choice["azimuth_overrides"] = dict(choice.get("azimuth_overrides") or {})
+    if choice.get("draw"):
+        choice["draw"] = dict(choice["draw"])
+        choice["draw"]["more"] = list(choice["draw"].get("more") or [])
+    sentences = []
+    for length, lat, lon in pending[:1]:
+        fix = _aim_short_run(choice, lat, lon, length)
+        if fix:
+            sentences.append(fix)
+    if not sentences:
+        return choice
+    choice["final"] = (choice.get("final") or "").rstrip() + " " + " ".join(sentences)
+    return choice
+
+
 def _cover_offbeam_pocket(
     choice: dict,
     samples: pd.DataFrame,
@@ -2281,6 +2515,7 @@ def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series, mode: s
             choice = _ep_check_choice(silent, spot_pop, plan_mode)
     if choice.get("kind") != "ep":
         choice = _cover_offbeam_pocket(choice, samples, column, spot, sites, spot_pop)
+        choice = _cover_short_runs(choice, samples, column, spot, sites)
     serving_names: list[str] = []
     for row in served:
         name = str(row["cell"].get("name") or "").strip()

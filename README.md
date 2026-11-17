@@ -138,9 +138,19 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
+## Download Excel report (v1.77)
+
+**v1.77 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.77.xlsx
+
+Every red run is checked again. A downtilt of a far cell only controls overshoot. It counts as cover when an L900 neighbor inside 2 km already faces the red samples and the beam reaches them. Where that neighbor is missing, the spot gets an uptilt, an azimuth turn, or a 4th L900. Active Bad Spot 11 keeps the SGSDR03 4th sector at 258° and SGKMK01A at 25° with E_tilt 2° to 1° for the southern red samples. SGKMK07A turns from 0° to 24° and E_tilt goes from 4° to 1° for the western red samples. At 4° that beam lands at 479 m. At 1° it lands at 1,919 m, and those samples are 3.2 km away.
+
+**v1.77 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.77.pptx
+
+The web map stays v1.73: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.73.zip
+
 ## Download Excel report (v1.76)
 
-**v1.76 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.76.xlsx
+**v1.76:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.76.xlsx
 
 Active Bad Spot 11 keeps the SGSDR03 4th sector at 258°. SGKMK01A still turns from 0° to 25° toward the red samples on the other side of the circle, and E_tilt goes from 2° to 1° so the beam lands on those samples. At 2° the beam from the 34 m antenna lands at 974 m, and the red samples are 1.6 km away.
 
