@@ -3624,6 +3624,8 @@ def _draw_coverage_points(
     bin_m: float | None = None,
     column: str | None = None,
     route_casing: bool = True,
+    casing_color: str = "#FFFFFF",
+    z0: int = 2,
 ) -> None:
     """Solid drive trace, worst colour on top, same 50 m bins as the bad spots.
 
@@ -3675,8 +3677,8 @@ def _draw_coverage_points(
     # Bad-spot boundary maps leave it off: the coloured KPI trace is the chart.
     if casing and route_casing:
         ax.add_collection(LineCollection(
-            casing, colors="#FFFFFF", linewidths=MAP_ROUTE_LW + 2.4,
-            capstyle="round", joinstyle="round", zorder=2,
+            casing, colors=casing_color, linewidths=MAP_ROUTE_LW + 2.4,
+            capstyle="round", joinstyle="round", zorder=z0,
         ))
     for z, lab in enumerate(order):
         segs = segments.get(lab) or []
@@ -3684,11 +3686,11 @@ def _draw_coverage_points(
             continue
         ax.add_collection(LineCollection(
             segs, colors=color_of[lab], linewidths=MAP_ROUTE_LW,
-            capstyle="round", joinstyle="round", zorder=3 + z,
+            capstyle="round", joinstyle="round", zorder=z0 + 1 + z,
         ))
         if alone[lab]:
             xy = np.vstack(alone[lab])
-            ax.scatter(xy[:, 0], xy[:, 1], s=18, c=color_of[lab], linewidths=0, zorder=3 + z)
+            ax.scatter(xy[:, 0], xy[:, 1], s=18, c=color_of[lab], linewidths=0, zorder=z0 + 1 + z)
 
 
 def _legend_sample_counts(df: pd.DataFrame, column: str, classifier, labels: list[str]) -> list[int]:
@@ -5101,6 +5103,140 @@ def _extent_with_nearest_site(
     return extent
 
 
+# Idle RSRP is drawn beside the active bad road, not on top of it.
+# 45 m is about two line-widths at the bad-spot zoom, so both colours stay readable.
+_IDLE_BESIDE_M = 45.0
+# The idle line runs a little past the red and blank stretch.
+_IDLE_EXTRA_M = 180.0
+# Idle samples farther than this from that stretch belong to another road.
+_IDLE_CORRIDOR_M = 80.0
+
+
+def _bad_road_segments(samples: pd.DataFrame, spot: pd.Series) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+    """Red bins and blank gaps, each extended a little past the bad spot."""
+    points: list[tuple[float, float]] = []
+    bins = _red_bins_inside(samples, "RSRP", spot) if "RSRP" in getattr(samples, "columns", []) else []
+    for run in _red_runs(bins) if bins else []:
+        if len(run) == 1:
+            points.append((run[0]["lat"], run[0]["lon"]))
+            continue
+        pending = list(run)
+        ordered = [pending.pop(0)]
+        while pending:
+            last = ordered[-1]
+            nxt = min(
+                pending,
+                key=lambda item: float(_equirect_km(last["lat"], last["lon"], item["lat"], item["lon"])),
+            )
+            pending.remove(nxt)
+            ordered.append(nxt)
+        points.extend((item["lat"], item["lon"]) for item in ordered)
+    segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    for left, right in zip(points, points[1:]):
+        if float(_equirect_km(left[0], left[1], right[0], right[1])) * 1000.0 <= 450.0:
+            segments.append((left, right))
+    for gap in _blank_segments(samples, spot):
+        segments.append(((gap["lat1"], gap["lon1"]), (gap["lat2"], gap["lon2"])))
+    extended = []
+    for start, end in segments:
+        extended.append((_extend_point(end, start, _IDLE_EXTRA_M), _extend_point(start, end, _IDLE_EXTRA_M)))
+    return extended
+
+
+def _extend_point(origin: tuple[float, float], toward: tuple[float, float], extra_m: float) -> tuple[float, float]:
+    """A point extra_m past `toward`, continuing the line from origin."""
+    dist_km = float(_equirect_km(origin[0], origin[1], toward[0], toward[1]))
+    if dist_km < 0.01:
+        return toward
+    scale = (extra_m / 1000.0) / dist_km
+    return (
+        toward[0] + (toward[0] - origin[0]) * scale,
+        toward[1] + (toward[1] - origin[1]) * scale,
+    )
+
+
+def _idle_beside_bad_road(
+    idle: pd.DataFrame,
+    samples: pd.DataFrame,
+    spot: pd.Series,
+) -> pd.DataFrame:
+    """Idle samples on the red and blank road, shifted beside that road.
+
+    The shift keeps the active colours visible. The same RSRP colours then show
+    whether idle is healthy where active is poor.
+    """
+    segments = _bad_road_segments(samples, spot)
+    if not segments or idle is None or idle.empty or "RSRP" not in idle.columns:
+        return idle.iloc[0:0]
+    lat0 = float(spot["lat"])
+    lon0 = float(spot["lon"])
+    pad = 0.03
+    near = idle[
+        idle["Longitude"].between(lon0 - pad, lon0 + pad)
+        & idle["Latitude"].between(lat0 - pad, lat0 + pad)
+    ].dropna(subset=["Longitude", "Latitude", "RSRP"])
+    if near.empty:
+        return near
+    lat = near["Latitude"].to_numpy(dtype=float)
+    lon = near["Longitude"].to_numpy(dtype=float)
+    kx = _km_per_deg_lon(lat0)
+    ky = 111.32
+    px = lon * kx
+    py = lat * ky
+    best = np.full(len(near), np.inf)
+    bearing = np.zeros(len(near))
+    for (a_lat, a_lon), (b_lat, b_lon) in segments:
+        ax, ay = a_lon * kx, a_lat * ky
+        bx, by = b_lon * kx, b_lat * ky
+        dx, dy = bx - ax, by - ay
+        length = math.hypot(dx, dy)
+        if length < 1e-6:
+            dist = np.hypot(px - ax, py - ay)
+            use = dist < best
+        else:
+            t = np.clip(((px - ax) * dx + (py - ay) * dy) / (length * length), 0.0, 1.0)
+            dist = np.hypot(px - (ax + t * dx), py - (ay + t * dy))
+            use = dist < best
+        best = np.where(use, dist, best)
+        bearing = np.where(use, _bearing_deg(a_lat, a_lon, b_lat, b_lon), bearing)
+    keep = best * 1000.0 <= _IDLE_CORRIDOR_M
+    if not keep.any():
+        return near.iloc[0:0]
+    picked = near.loc[keep].copy()
+    side = np.radians(bearing[keep] + 90.0)
+    shift_km = _IDLE_BESIDE_M / 1000.0
+    picked["Latitude"] = picked["Latitude"].to_numpy(dtype=float) + np.cos(side) * shift_km / ky
+    picked["Longitude"] = picked["Longitude"].to_numpy(dtype=float) + np.sin(side) * shift_km / kx
+    return picked
+
+
+def _draw_idle_beside(ax, idle_road: pd.DataFrame) -> None:
+    """Idle RSRP in the same colours, on the line beside the bad road."""
+    if idle_road is None or idle_road.empty:
+        return
+    _draw_coverage_points(
+        ax,
+        idle_road,
+        rsrp_map_class(idle_road["RSRP"]),
+        MAP_RSRP_LABELS,
+        MAP_RSRP_COLORS,
+        max_points=4000,
+        poor_on_top=True,
+        bin_m=MAP_BIN_M,
+        column="RSRP",
+        route_casing=True,
+        casing_color="#1B4F72",
+        z0=8,
+    )
+    ax.text(
+        0.985, 0.12, "Line beside the road: Idle RSRP",
+        transform=ax.transAxes, ha="right", va="bottom",
+        fontsize=8, color="#14202B", fontweight="bold",
+        bbox=dict(boxstyle="round,pad=0.28", fc="#FFFFFF", ec="#1B4F72", lw=0.8),
+        zorder=40, clip_on=False,
+    )
+
+
 def plot_bad_spot_serial_maps(
     df: pd.DataFrame,
     spots: pd.DataFrame,
@@ -5115,6 +5251,7 @@ def plot_bad_spot_serial_maps(
     route_casing: bool = True,
     mode: str = "",
     only: set[int] | None = None,
+    compare: pd.DataFrame | None = None,
 ) -> list[Path]:
     """One large map per bad spot, longest first.
 
@@ -5174,6 +5311,8 @@ def plot_bad_spot_serial_maps(
             column=column,
             route_casing=route_casing,
         )
+        if compare is not None and "active" in str(mode).lower():
+            _draw_idle_beside(ax, _idle_beside_bad_road(compare, df, spot))
         ax.set_xlim(zext[0], zext[1])
         ax.set_ylim(zext[2], zext[3])
         ax.set_aspect("equal", adjustable="box")
