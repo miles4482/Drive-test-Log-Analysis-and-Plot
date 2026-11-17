@@ -89,7 +89,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.78"
+REPORT_VERSION = "1.79"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -2033,8 +2033,10 @@ def verify_report(path: Path) -> dict:
             shown = min(BAD_SPOT_MAX_ZOOMS, n)
             expected_shapes += shown
             images = info["sheets"].get(sheet, {}).get("images", 0)
-            if sheet in info["sheets"] and images != 1 + shown:
-                info["problems"].append(f"{sheet}: {images} images, expected {1 + shown}")
+            # Active RSRP has the wide map plus one idle-area map under it.
+            expected_images = 1 + shown + (shown if sheet == "Bad Spot RSRP_Active" else 0)
+            if sheet in info["sheets"] and images != expected_images:
+                info["problems"].append(f"{sheet}: {images} images, expected {expected_images}")
         if ellipses != expected_shapes:
             info["problems"].append(f"{ellipses} circle shapes, expected {expected_shapes}")
         for item in zf.namelist():
@@ -2760,6 +2762,118 @@ def _write_circle_index() -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(payload))
     print(f"Wrote {dest} ({len(payload)} circles)", flush=True)
+
+
+def place_active_idle_area_maps(src: Path, dest: Path, pngs: list[Path], clean_from: Path) -> Path:
+    """Restore the clean active pictures, then put an idle-area map under each one.
+
+    The idle picture uses the same width as the active picture and only the bad-spot
+    area. Rows are inserted under that picture so the next bad spot stays clear.
+    Other sheets are copied through. The orange circles stay on the active pictures.
+    """
+    import io
+    from PIL import Image
+
+    if len(pngs) != 99:
+        raise SystemExit(f"expected 99 idle-area maps, got {len(pngs)}")
+    with zipfile.ZipFile(src) as zf:
+        names = zf.namelist()
+        parts = {name: zf.read(name) for name in names}
+    with zipfile.ZipFile(clean_from) as zf:
+        clean_drawing = zf.read("xl/drawings/drawing8.xml")
+        clean_media = {name: zf.read(name) for name in zf.namelist() if name.startswith("xl/media/")}
+    parts["xl/drawings/drawing8.xml"] = clean_drawing
+    rels = parts["xl/drawings/_rels/drawing8.xml.rels"].decode("utf-8")
+    for target in re.findall(r'Target="([^"]+)"', rels):
+        media = target.lstrip("/")
+        if media in clean_media:
+            parts[media] = clean_media[media]
+
+    drawing = parts["xl/drawings/drawing8.xml"].decode("utf-8")
+    pictures = []
+    for block in re.findall(r"<oneCellAnchor>.*?</oneCellAnchor>", drawing, flags=re.S):
+        if "<pic>" not in block:
+            continue
+        col = int(re.search(r"<col>(\d+)</col>", block).group(1))
+        row = int(re.search(r"<row>(\d+)</row>", block).group(1))
+        cx = int(re.search(r'<ext cx="(\d+)"', block).group(1))
+        if col == 0:
+            pictures.append((row, cx))
+    pictures.sort()
+    serial = pictures[1:]
+    if len(serial) != 99:
+        raise SystemExit(f"active sheet has {len(serial)} serial maps, expected 99")
+
+    sheet_path = _sheet_part_path(parts, "Bad Spot RSRP_Active")
+    xml = parts[sheet_path].decode("utf-8")
+    row_emu = 15 * 12700
+    inserts: list[tuple[int, int]] = []
+    for number, png in enumerate(pngs, start=1):
+        header = 59 + (number - 1) * _BAD_SPOT_STRIDE
+        with Image.open(png) as image:
+            aspect = image.height / image.width
+        cx = serial[number - 1][1]
+        cy = max(1, int(cx * aspect))
+        rows = int(math.ceil(cy / row_emu)) + 1
+        inserts.append((header + 37, rows, cy))
+
+    for start, count, _cy in reversed(inserts):
+        xml = _shift_rows_down(xml, start, count)
+
+        def shift_row(match: re.Match, start: int = start, count: int = count) -> str:
+            row = int(match.group(1))
+            if row >= start:
+                row += count
+            return f"<row>{row}</row>"
+
+        drawing = re.sub(r"<row>(\d+)</row>", shift_row, drawing)
+
+    parts[sheet_path] = xml.encode("utf-8")
+    next_shape = max((int(i) for i in re.findall(r'<cNvPr id="(\d+)"', drawing)), default=0) + 1
+    next_rid = max((int(i) for i in re.findall(r'Id="rId(\d+)"', rels)), default=0) + 1
+    media_numbers = [int(i) for i in re.findall(r"xl/media/image(\d+)\.jpg", "\n".join(parts))]
+    next_media = max(media_numbers, default=0) + 1
+    anchors: list[str] = []
+    carried = 0
+    for number, ((start, _count, cy), png) in enumerate(zip(inserts, pngs), start=1):
+        row = start + carried
+        carried += inserts[number - 1][1]
+        buf = io.BytesIO()
+        with Image.open(png) as image:
+            image.convert("RGB").save(buf, "JPEG", quality=70, optimize=True)
+        media = f"xl/media/image{next_media}.jpg"
+        next_media += 1
+        parts[media] = buf.getvalue()
+        rid = f"rId{next_rid}"
+        next_rid += 1
+        rels = rels.replace(
+            "</Relationships>",
+            f'<Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" '
+            f'Target="/{media}" Id="{rid}" /></Relationships>',
+            1,
+        )
+        cx = serial[number - 1][1]
+        anchors.append(
+            f'<oneCellAnchor><from><col>0</col><colOff>0</colOff><row>{row}</row><rowOff>0</rowOff></from>'
+            f'<ext cx="{cx}" cy="{cy}" /><pic><nvPicPr><cNvPr id="{next_shape}" name="Idle area {number}" '
+            f'descr="Idle RSRP" /><cNvPicPr /></nvPicPr><blipFill><a:blip cstate="print" r:embed="{rid}" />'
+            f'<a:stretch><a:fillRect /></a:stretch></blipFill><spPr><a:prstGeom prst="rect" /></spPr></pic>'
+            f'<clientData /></oneCellAnchor>'
+        )
+        next_shape += 1
+    parts["xl/drawings/drawing8.xml"] = (drawing.replace("</wsDr>", "".join(anchors) + "</wsDr>")).encode("utf-8")
+    parts["xl/drawings/_rels/drawing8.xml.rels"] = rels.encode("utf-8")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(".xlsx.tmp")
+    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name in names:
+            zf.writestr(name, parts[name])
+        for name, blob in parts.items():
+            if name not in names:
+                zf.writestr(name, blob)
+    tmp.replace(dest)
+    print(f"Wrote {dest} ({dest.stat().st_size / 1e6:.1f} MB)", flush=True)
+    return dest
 
 
 def _jpeg_bytes(path: Path) -> bytes:

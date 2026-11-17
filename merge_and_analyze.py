@@ -5237,6 +5237,104 @@ def _draw_idle_beside(ax, idle_road: pd.DataFrame) -> None:
     )
 
 
+def _idle_area_extent(spot: pd.Series) -> tuple[float, float, float, float, float, float]:
+    """Bad-spot circle plus 180 m, so the idle map shows that area and a short run past it."""
+    lat0 = float(spot["outline_lat"]) if pd.notna(spot.get("outline_lat")) else float(spot["lat"])
+    lon0 = float(spot["outline_lon"]) if pd.notna(spot.get("outline_lon")) else float(spot["lon"])
+    km_lon = _km_per_deg_lon(lat0)
+    half_w = float(spot["outline_width_km"]) / 2.0 if pd.notna(spot.get("outline_width_km")) else 0.35
+    half_h = float(spot["outline_height_km"]) / 2.0 if pd.notna(spot.get("outline_height_km")) else 0.35
+    extra = 0.18
+    return (
+        lon0 - (half_w + extra) / km_lon,
+        lon0 + (half_w + extra) / km_lon,
+        lat0 - (half_h + extra) / 111.32,
+        lat0 + (half_h + extra) / 111.32,
+        lon0,
+        lat0,
+    )
+
+
+def _paint_idle_area_caption(path: Path) -> None:
+    """Navy title and the same RSRP colours, so the picture reads as an idle coverage map."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    image = Image.open(path).convert("RGB")
+    bar, foot = 48, 40
+    canvas = Image.new("RGB", (image.width, image.height + bar + foot), "#0B2540")
+    canvas.paste(image, (0, bar))
+    draw = ImageDraw.Draw(canvas)
+    bold = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 22)
+    small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 15)
+    draw.text((14, 12), "Idle RSRP", fill="#FFFFFF", font=bold)
+    x, y = 14, bar + image.height + 11
+    for color, label in zip(MAP_RSRP_COLORS, MAP_RSRP_LABELS):
+        draw.rectangle((x, y, x + 16, y + 16), fill=color, outline="#FFFFFF")
+        draw.text((x + 20, y - 1), label, fill="#FFFFFF", font=small)
+        x += 28 + int(small.getlength(label)) + 18
+    canvas.save(path)
+
+
+def plot_idle_area_map(idle: pd.DataFrame, spot: pd.Series, path: Path) -> Path:
+    """Idle RSRP zoomed to one active bad spot. The active map stays a separate picture."""
+    west, east, south, north, _lon0, _lat0 = _idle_area_extent(spot)
+    km_lon = _km_per_deg_lon((south + north) / 2.0)
+    span_x = max((east - west) * km_lon, 0.2)
+    span_y = max((north - south) * 111.32, 0.2)
+    fig_w = 8.0
+    fig_h = min(8.0, max(3.2, fig_w * span_y / span_x))
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    ax.set_xlim(west, east)
+    ax.set_ylim(south, north)
+    ax.set_aspect("equal", adjustable="box")
+    local = idle[
+        idle["Longitude"].between(west, east) & idle["Latitude"].between(south, north)
+    ]
+    if not local.empty:
+        _draw_coverage_points(
+            ax,
+            local,
+            rsrp_map_class(local["RSRP"]),
+            MAP_RSRP_LABELS,
+            MAP_RSRP_COLORS,
+            max_points=4000,
+            poor_on_top=True,
+            bin_m=MAP_BIN_M,
+            column="RSRP",
+            route_casing=True,
+        )
+    else:
+        ax.text(0.5, 0.5, "No idle drive in this area", transform=ax.transAxes, ha="center", va="center", fontsize=11, color="#14202B")
+    _add_spot_outline(ax, spot)
+    _add_basemap(ax)
+    add_map_scale_bar(ax, km=0.2)
+    hide_map_axes(ax)
+    fig.subplots_adjust(0, 0, 1, 1)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=120)
+    plt.close(fig)
+    _paint_idle_area_caption(path)
+    return path
+
+
+def plot_idle_area_maps(idle: pd.DataFrame, spots: pd.DataFrame, directory: Path) -> list[Path]:
+    """One idle coverage map for each active bad spot, in sheet order."""
+    directory = Path(directory)
+    work = idle.dropna(subset=["Latitude", "Longitude", "RSRP"]).copy()
+    work["Latitude"] = pd.to_numeric(work["Latitude"], errors="coerce")
+    work["Longitude"] = pd.to_numeric(work["Longitude"], errors="coerce")
+    work["RSRP"] = pd.to_numeric(work["RSRP"], errors="coerce")
+    work = work.dropna(subset=["Latitude", "Longitude", "RSRP"])
+    paths: list[Path] = []
+    for number, (_, spot) in enumerate(spots.iterrows(), start=1):
+        path = directory / f"excel_bad_spots_rsrp_spot_active_idle_{number:02d}.png"
+        plot_idle_area_map(work, spot, path)
+        paths.append(path)
+        print(f"idle area {number}", flush=True)
+    return paths
+
+
 def plot_bad_spot_serial_maps(
     df: pd.DataFrame,
     spots: pd.DataFrame,
@@ -5311,8 +5409,6 @@ def plot_bad_spot_serial_maps(
             column=column,
             route_casing=route_casing,
         )
-        if compare is not None and "active" in str(mode).lower():
-            _draw_idle_beside(ax, _idle_beside_bad_road(compare, df, spot))
         ax.set_xlim(zext[0], zext[1])
         ax.set_ylim(zext[2], zext[3])
         ax.set_aspect("equal", adjustable="box")

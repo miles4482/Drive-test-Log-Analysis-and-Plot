@@ -26,10 +26,10 @@ from pptx.util import Emu, Inches, Pt
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
-REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.78.xlsx"
+REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.79.xlsx"
 PLOTS = OUTPUT / "plots"
 DESCRIPTIONS = OUTPUT / "bad_spot_descriptions.json"
-SUMMARY_VERSION = "1.78"
+SUMMARY_VERSION = "1.79"
 DEST = OUTPUT / f"Bogura_DriveTest_Summary_v{SUMMARY_VERSION}.pptx"
 CIRCLES = PLOTS / "bad_spot_circles.json"
 
@@ -152,6 +152,11 @@ def _map_path(mode: str, number: int) -> Path:
     if mode == "Idle":
         return PLOTS / f"excel_bad_spots_rsrp_spot_{number:02d}.png"
     return PLOTS / f"excel_bad_spots_rsrp_spot_active_{number:02d}.png"
+
+
+def _idle_area_path(number: int) -> Path | None:
+    path = PLOTS / f"excel_bad_spots_rsrp_spot_active_idle_{number:02d}.png"
+    return path if path.exists() else None
 
 
 def _circle_box(path: Path) -> dict | None:
@@ -278,7 +283,7 @@ def _text(slide, left, top, width, height, text: str, size: int, color: RGBColor
 def _footer(slide, page: int, pages: int) -> None:
     _text(
         slide, Inches(0.4), Inches(7.18), Inches(10), Inches(0.24),
-        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.78  ·  Web v1.73",
+        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.79  ·  Web v1.73",
         11, MUTED,
     )
     _text(
@@ -527,20 +532,40 @@ def _example(prs: Presentation, group: dict, item: dict, record: dict[str, str],
         20, WHITE, True,
     )
     picture = _map_path(group["mode"], item["n"])
+    idle_picture = _idle_area_path(item["n"]) if group["mode"] == "Active" else None
     with Image.open(picture) as source:
         aspect = source.width / source.height
+    idle_aspect = None
+    if idle_picture is not None:
+        with Image.open(idle_picture) as source:
+            idle_aspect = source.width / source.height
     image = _jpeg(picture)
     change_count = len((_description(group["mode"], item["n"]).get("changes") or []))
     table_rows = 2 + min(4, change_count or 1)
-    table_h = 0.30 * table_rows
-    max_w, max_h = 6.55, min(4.70, 6.85 - 0.74 - table_h)
+    max_w = 6.55
+    if idle_aspect:
+        # Active map, then the idle bad-spot map, then the table, all above the footer.
+        table_h = 0.28 * table_rows
+        spare = 6.28 - table_h - 0.08
+        idle_h = min(1.65, max_w / idle_aspect, spare * 0.38)
+        max_h = spare - idle_h
+    else:
+        idle_h = 0.0
+        table_h = 0.30 * table_rows
+        max_h = min(4.70, 6.85 - 0.74 - table_h)
     width = max_w
     height = width / aspect
     if height > max_h:
         height = max_h
         width = height * aspect
-    slide.shapes.add_picture(image, Inches(0.16), Inches(0.68), Inches(width), Inches(height))
-    _change_table(slide, group["mode"], item["n"], 0.16, 0.68 + height + 0.05, 6.7, table_h)
+    top = 0.64 if idle_aspect else 0.68
+    slide.shapes.add_picture(image, Inches(0.16), Inches(top), Inches(width), Inches(height))
+    top += height + 0.04
+    if idle_picture is not None and idle_aspect:
+        idle_w = min(max_w, idle_h * idle_aspect)
+        slide.shapes.add_picture(_jpeg(idle_picture), Inches(0.16), Inches(top), Inches(idle_w), Inches(idle_h))
+        top += idle_h + 0.04
+    _change_table(slide, group["mode"], item["n"], 0.16, top, 6.7, table_h)
 
     panel = 7.05
     panel_w = 5.95
@@ -892,7 +917,7 @@ def _annex_workbook(prs: Presentation, page: int, pages: int, groups: list[dict]
     if partial:
         deck += "Samples: " + ", ".join(partial) + "."
     rows = [
-        ("Excel v1.78", "The map has the same header, legend and dashed circle as the Excel sheet. On an Active bad spot, idle RSRP is the line beside the red and blank road, extended a short way past that road. Active is on the left of the KPI sheets and Idle is on the right. A downtilt of a far cell is not the cover for a red run. That run gets an uptilt, an azimuth turn, or a 4th L900 when no L900 inside 2 km already faces it. The parameter table lists azimuth and tilt changes. A new site leaves Existing blank and fills New Plan."),
+        ("Excel v1.79", "The map has the same header, legend and dashed circle as the Excel sheet. On an Active bad spot the idle coverage map sits under the active map and shows only that bad-spot area. Active is on the left of the KPI sheets and Idle is on the right. A downtilt of a far cell is not the cover for a red run. That run gets an uptilt, an azimuth turn, or a 4th L900 when no L900 inside 2 km already faces it. The parameter table lists azimuth and tilt changes. A new site leaves Existing blank and fills New Plan."),
         ("This deck", deck),
         ("Web v1.69", "The live map is unchanged. Site names are white with a dark edge. Sector names on that map stay small. With KPI set to Blank, Info on a sector or the site centre opens the cell table."),
         ("RSRQ and SINR", "The coverage maps are in this deck. The workbook no longer has separate RSRQ or SINR bad-spot sheets. Poor RSRQ is at or below −20 dB. Poor SINR is at or below 0 dB."),
