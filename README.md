@@ -142,9 +142,9 @@ GitHub shows `index.html` as a file, not as a running map. Download the `web` fo
 
 **v1.78 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.78.xlsx
 
-The Active bad-spot sheet now draws idle RSRP beside the red and blank road, and a short way past that road. The active colours stay on the road. The same RSRP colours on the side line show whether idle is healthy there. Every other sheet is unchanged. The summary deck stays v1.77.
+The Active bad-spot sheet now draws idle RSRP beside the red and blank road, and a short way past that road. The active colours stay on the road. The same RSRP colours on the side line show whether idle is healthy there. Every other sheet is unchanged. The summary deck uses those same maps. The web map stays v1.73.
 
-**v1.77 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.77.pptx
+**v1.78 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.78.pptx
 
 The web map stays v1.73: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.73.zip
 
