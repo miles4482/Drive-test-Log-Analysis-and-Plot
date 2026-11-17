@@ -2026,6 +2026,22 @@ def _cover_offbeam_pocket(
     return choice
 
 
+def _uptilt_delta(rec: dict, dist_km: float) -> float:
+    """Negative E_tilt change when the main beam lands short of this distance.
+
+    Positive would be a downtilt, and that pulls the beam even farther from a
+    red sample that is already beyond the landing point. A blank tilt is left
+    alone. The change stays inside 6°.
+    """
+    if rec.get("etilt") is None:
+        return 0.0
+    desired = _ground_tilt_deg(rec.get("height"), dist_km)
+    raw = desired - float(rec["etilt"])
+    if raw > -0.8:
+        return 0.0
+    return max(raw, -6.0)
+
+
 def _pocket_beam(choice: dict, pocket: dict, spot_pop: float) -> str | None:
     """One extra sector, or one turn, aimed at the uncovered pocket. None when no host is inside 3 km."""
     del spot_pop
@@ -2055,10 +2071,30 @@ def _pocket_beam(choice: dict, pocket: dict, spot_pop: float) -> str | None:
                 facing = (score, site, rec)
     if facing is not None:
         _score, site, rec = facing
+        up = _uptilt_delta(rec, site["dist"]) if site["dist"] <= TUNE_KM else 0.0
+        if abs(up) < 0.8:
+            return (
+                f"{rec.get('sector')} {rec.get('layer')} already faces this side of the circle, "
+                f"azimuth {float(rec['azimuth']):.0f}°, {site['dist']:.1f} km away. "
+                f"It covers the red samples and the {pocket['blank']:,.0f} m blank there."
+            )
+        _old_e, _old_m, new_e, _new_m = _tilt_step(rec.get("etilt"), rec.get("mtilt"), up)
+        shown = float(f"{new_e:.0f}")
+        item = {
+            "rec": rec, "dist": site["dist"], "off": abs(_signed_deg(float(rec["azimuth"]), site["bearing"])),
+            "delta": up, "turn": 0.0, "old_pop": None, "new_pop": None, "overshoot": False,
+            "site": site["name"],
+        }
+        action = _tune_action(item)
+        action["action"] = "Uptilt toward the other side"
+        choice["actions"].append(action)
+        height = float(rec.get("height") or 30.0)
+        land_m = height / math.tan(math.radians(float(rec["etilt"])))
         return (
-            f"{rec.get('sector')} {rec.get('layer')} already faces this side of the circle, "
-            f"azimuth {float(rec['azimuth']):.0f}°, {site['dist']:.1f} km away. "
-            f"It covers the red samples and the {pocket['blank']:,.0f} m blank there."
+            f"{rec.get('sector')} already faces this side, azimuth {float(rec['azimuth']):.0f}°. "
+            f"E_tilt {_deg_text(rec.get('etilt'))}° to {shown:.0f}° so the beam reaches the red samples "
+            f"{site['dist']:.1f} km away. At {_deg_text(rec.get('etilt'))}° the beam lands at {land_m:,.0f} m, "
+            f"short of the {pocket['blank']:,.0f} m blank on that side."
         )
 
     turn = None
@@ -2082,18 +2118,30 @@ def _pocket_beam(choice: dict, pocket: dict, spot_pop: float) -> str | None:
         signed = _signed_deg(float(rec["azimuth"]), site["bearing"])
         delta = math.copysign(min(off, 25.0), signed)
         new_az = (float(rec["azimuth"]) + delta) % 360.0
+        up = _uptilt_delta(rec, site["dist"])
         item = {
-            "rec": rec, "dist": site["dist"], "off": off, "delta": 0.0, "turn": delta,
+            "rec": rec, "dist": site["dist"], "off": off, "delta": up, "turn": delta,
             "old_pop": None, "new_pop": None, "overshoot": False, "site": site["name"],
         }
         action = _tune_action(item)
         action["action"] = "Azimuth toward the other side"
         choice["actions"].append(action)
         choice["azimuth_overrides"][str(rec.get("sector")).strip()] = new_az
+        tilt_clause = ""
+        if abs(up) >= 0.8:
+            _old_e, _old_m, new_e, _new_m = _tilt_step(rec.get("etilt"), rec.get("mtilt"), up)
+            shown = float(f"{new_e:.0f}")
+            height = float(rec.get("height") or 30.0)
+            land_m = height / math.tan(math.radians(float(rec["etilt"])))
+            tilt_clause = (
+                f" E_tilt {_deg_text(rec.get('etilt'))}° to {shown:.0f}° so the beam reaches those samples "
+                f"{site['dist']:.1f} km away. At {_deg_text(rec.get('etilt'))}° the beam lands at {land_m:,.0f} m, "
+                f"short of that side."
+            )
         return (
             f"{rec.get('sector')} turns from {float(rec['azimuth']):.0f}° to {new_az:.0f}° "
             f"to cover the red samples and the {pocket['blank']:,.0f} m blank "
-            f"on the other side of the circle."
+            f"on the other side of the circle.{tilt_clause}"
         )
 
     for site in near:

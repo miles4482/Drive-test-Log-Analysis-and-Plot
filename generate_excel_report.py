@@ -89,7 +89,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.75"
+REPORT_VERSION = "1.76"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -3793,7 +3793,10 @@ def _map_caption(changes: list[dict], kind: str) -> tuple[str, str]:
         bits.append(f"{row.get('site')} 4th L900 ({degree(row.get('p_azimuth'))}°)")
     for row in turns:
         delta = (float(row["p_azimuth"]) - float(row["azimuth"]) + 180.0) % 360.0 - 180.0
-        bits.append(f"Turn {row.get('sector')} to {float(row['p_azimuth']):.0f}° ({delta:+.0f}°)")
+        bit = f"Turn {row.get('sector')} to {float(row['p_azimuth']):.0f}° ({delta:+.0f}°)"
+        if _values_differ(row.get("et"), row.get("p_et")):
+            bit += f", E_tilt {degree(row.get('et'))}° to {degree(row.get('p_et'))}°"
+        bits.append(bit)
     for row in tilts:
         who = row.get("cell") or row.get("sector")
         if _values_differ(row.get("et"), row.get("p_et")):
