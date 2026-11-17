@@ -5267,7 +5267,9 @@ def _paint_idle_area_caption(path: Path) -> None:
     draw = ImageDraw.Draw(canvas)
     bold = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 22)
     small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 15)
-    draw.text((14, 12), "Idle RSRP", fill="#FFFFFF", font=bold)
+    draw.text((14, 8), "Idle RSRP", fill="#FFFFFF", font=bold)
+    small_note = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 13)
+    draw.text((150, 16), "Same scale as the active map.  Yellow dash: active serving.  Blue dash: idle serving.", fill="#D6E4F0", font=small_note)
     x, y = 14, bar + image.height + 11
     for color, label in zip(MAP_RSRP_COLORS, MAP_RSRP_LABELS):
         draw.rectangle((x, y, x + 16, y + 16), fill=color, outline="#FFFFFF")
@@ -5442,13 +5444,9 @@ def idle_vs_active_note(active: pd.DataFrame, idle: pd.DataFrame, spot: pd.Serie
     return coverage, serving
 
 
-def _draw_area_serving_lines(ax, samples: pd.DataFrame, spot: pd.Series) -> None:
-    """Dashed yellow line from each serving cell to the samples inside the circle.
-
-    The same yellow dash as the active map. The cell name stays on the line so a
-    site outside this tight view can still be identified.
-    """
-    cells = _area_serving_cells(samples, spot)
+def _draw_area_serving_lines(ax, samples: pd.DataFrame, spot: pd.Series, *, color: str = "#2E86C1", skip: set[str] | None = None) -> None:
+    """Dashed line from an idle serving cell that is not already on the active map."""
+    cells = [cell for cell in _area_serving_cells(samples, spot) if cell["name"] not in (skip or set())]
     if not cells:
         return
     spot_lat = float(spot["lat"])
@@ -5467,12 +5465,12 @@ def _draw_area_serving_lines(ax, samples: pd.DataFrame, spot: pd.Series) -> None
         dist_m = float(_equirect_km(lat0, lon0, lat1, lon1)) * 1000.0
         mx, my = _label_on_segment(
             ax, lon1, lat1, lon0, lat0,
-            fracs=(0.28, 0.42, 0.18), pixels=26,
+            fracs=(0.62, 0.74, 0.5), pixels=26,
         )
-        _ink(ax, mx, my, f"{cell['name']}\n{dist_m:,.0f} m", 8, "#F7FEFF")
+        _ink(ax, mx, my, f"{cell['name']}\n{dist_m:,.0f} m", 8, "#EAF4FB")
     ax.add_collection(LineCollection(
         segments,
-        colors="#F5C400",
+        colors=color,
         linewidths=1.35,
         linestyles=(0, (6, 3.5)),
         capstyle="butt",
@@ -5480,21 +5478,31 @@ def _draw_area_serving_lines(ax, samples: pd.DataFrame, spot: pd.Series) -> None
     ))
 
 
-def plot_idle_area_map(idle: pd.DataFrame, spot: pd.Series, path: Path) -> Path:
-    """Idle RSRP zoomed to one active bad spot. The active map stays a separate picture."""
-    west, east, south, north, _lon0, _lat0 = _idle_area_extent(spot)
-    km_lon = _km_per_deg_lon((south + north) / 2.0)
-    span_x = max((east - west) * km_lon, 0.2)
-    span_y = max((north - south) * 111.32, 0.2)
-    fig_w = 8.0
-    fig_h = min(8.0, max(3.2, fig_w * span_y / span_x))
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+def plot_idle_area_map(idle: pd.DataFrame, active: pd.DataFrame, spot: pd.Series, path: Path) -> Path:
+    """Idle RSRP on the same window and scale as the active bad-spot map."""
+    (west, east, south, north), _plan = _serial_spot_extent(active, spot, "RSRP", "Active")
+    # The scale bar uses the active window, so it reads the same length on both maps.
+    mid_lat = (south + north) / 2.0
+    span_km = (east - west) * _km_per_deg_lon(mid_lat)
+    bar_km = 0.2
+    for choice in (0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 40.0):
+        if choice <= (span_km / 5.0) * 1.35:
+            bar_km = choice
+    # A little more idle road than the active window, with the picture widened
+    # by the same fraction so the kilometres-per-centimetre stay the same.
+    pad_lon = (east - west) * 0.06
+    pad_lat = (north - south) * 0.06
+    west, east, south, north = west - pad_lon, east + pad_lon, south - pad_lat, north + pad_lat
+    fig, ax = plt.subplots(figsize=(9.4, 8.6))
     ax.set_xlim(west, east)
     ax.set_ylim(south, north)
     ax.set_aspect("equal", adjustable="box")
     local = idle[
         idle["Longitude"].between(west, east) & idle["Latitude"].between(south, north)
     ]
+    active_local = active[
+        active["Longitude"].between(west, east) & active["Latitude"].between(south, north)
+    ] if active is not None and not active.empty else active
     if not local.empty:
         _draw_coverage_points(
             ax,
@@ -5502,7 +5510,7 @@ def plot_idle_area_map(idle: pd.DataFrame, spot: pd.Series, path: Path) -> Path:
             rsrp_map_class(local["RSRP"]),
             MAP_RSRP_LABELS,
             MAP_RSRP_COLORS,
-            max_points=4000,
+            max_points=8000,
             poor_on_top=True,
             bin_m=MAP_BIN_M,
             column="RSRP",
@@ -5510,12 +5518,13 @@ def plot_idle_area_map(idle: pd.DataFrame, spot: pd.Series, path: Path) -> Path:
         )
     else:
         ax.text(0.5, 0.5, "No idle drive in this area", transform=ax.transAxes, ha="center", va="center", fontsize=11, color="#14202B")
-    # Existing sites in this view, then the idle serving-cell lines. The circle stays the same orange.
-    draw_bad_spot_sector_pies(ax, spot, samples=local, column="RSRP", serving=False)
-    _draw_area_serving_lines(ax, idle, spot)
+    # Same sites and the same yellow serving lines as the active map.
+    draw_bad_spot_sector_pies(ax, spot, samples=active_local, column="RSRP", serving=True)
+    active_names = {cell["name"] for cell in _area_serving_cells(active, spot)} if active is not None else set()
+    _draw_area_serving_lines(ax, idle, spot, color="#2E86C1", skip=active_names)
     _add_spot_outline(ax, spot)
     _add_basemap(ax)
-    add_map_scale_bar(ax, km=0.2)
+    add_map_scale_bar(ax, km=bar_km, boxed=False)
     hide_map_axes(ax)
     fig.subplots_adjust(0, 0, 1, 1)
     path = Path(path)
@@ -5526,21 +5535,45 @@ def plot_idle_area_map(idle: pd.DataFrame, spot: pd.Series, path: Path) -> Path:
     return path
 
 
-def plot_idle_area_maps(idle: pd.DataFrame, spots: pd.DataFrame, directory: Path) -> list[Path]:
-    """One idle coverage map for each active bad spot, in sheet order."""
+def plot_idle_area_maps(idle: pd.DataFrame, active: pd.DataFrame, spots: pd.DataFrame, directory: Path) -> list[Path]:
+    """One idle coverage map for each active bad spot, on the same scale as that active map."""
     directory = Path(directory)
     work = idle.dropna(subset=["Latitude", "Longitude", "RSRP"]).copy()
-    work["Latitude"] = pd.to_numeric(work["Latitude"], errors="coerce")
-    work["Longitude"] = pd.to_numeric(work["Longitude"], errors="coerce")
-    work["RSRP"] = pd.to_numeric(work["RSRP"], errors="coerce")
-    work = work.dropna(subset=["Latitude", "Longitude", "RSRP"])
     paths: list[Path] = []
     for number, (_, spot) in enumerate(spots.iterrows(), start=1):
         path = directory / f"excel_bad_spots_rsrp_spot_active_idle_{number:02d}.png"
-        plot_idle_area_map(work, spot, path)
+        plot_idle_area_map(work, active, spot, path)
         paths.append(path)
         print(f"idle area {number}", flush=True)
     return paths
+
+
+def _serial_spot_extent(samples: pd.DataFrame, spot: pd.Series, column: str, mode: str) -> tuple[tuple[float, float, float, float], dict]:
+    """The window used by the active bad-spot map, so the idle map can share its scale."""
+    zext = _zoom_extent(spot)
+    arm_km = 0.9
+    mid_lat = (zext[2] + zext[3]) / 2.0
+    arm_lon = arm_km / _km_per_deg_lon(mid_lat)
+    arm_lat = arm_km / 111.32
+    zext = (zext[0] - arm_lon, zext[1] + arm_lon, zext[2] - arm_lat, zext[3] + arm_lat)
+    plan = bad_spot_advice(samples, column, spot, mode=mode)
+    proposal = plan.get("draw")
+    if proposal:
+        zext = _extent_with_proposal(zext, proposal)
+    plan_names = []
+    for row in plan.get("actions") or []:
+        plan_names.append(str(row.get("site") or ""))
+        plan_names.append(str(row.get("sector") or ""))
+    zext = _extent_with_nearest_site(
+        zext,
+        float(spot["lat"]),
+        float(spot["lon"]),
+        plan.get("azimuth_overrides") or {},
+        plan_names,
+    )
+    # The idle map uses this same window, so both pictures share one scale.
+    # A nearest site beyond 2 km does not force a wider view than the active map.
+    return zext, plan
 
 
 def plot_bad_spot_serial_maps(
@@ -5578,29 +5611,9 @@ def plot_bad_spot_serial_maps(
             continue
         print(f"  {stem} bad spot {i}/{total}", flush=True)
         fig, ax = plt.subplots(figsize=(9.4, 8.6))
-        zext = _zoom_extent(spot)
-        # Room for every sector arm when the site sits near the edge of the spot.
-        arm_km = 0.9
-        mid_lat = (zext[2] + zext[3]) / 2.0
-        arm_lon = arm_km / _km_per_deg_lon(mid_lat)
-        arm_lat = arm_km / 111.32
-        zext = (zext[0] - arm_lon, zext[1] + arm_lon, zext[2] - arm_lat, zext[3] + arm_lat)
-        plan = bad_spot_advice(df, column, spot, mode=mode)
+        zext, plan = _serial_spot_extent(df, spot, column, mode)
         proposal = plan.get("draw")
         overshoot = plan.get("overshoot_marks") or {}
-        if proposal:
-            zext = _extent_with_proposal(zext, proposal)
-        plan_names = []
-        for row in plan.get("actions") or []:
-            plan_names.append(str(row.get("site") or ""))
-            plan_names.append(str(row.get("sector") or ""))
-        zext = _extent_with_nearest_site(
-            zext,
-            float(spot["lat"]),
-            float(spot["lon"]),
-            plan.get("azimuth_overrides") or {},
-            plan_names,
-        )
         local = geo[
             geo["Longitude"].between(zext[0], zext[1])
             & geo["Latitude"].between(zext[2], zext[3])

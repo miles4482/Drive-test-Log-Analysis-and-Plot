@@ -26,11 +26,11 @@ from pptx.util import Emu, Inches, Pt
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
-REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.80.xlsx"
+REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.81.xlsx"
 IDLE_NOTES = OUTPUT / "idle_vs_active_notes.json"
 PLOTS = OUTPUT / "plots"
 DESCRIPTIONS = OUTPUT / "bad_spot_descriptions.json"
-SUMMARY_VERSION = "1.80"
+SUMMARY_VERSION = "1.81"
 DEST = OUTPUT / f"Bogura_DriveTest_Summary_v{SUMMARY_VERSION}.pptx"
 CIRCLES = PLOTS / "bad_spot_circles.json"
 
@@ -295,7 +295,7 @@ def _text(slide, left, top, width, height, text: str, size: int, color: RGBColor
 def _footer(slide, page: int, pages: int) -> None:
     _text(
         slide, Inches(0.4), Inches(7.18), Inches(10), Inches(0.24),
-        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.80  ·  Web v1.73",
+        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.81  ·  Web v1.73",
         11, MUTED,
     )
     _text(
@@ -557,30 +557,42 @@ def _example(prs: Presentation, group: dict, item: dict, record: dict[str, str],
     max_w = 6.55
     note = _idle_note(item["n"]) if group["mode"] == "Active" else None
     if idle_aspect:
-        # Active map, a smaller idle map, the comparison note, then the table.
+        # Side by side, same width, so the two maps share one scale.
         table_h = 0.28 * table_rows
-        note_h = 1.05 if note else 0.0
+        note_h = 0.95 if note else 0.0
         spare = 6.18 - table_h - note_h - 0.12
-        idle_h = min(1.05, max_w * 0.72 / idle_aspect, spare * 0.32)
-        max_h = spare - idle_h
+        gap = 0.08
+        # The idle window is 12% wider. Its picture is 12% wider so the scale matches.
+        width = (max_w - gap) / 2.12
+        idle_w = width * 1.12
+        height = width / aspect
+        idle_h = idle_w / idle_aspect
+        map_h = max(height, idle_h)
+        if map_h > spare and map_h > 0:
+            fitted = spare / map_h
+            width *= fitted
+            height *= fitted
+            idle_w *= fitted
+            idle_h *= fitted
     else:
         idle_h = 0.0
         note_h = 0.0
         table_h = 0.30 * table_rows
         max_h = min(4.70, 6.85 - 0.74 - table_h)
-    width = max_w
-    height = width / aspect
-    if height > max_h:
-        height = max_h
-        width = height * aspect
+        width = max_w
+        height = width / aspect
+        if height > max_h:
+            height = max_h
+            width = height * aspect
     top = 0.64 if idle_aspect else 0.68
     slide.shapes.add_picture(image, Inches(0.16), Inches(top), Inches(width), Inches(height))
-    top += height + 0.04
     if idle_picture is not None and idle_aspect:
-        idle_w = min(width * 0.78, idle_h * idle_aspect)
-        idle_h = idle_w / idle_aspect
-        slide.shapes.add_picture(_jpeg(idle_picture), Inches(0.16), Inches(top), Inches(idle_w), Inches(idle_h))
-        top += idle_h + 0.03
+        slide.shapes.add_picture(
+            _jpeg(idle_picture), Inches(0.16 + width + 0.08), Inches(top), Inches(idle_w), Inches(idle_h),
+        )
+        top += max(height, idle_h) + 0.04
+    else:
+        top += height + 0.04
     if note:
         _text(slide, Inches(0.16), Inches(top), Inches(6.5), Inches(0.18), "Idle vs active", 11, color, True)
         _text(
@@ -941,7 +953,7 @@ def _annex_workbook(prs: Presentation, page: int, pages: int, groups: list[dict]
     if partial:
         deck += "Samples: " + ", ".join(partial) + "."
     rows = [
-        ("Excel v1.80", "The map has the same header, legend and dashed circle as the Excel sheet. On an Active bad spot the idle coverage map sits under the active map, a bit smaller, with the same orange circle. Existing sites and the idle serving-cell lines are on that map. A note beside it compares idle and active coverage and the serving cells. Active is on the left of the KPI sheets and Idle is on the right. A downtilt of a far cell is not the cover for a red run. That run gets an uptilt, an azimuth turn, or a 4th L900 when no L900 inside 2 km already faces it. The parameter table lists azimuth and tilt changes. A new site leaves Existing blank and fills New Plan."),
+        ("Excel v1.81", "The map has the same header, legend and dashed circle as the Excel sheet. On an Active bad spot the idle map uses the same scale as the active map, with a little more road. The yellow dashed serving lines are the same lines as the active map. A blue dash is an idle serving cell that is different. A note beside it compares the two. Active is on the left of the KPI sheets and Idle is on the right. A downtilt of a far cell is not the cover for a red run. That run gets an uptilt, an azimuth turn, or a 4th L900 when no L900 inside 2 km already faces it. The parameter table lists azimuth and tilt changes. A new site leaves Existing blank and fills New Plan."),
         ("This deck", deck),
         ("Web v1.69", "The live map is unchanged. Site names are white with a dark edge. Sector names on that map stay small. With KPI set to Blank, Info on a sector or the site centre opens the cell table."),
         ("RSRQ and SINR", "The coverage maps are in this deck. The workbook no longer has separate RSRQ or SINR bad-spot sheets. Poor RSRQ is at or below −20 dB. Poor SINR is at or below 0 dB."),

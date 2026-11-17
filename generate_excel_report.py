@@ -89,7 +89,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.80"
+REPORT_VERSION = "1.81"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -2954,6 +2954,134 @@ def refresh_idle_area_maps(src: Path, dest: Path, pngs: list[Path], notes: list[
     tmp.replace(dest)
     print(f"Wrote {dest} ({dest.stat().st_size / 1e6:.1f} MB)", flush=True)
     return dest
+
+
+def refit_idle_area_scale(src: Path, dest: Path, pngs: list[Path]) -> Path:
+    """Put each idle map on the same scale as the active map above it.
+
+    The idle picture is 12% wider than the active picture because its window is
+    12% wider. Kilometres per centimetre stay the same. Rows are inserted when
+    the taller picture would reach the next bad spot.
+    """
+    import io
+    from PIL import Image
+
+    if len(pngs) != 99:
+        raise SystemExit(f"expected 99 idle maps, got {len(pngs)}")
+    with zipfile.ZipFile(src) as zf:
+        names = zf.namelist()
+        parts = {name: zf.read(name) for name in names}
+    drawing = parts["xl/drawings/drawing8.xml"].decode("utf-8")
+    rels = parts["xl/drawings/_rels/drawing8.xml.rels"].decode("utf-8")
+    rid_to = {}
+    for target, rid in re.findall(r'Target="([^"]+)"[^>]*Id="(rId\d+)"', rels):
+        rid_to[rid] = target.lstrip("/")
+    for rid, target in re.findall(r'Id="(rId\d+)"[^>]*Target="([^"]+)"', rels):
+        rid_to[rid] = target.lstrip("/")
+
+    blocks = re.findall(r"<oneCellAnchor>.*?</oneCellAnchor>", drawing, flags=re.S)
+    active_cx: list[int] = []
+    idle_index: dict[int, int] = {}
+    for index, block in enumerate(blocks):
+        if "<pic>" not in block:
+            continue
+        col = int(re.search(r"<col>(\d+)</col>", block).group(1))
+        row = int(re.search(r"<row>(\d+)</row>", block).group(1))
+        name = re.search(r'name="([^"]+)"', block).group(1)
+        if col != 0:
+            continue
+        if name.startswith("Idle area"):
+            idle_index[int(name.split()[-1])] = index
+        else:
+            active_cx.append((row, int(re.search(r'<ext cx="(\d+)"', block).group(1))))
+    active_cx.sort()
+    serial = active_cx[1:]
+    if len(serial) != 99 or len(idle_index) != 99:
+        raise SystemExit(f"pictures active {len(serial)} idle {len(idle_index)}")
+
+    aspects: dict[int, float] = {}
+    new_cy: dict[int, int] = {}
+    for number, png in enumerate(pngs, start=1):
+        with Image.open(png) as image:
+            aspects[number] = image.height / image.width
+            buf = io.BytesIO()
+            image.convert("RGB").save(buf, "JPEG", quality=70, optimize=True)
+        block = blocks[idle_index[number]]
+        rid = re.search(r'r:embed="(rId\d+)"', block).group(1)
+        parts[rid_to[rid]] = buf.getvalue()
+        cx = int(serial[number - 1][1] * 1.12)
+        cy = max(1, int(cx * aspects[number]))
+        new_cy[number] = cy
+        blocks[idle_index[number]] = re.sub(
+            r'<ext cx="\d+" cy="\d+"', f'<ext cx="{cx}" cy="{cy}"', block, count=1,
+        )
+
+    sheet_path = _sheet_part_path(parts, "Bad Spot RSRP_Active")
+    xml = parts[sheet_path].decode("utf-8")
+    headers: dict[int, int] = {}
+    for match in re.finditer(r'<t(?: xml:space="preserve")?>Bad Spot (\d+)</t>', xml):
+        start = xml.rfind("<row r=\"", 0, match.start())
+        row = int(re.match(r'<row r="(\d+)"', xml[start:]).group(1))
+        if 's="5"' in xml[start:match.start()]:
+            headers[int(match.group(1))] = row
+    if len(headers) != 99:
+        raise SystemExit(f"found {len(headers)} titles")
+
+    # The comparison note occupies header+42 through header+48. The wider idle
+    # picture starts on the next free row so it does not cover that note.
+    idle_rows = {}
+    for number, index in idle_index.items():
+        idle_rows[number] = headers[number] + 50
+        blocks[index] = re.sub(
+            r"<row>\d+</row>", f"<row>{idle_rows[number]}</row>", blocks[index], count=1,
+        )
+    row_emu = 15 * 12700
+    drawing = "".join(blocks)
+    # The drawing was split on anchors; rebuild from the original wrapper.
+    drawing = parts["xl/drawings/drawing8.xml"].decode("utf-8")
+    drawing = re.sub(
+        r"<oneCellAnchor>.*?</oneCellAnchor>",
+        lambda match, blocks=blocks: _consume(blocks),
+        drawing,
+        flags=re.S,
+    )
+
+    content_rows = [int(row) for row in re.findall(r'<row r="(\d+)"', xml)]
+    tail = [row for row in content_rows if row > headers[99] + 48]
+    bounds = {number: headers[number + 1] for number in range(1, 99)}
+    if tail:
+        bounds[99] = tail[0]
+
+    for number in range(99, 0, -1):
+        nxt = bounds.get(number)
+        if nxt is None:
+            continue
+        end = idle_rows[number] + math.ceil(new_cy[number] / row_emu)
+        if end < nxt - 1:
+            continue
+        count = end - (nxt - 2)
+        xml = _shift_rows_down(xml, nxt, count)
+
+        def shift_row(match: re.Match, start: int = nxt, count: int = count) -> str:
+            row = int(match.group(1))
+            return f"<row>{row + count if row >= start else row}</row>"
+
+        drawing = re.sub(r"<row>(\d+)</row>", shift_row, drawing)
+        print(f"  inserted {count} rows before bad spot {number + 1}", flush=True)
+
+    parts[sheet_path] = xml.encode("utf-8")
+    parts["xl/drawings/drawing8.xml"] = drawing.encode("utf-8")
+    tmp = dest.with_suffix(".xlsx.tmp")
+    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name in names:
+            zf.writestr(name, parts[name])
+    tmp.replace(dest)
+    print(f"Wrote {dest} ({dest.stat().st_size / 1e6:.1f} MB)", flush=True)
+    return dest
+
+
+def _consume(blocks: list[str]) -> str:
+    return blocks.pop(0)
 
 
 def _jpeg_bytes(path: Path) -> bytes:
