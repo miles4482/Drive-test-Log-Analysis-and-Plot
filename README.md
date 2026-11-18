@@ -138,9 +138,19 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
+## Download Excel report (v1.88)
+
+**v1.88 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.88.xlsx
+
+On Bad Spot RSRP_Active a short gap sits under each active map so the legend on that map stays visible. The circle on every idle map is the same dashed orange as the circle on the active map. The other sheets are unchanged. The web map stays v1.73.
+
+**v1.88 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.88.pptx
+
+The web map stays v1.73: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.73.zip
+
 ## Download Excel report (v1.87)
 
-**v1.87 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.87.xlsx
+**v1.87:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.87.xlsx
 
 On Active Bad Spot 4 the circle shifts east so the blank just past the intersection is inside it. The green road beyond that blank stays outside. The idle map under that spot uses the same dashed orange circle. The other sheets are unchanged. The web map stays v1.73.
 

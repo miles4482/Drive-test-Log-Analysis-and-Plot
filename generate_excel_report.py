@@ -90,7 +90,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.87"
+REPORT_VERSION = "1.88"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -3979,6 +3979,63 @@ def _pull_idle_under_active(drawing: str, sheet_xml: str) -> str:
     )
 
 
+def _open_idle_gap(drawing: str, sheet_xml: str, gap_emu: int) -> str:
+    """Drop each idle map a short way below the active map so the legend stays visible.
+
+    The two navy bars were touching, so the active legend read as part of the idle
+    title. The idle picture and any circle that sits on it move together.
+    """
+    col_emu, row_emu = _sheet_axes(sheet_xml)
+    blocks = re.findall(r"<oneCellAnchor>.*?</oneCellAnchor>", drawing, flags=re.S)
+    pictures = []
+    for index, block in enumerate(blocks):
+        if "<pic>" not in block:
+            continue
+        name = re.search(r'name="([^"]+)"', block)
+        box = _anchor_box(block)
+        if name is None or box is None or not name.group(1).startswith("Idle"):
+            continue
+        pictures.append((index, box))
+    for index, box in pictures:
+        old_top = _abs_along(box[2], box[3], row_emu)
+        new_top = old_top + gap_emu
+        row, row_off = _walk_along(new_top, row_emu)
+        blocks[index] = re.sub(
+            r"<from><col>\d+</col><colOff>\d+</colOff><row>\d+</row><rowOff>\d+</rowOff></from>",
+            f"<from><col>0</col><colOff>0</colOff><row>{row}</row><rowOff>{row_off}</rowOff></from>",
+            blocks[index],
+            count=1,
+        )
+        bottom = old_top + box[5]
+        for shape, shape_block in enumerate(blocks):
+            if 'prst="ellipse"' not in shape_block:
+                continue
+            found = _anchor_box(shape_block)
+            if found is None:
+                continue
+            center = _abs_along(found[2], found[3], row_emu) + found[5] / 2.0
+            if not (old_top <= center <= bottom):
+                continue
+            shape_row, shape_off = _walk_along(
+                _abs_along(found[2], found[3], row_emu) + gap_emu, row_emu,
+            )
+            blocks[shape] = re.sub(
+                r"<from><col>(\d+)</col><colOff>(\d+)</colOff><row>\d+</row><rowOff>\d+</rowOff></from>",
+                lambda match, row=shape_row, off=shape_off: (
+                    f"<from><col>{match.group(1)}</col><colOff>{match.group(2)}</colOff>"
+                    f"<row>{row}</row><rowOff>{off}</rowOff></from>"
+                ),
+                blocks[shape],
+                count=1,
+            )
+    return re.sub(
+        r"<oneCellAnchor>.*?</oneCellAnchor>",
+        lambda _match, pending=blocks: _consume(pending),
+        drawing,
+        flags=re.S,
+    )
+
+
 def _move_circle_on_picture(drawing: str, sheet_xml: str, name: str, old: dict, new: dict) -> str:
     """Move one oval by the same fraction the bad-spot outline moved on its map."""
     col_emu, row_emu = _sheet_axes(sheet_xml)
@@ -4051,6 +4108,50 @@ def _move_circle_on_picture(drawing: str, sheet_xml: str, name: str, old: dict, 
         drawing,
         flags=re.S,
     )
+
+
+def publish_report_v188(src: Path, dest: Path, idle_pngs: dict[int, Path], gap_in: float = 0.20) -> Path:
+    """Open a short gap under each active map and use the orange idle circles."""
+    with zipfile.ZipFile(src) as zf:
+        names = zf.namelist()
+        parts = {name: zf.read(name) for name in names}
+    sheet = _sheet_part_path(parts, "Bad Spot RSRP_Active")
+    xml = parts[sheet].decode("utf-8")
+    drawing = _open_idle_gap(
+        parts["xl/drawings/drawing8.xml"].decode("utf-8"), xml, int(round(gap_in * 914400)),
+    )
+    parts["xl/drawings/drawing8.xml"] = drawing.encode("utf-8")
+    rels = parts["xl/drawings/_rels/drawing8.xml.rels"].decode("utf-8")
+    rid_media = {}
+    for rel in re.findall(r"<Relationship\b[^>]*/>", rels):
+        rid = re.search(r'Id="([^"]+)"', rel).group(1)
+        target = re.search(r'Target="([^"]+)"', rel).group(1)
+        if target.startswith("../"):
+            rid_media[rid] = "xl/" + target[3:]
+        else:
+            rid_media[rid] = "xl/media/" + target.rsplit("/", 1)[-1]
+    replaced = 0
+    for block in re.findall(r"<oneCellAnchor>.*?</oneCellAnchor>", drawing, flags=re.S):
+        name = re.search(r'name="Idle area (\d+)"', block)
+        embed = re.search(r'r:embed="([^"]+)"', block)
+        if name is None or embed is None:
+            continue
+        number = int(name.group(1))
+        media = rid_media.get(embed.group(1))
+        png = idle_pngs.get(number)
+        if media is None or png is None:
+            raise SystemExit(f"Idle area {number} has no picture")
+        parts[media] = _jpeg_bytes(png)
+        replaced += 1
+    if replaced != len(idle_pngs):
+        raise SystemExit(f"Replaced {replaced} idle maps, expected {len(idle_pngs)}")
+    tmp = dest.with_suffix(".xlsx.tmp")
+    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name in names:
+            zf.writestr(name, parts[name])
+    tmp.replace(dest)
+    print(f"Wrote {dest} ({dest.stat().st_size / 1e6:.1f} MB, {replaced} idle maps)", flush=True)
+    return dest
 
 
 def publish_report_v187(src: Path, dest: Path, idle_png: Path, old: dict, new: dict) -> Path:

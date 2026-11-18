@@ -6014,6 +6014,66 @@ def plot_idle_area_map(idle: pd.DataFrame, active: pd.DataFrame, spot: pd.Series
     return path
 
 
+def _dash_ellipse(draw, box: tuple[float, float, float, float], fill: tuple[int, int, int], width: int, dash: float, gap: float) -> None:
+    """Dashed oval. The active-sheet circle is this same orange dash."""
+    left, top, right, bottom = box
+    cx = (left + right) / 2.0
+    cy = (top + bottom) / 2.0
+    rx = max(1.0, (right - left) / 2.0)
+    ry = max(1.0, (bottom - top) / 2.0)
+    steps = 420
+    points = [
+        (cx + rx * math.cos(2.0 * math.pi * i / steps), cy + ry * math.sin(2.0 * math.pi * i / steps))
+        for i in range(steps)
+    ]
+    points.append(points[0])
+    travel = 0.0
+    drawing = True
+    for start, end in zip(points, points[1:]):
+        length = math.hypot(end[0] - start[0], end[1] - start[1])
+        if drawing:
+            draw.line([start, end], fill=fill, width=width)
+        travel += length
+        if travel >= (dash if drawing else gap):
+            drawing = not drawing
+            travel = 0.0
+
+
+def repaint_idle_circle(path: Path, active: pd.DataFrame, spot: pd.Series, *, cover_blanks: bool) -> Path:
+    """Paint the idle circle orange on a map that already exists, without redrawing the photo.
+
+    The old stroke was a thin orange line on a black halo, so it read as brown.
+    The new stroke is the same #FF6600 dash as the movable circle on the active map.
+    """
+    from PIL import Image, ImageDraw
+
+    display = with_tight_outline(active, spot, "RSRP", cover_blanks=cover_blanks)
+    (west, east, south, north), _plan = _serial_spot_extent(active, spot, "RSRP", "Active")
+    fig, ax = plt.subplots(figsize=(9.4, 8.6), dpi=120)
+    ax.set_xlim(west, east)
+    ax.set_ylim(south, north)
+    ax.set_aspect("equal", adjustable="box")
+    fig.subplots_adjust(0, 0, 1, 1)
+    fig.canvas.draw()
+    cx, cy, width, height, _angle, _style = _spot_outline(display)
+    x0, y0 = ax.transData.transform((cx - width / 2.0, cy - height / 2.0))
+    x1, y1 = ax.transData.transform((cx + width / 2.0, cy + height / 2.0))
+    fig_h = float(fig.bbox.height)
+    plt.close(fig)
+    # The caption bar is 48 px, pasted above the map after the figure is saved.
+    bar = 48.0
+    box = (min(x0, x1), bar + (fig_h - max(y0, y1)), max(x0, x1), bar + (fig_h - min(y0, y1)))
+    image = Image.open(path).convert("RGB")
+    draw = ImageDraw.Draw(image)
+    dotted = str(spot.get("kind", "consecutive")) == "discrete"
+    dash, gap = (3.0, 4.0) if dotted else (16.0, 9.0)
+    # White first, wide enough to cover the old dark halo, then the orange dash.
+    _dash_ellipse(draw, box, (255, 255, 255), 11, dash, gap)
+    _dash_ellipse(draw, box, (255, 102, 0), 7, dash, gap)
+    image.save(path)
+    return path
+
+
 def plot_idle_area_maps(idle: pd.DataFrame, active: pd.DataFrame, spots: pd.DataFrame, directory: Path) -> list[Path]:
     """One idle coverage map for each active bad spot, on the same scale as that active map."""
     directory = Path(directory)
