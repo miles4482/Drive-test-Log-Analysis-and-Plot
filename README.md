@@ -138,9 +138,19 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
+## Download Excel report (v1.87)
+
+**v1.87 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.87.xlsx
+
+On Active Bad Spot 4 the circle shifts east so the blank just past the intersection is inside it. The green road beyond that blank stays outside. The idle map under that spot uses the same dashed orange circle. The other sheets are unchanged. The web map stays v1.73.
+
+**v1.87 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.87.pptx
+
+The web map stays v1.73: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.73.zip
+
 ## Download Excel report (v1.86)
 
-**v1.86 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.86.xlsx
+**v1.86:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.86.xlsx
 
 On the Feeder swap maps the yellow arm stays. The other two arms are bright red and bright cyan, with a dark edge, so they stay visible on the satellite photo. On Bad Spot RSRP_Active the idle map sits directly under the active map. Both circles stay orange. The other sheets are unchanged. The web map stays v1.73.
 

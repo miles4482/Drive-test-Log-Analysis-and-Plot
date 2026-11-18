@@ -4777,8 +4777,11 @@ def _add_spot_outline(
                 )
             )
     else:
-        lw = 1.0
-    # Black under the orange stroke so the circle shows on both dark water and pale roofs.
+        # Thick orange dash. A thin orange line on a black halo reads as brown on the satellite.
+        lw = 2.8
+        style = (0, (1.2, 1.6)) if str(spot.get("kind", "consecutive")) == "discrete" else (0, (6.0, 3.2))
+    halo = "#FFFFFF" if not overview else "#1B1B1B"
+    halo_lw = lw + (2.4 if not overview else 1.6)
     ax.add_patch(
         Ellipse(
             (cx, cy),
@@ -4786,9 +4789,9 @@ def _add_spot_outline(
             height=h,
             angle=angle,
             fill=False,
-            edgecolor="#1B1B1B",
+            edgecolor=halo,
             linestyle=style,
-            linewidth=lw + 1.6,
+            linewidth=halo_lw,
             zorder=19,
         )
     )
@@ -5480,7 +5483,9 @@ def _draw_area_serving_lines(ax, samples: pd.DataFrame, spot: pd.Series, *, colo
     ))
 
 
-def tight_bad_spot_outline(samples: pd.DataFrame, spot: pd.Series, column: str = "RSRP") -> dict:
+def tight_bad_spot_outline(
+    samples: pd.DataFrame, spot: pd.Series, column: str = "RSRP", *, cover_blanks: bool = True,
+) -> dict:
     """Oval around the red samples only, with a small margin.
 
     The stored outline is at least 2.5 km, so it covers green road that is not
@@ -5512,9 +5517,122 @@ def tight_bad_spot_outline(samples: pd.DataFrame, spot: pd.Series, column: str =
     width = max((float(lons.max()) - float(lons.min())) * _km_per_deg_lon(lat0) + 2.0 * pad, 0.36)
     height = min(height, float(spot["outline_height_km"]))
     width = min(width, float(spot["outline_width_km"]))
-    return {
+    outline = {
         "outline_lon": lon0,
         "outline_lat": lat0,
+        "outline_width_km": float(width),
+        "outline_height_km": float(height),
+    }
+    if not cover_blanks:
+        return outline
+    red_pts = list(zip(lats.astype(float), lons.astype(float)))
+    return _outline_covering_adjacent_blanks(samples, spot, outline, red_pts)
+
+
+def _outline_radius(lat: float, lon: float, outline: dict) -> float:
+    """1.0 sits on the ellipse. Above 1 is outside it."""
+    lat0 = float(outline["outline_lat"])
+    lon0 = float(outline["outline_lon"])
+    half_w = float(outline["outline_width_km"]) / _km_per_deg_lon(lat0) / 2.0
+    half_h = float(outline["outline_height_km"]) / 111.32 / 2.0
+    if half_w <= 0 or half_h <= 0:
+        return 0.0
+    return math.hypot((float(lon) - lon0) / half_w, (float(lat) - lat0) / half_h)
+
+
+def _outline_covering_adjacent_blanks(
+    samples: pd.DataFrame, spot: pd.Series, outline: dict, red_pts: list[tuple[float, float]] | None = None,
+) -> dict:
+    """Shift the red oval onto a blank that starts just outside it.
+
+    A blank whose near end touches the red circle is part of the same bad spot.
+    Only that near portion is added, so a long gap through good road stays outside.
+    The oval grows on the axis the blank sticks out of, and the blank ends inside.
+    """
+    blanks = _blank_segments(samples, spot)
+    if not blanks:
+        return outline
+    reach = 1.22
+    extra: list[tuple[float, float]] = []
+    for gap in blanks:
+        pts = [
+            (
+                float(gap["lat1"]) + t * (float(gap["lat2"]) - float(gap["lat1"])),
+                float(gap["lon1"]) + t * (float(gap["lon2"]) - float(gap["lon1"])),
+            )
+            for t in np.linspace(0.0, 1.0, 16)
+        ]
+        radii = [_outline_radius(lat, lon, outline) for lat, lon in pts]
+        if min(radii) > reach or not any(r > 0.98 for r in radii):
+            continue
+        for (lat, lon), radius in zip(pts, radii):
+            if 0.90 <= radius <= reach:
+                extra.append((lat, lon))
+    if not extra:
+        return outline
+    lat0 = float(outline["outline_lat"])
+    lon0 = float(outline["outline_lon"])
+    km_lon = _km_per_deg_lon(lat0)
+    half_w = float(outline["outline_width_km"]) / km_lon / 2.0
+    half_h = float(outline["outline_height_km"]) / 111.32 / 2.0
+    # Keep the edge that already covers the red samples. Move only the edge the blank crosses.
+    west, east = lon0 - half_w, lon0 + half_w
+    south, north = lat0 - half_h, lat0 + half_h
+    cap_w = float(spot["outline_width_km"])
+    cap_h = float(spot["outline_height_km"])
+    # Pull the crossed edge out until the blank sits inside the oval, not on the line.
+    for _ in range(14):
+        lon0 = (west + east) / 2.0
+        lat0 = (south + north) / 2.0
+        current = {
+            "outline_lon": lon0,
+            "outline_lat": lat0,
+            "outline_width_km": (east - west) * _km_per_deg_lon(lat0),
+            "outline_height_km": (north - south) * 111.32,
+        }
+        if current["outline_width_km"] >= cap_w - 1e-6 and current["outline_height_km"] >= cap_h - 1e-6:
+            break
+        step_lon = 0.12 / _km_per_deg_lon(lat0)
+        step_lat = 0.12 / 111.32
+        push = {"west": False, "east": False, "south": False, "north": False}
+
+        def _push_out(lat: float, lon: float, limit: float) -> None:
+            if _outline_radius(lat, lon, current) <= limit:
+                return
+            half_w = (east - west) / 2.0
+            half_h = (north - south) / 2.0
+            dx = (lon - lon0) / half_w if half_w else 0.0
+            dy = (lat - lat0) / half_h if half_h else 0.0
+            if abs(dx) >= abs(dy):
+                push["east" if lon >= lon0 else "west"] = True
+            else:
+                push["north" if lat >= lat0 else "south"] = True
+
+        for lat, lon in extra:
+            _push_out(lat, lon, 0.78)
+        for lat, lon in red_pts or []:
+            # A red sample that was inside the old circle stays inside after the shift.
+            if _outline_radius(lat, lon, outline) <= 1.02:
+                _push_out(lat, lon, 1.0)
+        if not any(push.values()):
+            break
+        room_lon = cap_w / _km_per_deg_lon(lat0) - (east - west)
+        room_lat = cap_h / 111.32 - (north - south)
+        if push["east"] and room_lon > 1e-9:
+            east += min(step_lon, room_lon)
+        elif push["west"] and room_lon > 1e-9:
+            west -= min(step_lon, room_lon)
+        if push["north"] and room_lat > 1e-9:
+            north += min(step_lat, room_lat)
+        elif push["south"] and room_lat > 1e-9:
+            south -= min(step_lat, room_lat)
+    lon0 = (west + east) / 2.0
+    lat0 = (south + north) / 2.0
+    width = min((east - west) * _km_per_deg_lon(lat0), cap_w)
+    height = min((north - south) * 111.32, cap_h)
+    return {
+        "outline_lon": float(lon0),
+        "outline_lat": float(lat0),
         "outline_width_km": float(width),
         "outline_height_km": float(height),
     }
@@ -5830,10 +5948,12 @@ def _paint_swap_caption(path: Path, title: str, note: str | None = None) -> None
     canvas.save(path)
 
 
-def with_tight_outline(samples: pd.DataFrame, spot: pd.Series, column: str = "RSRP") -> pd.Series:
-    """Copy of the spot whose circle hugs the red samples."""
+def with_tight_outline(
+    samples: pd.DataFrame, spot: pd.Series, column: str = "RSRP", *, cover_blanks: bool = True,
+) -> pd.Series:
+    """Copy of the spot whose circle hugs the red samples and a blank on their edge."""
     display = spot.copy()
-    for key, value in tight_bad_spot_outline(samples, spot, column).items():
+    for key, value in tight_bad_spot_outline(samples, spot, column, cover_blanks=cover_blanks).items():
         display[key] = value
     return display
 
@@ -5847,6 +5967,8 @@ def plot_idle_area_map(idle: pd.DataFrame, active: pd.DataFrame, spot: pd.Series
     for choice in (0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 40.0):
         if choice <= (span_km / 5.0) * 1.35:
             bar_km = choice
+    # Lines stay on the red samples. The circle also takes in a blank that touches them.
+    lines = with_tight_outline(active, spot, "RSRP", cover_blanks=False)
     display = with_tight_outline(active, spot, "RSRP")
     fig, ax = plt.subplots(figsize=(9.4, 8.6))
     ax.set_xlim(west, east)
@@ -5876,9 +5998,9 @@ def plot_idle_area_map(idle: pd.DataFrame, active: pd.DataFrame, spot: pd.Series
     # Same sites and the same yellow serving lines as the active map.
     # The circle and the lines use the tight outline, so green road outside the
     # red samples is not treated as the bad spot.
-    draw_bad_spot_sector_pies(ax, display, samples=active_local, column="RSRP", serving=True)
-    active_names = {cell["name"] for cell in _area_serving_cells(active, display)} if active is not None else set()
-    _draw_area_serving_lines(ax, idle, display, color="#2E86C1", skip=active_names)
+    draw_bad_spot_sector_pies(ax, lines, samples=active_local, column="RSRP", serving=True)
+    active_names = {cell["name"] for cell in _area_serving_cells(active, lines)} if active is not None else set()
+    _draw_area_serving_lines(ax, idle, lines, color="#2E86C1", skip=active_names)
     _add_spot_outline(ax, display)
     _add_basemap(ax)
     add_map_scale_bar(ax, km=bar_km, boxed=False)

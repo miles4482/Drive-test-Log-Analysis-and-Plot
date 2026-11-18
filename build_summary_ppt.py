@@ -26,11 +26,11 @@ from pptx.util import Emu, Inches, Pt
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
-REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.86.xlsx"
+REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.87.xlsx"
 IDLE_NOTES = OUTPUT / "idle_vs_active_notes.json"
 PLOTS = OUTPUT / "plots"
 DESCRIPTIONS = OUTPUT / "bad_spot_descriptions.json"
-SUMMARY_VERSION = "1.86"
+SUMMARY_VERSION = "1.87"
 DEST = OUTPUT / f"Bogura_DriveTest_Summary_v{SUMMARY_VERSION}.pptx"
 CIRCLES = PLOTS / "bad_spot_circles.json"
 
@@ -295,7 +295,7 @@ def _text(slide, left, top, width, height, text: str, size: int, color: RGBColor
 def _footer(slide, page: int, pages: int) -> None:
     _text(
         slide, Inches(0.4), Inches(7.18), Inches(10), Inches(0.24),
-        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.86  ·  Web v1.73",
+        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.87  ·  Web v1.73",
         11, MUTED,
     )
     _text(
@@ -954,7 +954,7 @@ def _annex_workbook(prs: Presentation, page: int, pages: int, groups: list[dict]
     if partial:
         deck += "Samples: " + ", ".join(partial) + "."
     rows = [
-        ("Excel v1.86", "The map has the same header, legend and dashed circle as the Excel sheet. The circle covers the red samples only, with a small margin. On an Active bad spot the idle map is the same size and the same window as the active map, and both maps are smaller so the sheet is easier to read. The yellow dashed serving lines are the same lines as the active map. A blue dash is an idle serving cell that is different. A note compares the two. The description sits just to the right of that map. The Feeder swap sheet keeps three arms. Yellow stays. The other two arms are bright red and bright cyan so they show on the satellite photo, and the dashes use that same colour. Each PCI is repeated along those dashes until that cell stops serving. On an Active bad spot the idle map sits directly under the active map. Both circles are orange. A summary of the swaps sits at the top of that sheet. A sample within 500 m is left out. Active is on the left of the KPI sheets and Idle is on the right. A downtilt of a far cell is not the cover for a red run. That run gets an uptilt, an azimuth turn, or a 4th L900 when no L900 inside 2 km already faces it. The parameter table lists azimuth and tilt changes. A new site leaves Existing blank and fills New Plan."),
+        ("Excel v1.87", "On Active Bad Spot 4 the circle shifts so the blank just east of the intersection is inside it, and the green road beyond that blank stays outside. The idle map under that spot uses the same dashed orange circle. The map has the same header, legend and dashed circle as the Excel sheet. The circle covers the red samples, with a small margin. On an Active bad spot the idle map is the same size and the same window as the active map, and both maps are smaller so the sheet is easier to read. The yellow dashed serving lines are the same lines as the active map. A blue dash is an idle serving cell that is different. A note compares the two. The description sits just to the right of that map. The Feeder swap sheet keeps three arms. Yellow stays. The other two arms are bright red and bright cyan so they show on the satellite photo, and the dashes use that same colour. Each PCI is repeated along those dashes until that cell stops serving. On an Active bad spot the idle map sits directly under the active map. Both circles are orange. A summary of the swaps sits at the top of that sheet. A sample within 500 m is left out. Active is on the left of the KPI sheets and Idle is on the right. A downtilt of a far cell is not the cover for a red run. That run gets an uptilt, an azimuth turn, or a 4th L900 when no L900 inside 2 km already faces it. The parameter table lists azimuth and tilt changes. A new site leaves Existing blank and fills New Plan."),
         ("This deck", deck),
         ("Web v1.69", "The live map is unchanged. Site names are white with a dark edge. Sector names on that map stay small. With KPI set to Blank, Info on a sector or the site centre opens the cell table."),
         ("RSRQ and SINR", "The coverage maps are in this deck. The workbook no longer has separate RSRQ or SINR bad-spot sheets. Poor RSRQ is at or below −20 dB. Poor SINR is at or below 0 dB."),

@@ -90,7 +90,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.86"
+REPORT_VERSION = "1.87"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -3977,6 +3977,116 @@ def _pull_idle_under_active(drawing: str, sheet_xml: str) -> str:
         drawing,
         flags=re.S,
     )
+
+
+def _move_circle_on_picture(drawing: str, sheet_xml: str, name: str, old: dict, new: dict) -> str:
+    """Move one oval by the same fraction the bad-spot outline moved on its map."""
+    col_emu, row_emu = _sheet_axes(sheet_xml)
+    blocks = re.findall(r"<oneCellAnchor>.*?</oneCellAnchor>", drawing, flags=re.S)
+    circles = []
+    pictures = []
+    for index, block in enumerate(blocks):
+        found = re.search(r'name="([^"]+)"', block)
+        if found is None:
+            continue
+        if found.group(1) == name and 'prst="ellipse"' in block:
+            circles.append(index)
+        elif "<pic>" in block:
+            pictures.append(index)
+    if len(circles) != 1:
+        raise SystemExit(f"{name} not found")
+    circle = _anchor_box(blocks[circles[0]])
+    if circle is None:
+        raise SystemExit(f"{name} has no anchor")
+    cleft = _abs_along(circle[0], circle[1], col_emu)
+    ctop = _abs_along(circle[2], circle[3], row_emu)
+    ccx, ccy = cleft + circle[4] / 2.0, ctop + circle[5] / 2.0
+    host = None
+    for index in pictures:
+        box = _anchor_box(blocks[index])
+        if box is None:
+            continue
+        left = _abs_along(box[0], box[1], col_emu)
+        top = _abs_along(box[2], box[3], row_emu)
+        if left <= ccx <= left + box[4] and top <= ccy <= top + box[5]:
+            host = (left, top, box[4], box[5])
+            break
+    if host is None:
+        raise SystemExit(f"{name} is not on a picture")
+    left, top, pic_w, pic_h = host
+    fx = (cleft - left) / pic_w
+    fy = (ctop - top) / pic_h
+    fw = circle[4] / pic_w
+    fh = circle[5] / pic_h
+    km = _km_per_deg_lon(float(old["outline_lat"]))
+    old_w = float(old["outline_width_km"]) / km
+    old_h = float(old["outline_height_km"]) / 111.32
+    new_w = float(new["outline_width_km"]) / _km_per_deg_lon(float(new["outline_lat"]))
+    new_h = float(new["outline_height_km"]) / 111.32
+    cx = fx + fw / 2.0 + (float(new["outline_lon"]) - float(old["outline_lon"])) / old_w * fw
+    cy = fy + fh / 2.0 - (float(new["outline_lat"]) - float(old["outline_lat"])) / old_h * fh
+    fw *= new_w / old_w
+    fh *= new_h / old_h
+    nx = max(0.0, cx - fw / 2.0)
+    ny = max(0.0, cy - fh / 2.0)
+    fw = min(fw, 1.0 - nx)
+    fh = min(fh, 1.0 - ny)
+    abs_x = left + nx * pic_w
+    abs_y = top + ny * pic_h
+    col, col_off = _walk_along(abs_x, col_emu)
+    row, row_off = _walk_along(abs_y, row_emu)
+    ext_x, ext_y = max(1, int(round(fw * pic_w))), max(1, int(round(fh * pic_h)))
+    updated = re.sub(
+        r"<from><col>\d+</col><colOff>\d+</colOff><row>\d+</row><rowOff>\d+</rowOff></from>",
+        f"<from><col>{col}</col><colOff>{col_off}</colOff><row>{row}</row><rowOff>{row_off}</rowOff></from>",
+        blocks[circles[0]],
+        count=1,
+    )
+    updated = re.sub(r'<ext cx="\d+" cy="\d+"\s*/>', f'<ext cx="{ext_x}" cy="{ext_y}"/>', updated)
+    updated = re.sub(r'<a:ext cx="\d+" cy="\d+"/>', f'<a:ext cx="{ext_x}" cy="{ext_y}"/>', updated)
+    blocks[circles[0]] = updated
+    return re.sub(
+        r"<oneCellAnchor>.*?</oneCellAnchor>",
+        lambda _match, pending=blocks: _consume(pending),
+        drawing,
+        flags=re.S,
+    )
+
+
+def publish_report_v187(src: Path, dest: Path, idle_png: Path, old: dict, new: dict) -> Path:
+    """Shift Active Bad Spot 4 onto its blank, and use that orange circle on the idle map."""
+    with zipfile.ZipFile(src) as zf:
+        names = zf.namelist()
+        parts = {name: zf.read(name) for name in names}
+    sheet = _sheet_part_path(parts, "Bad Spot RSRP_Active")
+    xml = parts[sheet].decode("utf-8")
+    drawing = parts["xl/drawings/drawing8.xml"].decode("utf-8")
+    drawing = _move_circle_on_picture(drawing, xml, "Circle 4", old, new)
+    parts["xl/drawings/drawing8.xml"] = drawing.encode("utf-8")
+    rels = parts["xl/drawings/_rels/drawing8.xml.rels"].decode("utf-8")
+    rid = None
+    for block in re.findall(r"<oneCellAnchor>.*?</oneCellAnchor>", drawing, flags=re.S):
+        if 'name="Idle area 4"' not in block:
+            continue
+        found = re.search(r'r:embed="([^"]+)"', block)
+        rid = found.group(1) if found else None
+        break
+    if rid is None:
+        raise SystemExit("Idle area 4 picture is missing")
+    target = re.search(rf'Id="{re.escape(rid)}"[^>]*Target="([^"]+)"', rels)
+    if target is None:
+        target = re.search(rf'Target="([^"]+)"[^>]*Id="{re.escape(rid)}"', rels)
+    if target is None:
+        raise SystemExit("Idle area 4 media is missing")
+    media = "xl/" + target.group(1)[3:] if target.group(1).startswith("../") else "xl/media/" + target.group(1).rsplit("/", 1)[-1]
+    parts[media] = _jpeg_bytes(idle_png)
+    tmp = dest.with_suffix(".xlsx.tmp")
+    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name in names:
+            zf.writestr(name, parts[name])
+    tmp.replace(dest)
+    print(f"Wrote {dest} ({dest.stat().st_size / 1e6:.1f} MB)", flush=True)
+    return dest
 
 
 def publish_report_v186(src: Path, dest: Path, pngs: list[tuple[str, Path]], summary: list[dict]) -> Path:
