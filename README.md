@@ -138,9 +138,19 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
+## Download Excel report (v1.83)
+
+**v1.83 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.83.xlsx
+
+Each bad-spot map is smaller, and the active map and the idle map under it stay the same size. The description, the parameter table and the comparison note start just to the right of that map, with a short gap. Three rows stay clear under the picture so the next bad-spot name is still visible. The circle, the suggestions and the Feeder swap sheet are unchanged. The web map stays v1.73.
+
+**v1.83 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.83.pptx
+
+The web map stays v1.73: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.73.zip
+
 ## Download Excel report (v1.82)
 
-**v1.82 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.82.xlsx
+**v1.82:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.82.xlsx
 
 The orange circle on each bad spot covers the red samples only, with a small margin, so green road outside the bad spot is left out. The idle map under each Active bad spot is the same size and the same window as the active map. Eight rows stay clear under that picture so the next bad-spot name is not covered by the legend. The description, the parameter table and the idle-versus-active note start further right, with a gap after the map. A new Feeder swap sheet uses the idle log only: two sectors of one site, each heard in the other's forward area, with a dashed line for each serving cell. A sample within 500 m is left out. The web map stays v1.73.
 

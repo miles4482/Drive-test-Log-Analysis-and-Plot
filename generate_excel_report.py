@@ -90,7 +90,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.82"
+REPORT_VERSION = "1.83"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -3513,6 +3513,367 @@ def publish_report_v182(
 
 def _consume(blocks: list[str]) -> str:
     return blocks.pop(0)
+
+
+# v1.83. Both bad-spot pictures shrink by the same amount, and the description
+# starts just to the right of that spot's map instead of a fixed eight inches over.
+MAP_SCALE = 0.70
+TEXT_GAP_EMU = int(0.40 * 914400)
+TEXT_COL_FIRST = 16  # P, where v1.82 left the description
+TEXT_COL_LAST = 26  # Z
+ROW_CLEAR = 3
+
+
+def _col_prefix(sheet_xml: str) -> list[int]:
+    col_px, default_width, _row_pt, _default_pt = _sheet_metric(sheet_xml.encode("utf-8"))
+    prefix = [0]
+    for index in range(40):
+        prefix.append(prefix[-1] + col_px.get(index + 1, _column_width_px(default_width)) * 9525)
+    return prefix
+
+
+def _anchor_box(block: str) -> tuple[int, int, int, int, int, int] | None:
+    found = re.search(
+        r"<from><col>(\d+)</col><colOff>(\d+)</colOff><row>(\d+)</row><rowOff>(\d+)</rowOff></from>",
+        block,
+    )
+    ext = re.search(r'<ext cx="(\d+)" cy="(\d+)"', block)
+    if found is None or ext is None:
+        return None
+    col, col_off, row, row_off = (int(value) for value in found.groups())
+    return col, col_off, row, row_off, int(ext.group(1)), int(ext.group(2))
+
+
+def _abs_along(index: int, offset: int, size_of) -> int:
+    total = offset
+    for step in range(index):
+        total += size_of(step)
+    return total
+
+
+def _walk_along(absolute: float, size_of) -> tuple[int, int]:
+    index = 0
+    guard = 0
+    while absolute >= size_of(index) and guard < 20000:
+        absolute -= size_of(index)
+        index += 1
+        guard += 1
+    return index, int(max(0, round(absolute)))
+
+
+def _sheet_axes(sheet_xml: str):
+    col_px, default_width, row_pt, default_pt = _sheet_metric(sheet_xml.encode("utf-8"))
+
+    def col_emu(index0: int) -> int:
+        return col_px.get(index0 + 1, _column_width_px(default_width)) * 9525
+
+    def row_emu(index0: int) -> int:
+        return int(round(row_pt.get(index0 + 1, default_pt) * 12700))
+
+    return col_emu, row_emu
+
+
+def _fit_maps(drawing: str, sheet_xml: str, factor: float) -> str:
+    """Shrink serial bad-spot pictures, and the circle that sits on each one."""
+    col_emu, row_emu = _sheet_axes(sheet_xml)
+    blocks = re.findall(r"<oneCellAnchor>.*?</oneCellAnchor>", drawing, flags=re.S)
+    pictures: list[dict] = []
+    scaled_circles = 0
+    for index, block in enumerate(blocks):
+        if "<pic>" not in block:
+            continue
+        name = re.search(r'name="([^"]+)"', block)
+        box = _anchor_box(block)
+        if name is None or box is None or box[0] != 0:
+            continue
+        if name.group(1) == "Image 1":
+            continue
+        col, col_off, row, row_off, cx, cy = box
+        pictures.append({
+            "index": index,
+            "x": _abs_along(col, col_off, col_emu),
+            "y": _abs_along(row, row_off, row_emu),
+            "cx": cx,
+            "cy": cy,
+        })
+        new_cx = max(1, int(round(cx * factor)))
+        new_cy = max(1, int(round(cy * factor)))
+        blocks[index] = re.sub(
+            r'cx="\d+" cy="\d+"',
+            f'cx="{new_cx}" cy="{new_cy}"',
+            block,
+        )
+
+    def on_picture(center_y: float) -> dict | None:
+        for picture in pictures:
+            if picture["y"] <= center_y <= picture["y"] + picture["cy"]:
+                return picture
+        return None
+
+    for index, block in enumerate(blocks):
+        if 'prst="ellipse"' not in block:
+            continue
+        box = _anchor_box(block)
+        if box is None:
+            continue
+        col, col_off, row, row_off, cx, cy = box
+        left = _abs_along(col, col_off, col_emu)
+        top = _abs_along(row, row_off, row_emu)
+        picture = on_picture(top + cy / 2.0)
+        if picture is None:
+            continue
+        new_left = picture["x"] + (left - picture["x"]) * factor
+        new_top = picture["y"] + (top - picture["y"]) * factor
+        new_cx = max(1, int(round(cx * factor)))
+        new_cy = max(1, int(round(cy * factor)))
+        new_col, new_col_off = _walk_along(new_left, col_emu)
+        new_row, new_row_off = _walk_along(new_top, row_emu)
+        updated = re.sub(
+            r"<from><col>\d+</col><colOff>\d+</colOff><row>\d+</row><rowOff>\d+</rowOff></from>",
+            f"<from><col>{new_col}</col><colOff>{new_col_off}</colOff>"
+            f"<row>{new_row}</row><rowOff>{new_row_off}</rowOff></from>",
+            block,
+            count=1,
+        )
+        blocks[index] = re.sub(
+            r'cx="\d+" cy="\d+"',
+            f'cx="{new_cx}" cy="{new_cy}"',
+            updated,
+        )
+        scaled_circles += 1
+    print(f"  scaled {len(pictures)} pictures and {scaled_circles} circles", flush=True)
+    return re.sub(
+        r"<oneCellAnchor>.*?</oneCellAnchor>",
+        lambda match, pending=blocks: _consume(pending),
+        drawing,
+        flags=re.S,
+    )
+
+
+def _text_column(prefix: list[int], map_right: int) -> int:
+    """1-based column where the description starts, just past this map."""
+    target = map_right + TEXT_GAP_EMU
+    origin = TEXT_COL_FIRST
+    for index in range(3, len(prefix) - 1):
+        if prefix[index] >= target:
+            origin = index + 1
+            break
+    return max(4, min(origin, TEXT_COL_FIRST))
+
+
+def _pic_boxes(drawing: str) -> list[tuple[str, tuple]]:
+    boxes = []
+    for block in re.findall(r"<oneCellAnchor>.*?</oneCellAnchor>", drawing, flags=re.S):
+        if "<pic>" not in block:
+            continue
+        name = re.search(r'name="([^"]+)"', block)
+        box = _anchor_box(block)
+        if name is None or box is None or name.group(1) == "Image 1":
+            continue
+        boxes.append((name.group(1), box))
+    return boxes
+
+
+def _spot_end(headers: dict[int, int], number: int, tail: int | None) -> int:
+    nxt = headers.get(number + 1)
+    if nxt is not None:
+        return nxt
+    if tail is not None:
+        return tail
+    return headers[number] + 60
+
+
+def _shift_description(xml: str, row_from: int, row_to: int, delta: int) -> str:
+    """Move this spot's P–Z block left by delta columns. Other rows stay."""
+    if delta == 0:
+        return xml
+
+    def letters(value: str) -> str:
+        index = _col_index(value)
+        if TEXT_COL_FIRST <= index <= TEXT_COL_LAST:
+            index += delta
+        return _col_letters(index)
+
+    def one_row(match: re.Match) -> str:
+        row = int(match.group(1))
+        body = match.group(0)
+        if not (row_from <= row < row_to):
+            return body
+        return re.sub(
+            r'\br="([A-Z]+)(\d+)"',
+            lambda found: f'r="{letters(found.group(1))}{found.group(2)}"',
+            body,
+        )
+
+    xml = re.sub(r'<row r="(\d+)"[^>]*>.*?</row>', one_row, xml, flags=re.S)
+
+    def one_merge(match: re.Match) -> str:
+        r1 = int(match.group(2))
+        r2 = int(match.group(4))
+        if not (row_from <= r1 and r2 < row_to):
+            return match.group(0)
+        return f'ref="{letters(match.group(1))}{r1}:{letters(match.group(3))}{r2}"'
+
+    return re.sub(r'ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"', one_merge, xml)
+
+
+def _row_has_cells(xml: str, row: int) -> bool:
+    found = re.search(rf'<row r="{row}"[^>]*>(.*?)</row>', xml, flags=re.S)
+    return found is not None and "<c " in found.group(1)
+
+
+def _merge_hits(xml: str, start: int, end: int) -> bool:
+    for match in re.finditer(r'<mergeCell ref="[A-Z]+(\d+):[A-Z]+(\d+)"', xml):
+        top = int(match.group(1))
+        bottom = int(match.group(2))
+        if top < end and bottom >= start:
+            return True
+    return False
+
+
+def _delete_rows(xml: str, start: int, count: int) -> str:
+    """Remove empty Excel rows [start, start+count) and close the gap."""
+    if count <= 0:
+        return xml
+    end = start + count
+
+    def drop(match: re.Match) -> str:
+        row = int(match.group(1))
+        return "" if start <= row < end else match.group(0)
+
+    xml = re.sub(r'<row r="(\d+)"[^>]*>.*?</row>', drop, xml, flags=re.S)
+    xml = re.sub(r'<row r="(\d+)"[^>]*/>', drop, xml)
+
+    def shift_r(match: re.Match) -> str:
+        row = int(match.group(2))
+        if row >= end:
+            row -= count
+        return f'r="{match.group(1)}{row}"'
+
+    def shift_ref(match: re.Match) -> str:
+        r1 = int(match.group(2))
+        r2 = int(match.group(4))
+        if r1 >= end:
+            r1 -= count
+        if r2 >= end:
+            r2 -= count
+        return f'ref="{match.group(1)}{r1}:{match.group(3)}{r2}"'
+
+    xml = re.sub(r'\br="([A-Z]*)(\d+)"', shift_r, xml)
+    xml = re.sub(r'ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"', shift_ref, xml)
+    return re.sub(
+        r'<dimension ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"\s*/>',
+        lambda match: f'<dimension ref="{match.group(1)}{match.group(2)}:{match.group(3)}{int(match.group(4)) - count}" />',
+        xml,
+        count=1,
+    )
+
+
+def _close_tail(xml: str, drawing: str, headers: dict[int, int], tail: int | None) -> tuple[str, str]:
+    """Leave ROW_CLEAR rows under the lower picture, then the next title."""
+    row_emu = 15 * 12700
+    content_rows = [
+        int(row) for row in re.findall(r'<row r="(\d+)"[^>]*>\s*<c ', xml)
+    ]
+    for number in range(max(headers), 0, -1):
+        nxt = _spot_end(headers, number, tail)
+        header = headers[number]
+        pictures = [
+            box for _name, box in _pic_boxes(drawing)
+            if header <= box[2] + 1 < nxt
+        ]
+        if not pictures:
+            continue
+        lower = max(pictures, key=lambda box: box[2])
+        draw_row, cy = lower[2], lower[5]
+        last = draw_row + math.ceil(cy / row_emu)
+        content = [row for row in content_rows if header <= row < nxt]
+        floor = max([last, *content]) if content else last
+        target = floor + ROW_CLEAR + 1
+        if nxt <= target:
+            continue
+        if any(target <= row < nxt for row in content_rows) or _merge_hits(xml, target, nxt):
+            continue
+        count = nxt - target
+        xml = _delete_rows(xml, target, count)
+        content_rows = [row if row < target else row - count for row in content_rows]
+
+        def shift_drawing(match: re.Match, start: int = target, count: int = count) -> str:
+            row = int(match.group(1))
+            if row + 1 >= start:
+                row -= count
+            return f"<row>{row}</row>"
+
+        drawing = re.sub(r"<row>(\d+)</row>", shift_drawing, drawing)
+        # Later (higher) spots keep their original header numbers: this cut is below them.
+        print(f"  closed {count} rows under bad spot {number}", flush=True)
+    return xml, drawing
+
+
+def _place_descriptions(xml: str, drawing: str, tail: int | None) -> str:
+    prefix = _col_prefix(xml)
+    headers = _title_rows(xml)
+    boxes = _pic_boxes(drawing)
+    gaps = []
+    for number in sorted(headers):
+        header = headers[number]
+        nxt = _spot_end(headers, number, tail)
+        widths = [box[4] for _name, box in boxes if header <= box[2] + 1 < nxt]
+        if not widths:
+            print(f"  no picture beside bad spot {number}", flush=True)
+            continue
+        map_right = max(widths)
+        origin = _text_column(prefix, map_right)
+        delta = origin - TEXT_COL_FIRST
+        xml = _shift_description(xml, header, nxt, delta)
+        gaps.append((prefix[origin - 1] - map_right) / 914400)
+    if gaps:
+        gaps.sort()
+        print(
+            f"  text gap inches min {gaps[0]:.2f} median {gaps[len(gaps)//2]:.2f} max {gaps[-1]:.2f}",
+            flush=True,
+        )
+    return xml
+
+
+def _tail_row(xml: str, headers: dict[int, int]) -> int | None:
+    last = headers[max(headers)]
+    for match in re.finditer(r'<row r="(\d+)"[^>]*>(.*?)</row>', xml, flags=re.S):
+        row = int(match.group(1))
+        if row > last and "Identified RSRP bad spots" in match.group(2):
+            return row
+    return None
+
+
+def publish_report_v183(src: Path, dest: Path) -> Path:
+    """Smaller bad-spot maps, with the description moved in beside each one."""
+    with zipfile.ZipFile(src) as zf:
+        names = zf.namelist()
+        parts = {name: zf.read(name) for name in names}
+    active_sheet = _sheet_part_path(parts, "Bad Spot RSRP_Active")
+    idle_sheet = _sheet_part_path(parts, "Bad Spot RSRP")
+
+    for sheet_key, drawing_name in (
+        (active_sheet, "xl/drawings/drawing8.xml"),
+        (idle_sheet, "xl/drawings/drawing5.xml"),
+    ):
+        xml = parts[sheet_key].decode("utf-8")
+        drawing = _fit_maps(parts[drawing_name].decode("utf-8"), xml, MAP_SCALE)
+        tail = _tail_row(xml, _title_rows(xml))
+        xml = _place_descriptions(xml, drawing, tail)
+        xml, drawing = _close_tail(xml, drawing, _title_rows(xml), tail)
+        parts[sheet_key] = xml.encode("utf-8")
+        parts[drawing_name] = drawing.encode("utf-8")
+        print(f"  fitted {sheet_key} tail {tail}", flush=True)
+
+    tmp = dest.with_suffix(".xlsx.tmp")
+    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name in names:
+            zf.writestr(name, parts[name])
+    tmp.replace(dest)
+    print(f"Wrote {dest} ({dest.stat().st_size / 1e6:.1f} MB)", flush=True)
+    return dest
+
 
 
 def _jpeg_bytes(path: Path) -> bytes:
