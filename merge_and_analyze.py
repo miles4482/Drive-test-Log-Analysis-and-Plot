@@ -5478,21 +5478,237 @@ def _draw_area_serving_lines(ax, samples: pd.DataFrame, spot: pd.Series, *, colo
     ))
 
 
+def tight_bad_spot_outline(samples: pd.DataFrame, spot: pd.Series, column: str = "RSRP") -> dict:
+    """Oval around the red samples only, with a small margin.
+
+    The stored outline is at least 2.5 km, so it covers green road that is not
+    the bad spot. The drawn circle uses this tighter box. The solution text
+    still uses the original outline.
+    """
+    inside = _samples_inside_outline(samples, spot)
+    rule = BAD_SPOT_RULES[column]
+    threshold = float(rule["threshold"])
+    use = inside
+    if inside is not None and not inside.empty and column in inside.columns:
+        values = pd.to_numeric(inside[column], errors="coerce")
+        red = inside.loc[values < threshold]
+        if len(red) >= 3:
+            use = red
+    if use is None or use.empty:
+        return {
+            "outline_lon": float(spot["outline_lon"]),
+            "outline_lat": float(spot["outline_lat"]),
+            "outline_width_km": float(spot["outline_width_km"]),
+            "outline_height_km": float(spot["outline_height_km"]),
+        }
+    lats = pd.to_numeric(use["Latitude"], errors="coerce").dropna()
+    lons = pd.to_numeric(use["Longitude"], errors="coerce").dropna()
+    lat0 = float((float(lats.min()) + float(lats.max())) / 2.0)
+    lon0 = float((float(lons.min()) + float(lons.max())) / 2.0)
+    pad = 0.10
+    height = max((float(lats.max()) - float(lats.min())) * 111.32 + 2.0 * pad, 0.36)
+    width = max((float(lons.max()) - float(lons.min())) * _km_per_deg_lon(lat0) + 2.0 * pad, 0.36)
+    height = min(height, float(spot["outline_height_km"]))
+    width = min(width, float(spot["outline_width_km"]))
+    return {
+        "outline_lon": lon0,
+        "outline_lat": lat0,
+        "outline_width_km": float(width),
+        "outline_height_km": float(height),
+    }
+
+
+def find_feeder_swaps(samples: pd.DataFrame, min_samples: int = 12) -> list[dict]:
+    """Idle sectors whose cells serve each other's area.
+
+    A swap is two sectors of one site. Cells of A are heard in B's direction,
+    and cells of B are heard in A's direction. A sample within 500 m on the
+    back lobe is ignored.
+    """
+    if samples is None or samples.empty or "Cell Id" not in samples.columns:
+        return []
+    work = samples.dropna(subset=["Latitude", "Longitude", "Cell Id"]).copy()
+    work["Cell Id"] = pd.to_numeric(work["Cell Id"], errors="coerce")
+    work = work.dropna(subset=["Cell Id"])
+    ear_col = "DL EARFCN" if "DL EARFCN" in work.columns else None
+    rows: list[dict] = []
+    for eci, ear, lat, lon in zip(
+        work["Cell Id"],
+        work[ear_col] if ear_col else [None] * len(work),
+        work["Latitude"],
+        work["Longitude"],
+    ):
+        cell = _resolve_serving_cell(int(eci), ear)
+        if cell is None or cell.get("azimuth") is None or not cell.get("sector"):
+            continue
+        dist = float(_equirect_km(cell["lat"], cell["lon"], float(lat), float(lon)))
+        bearing = _bearing_deg(cell["lat"], cell["lon"], float(lat), float(lon))
+        off = abs(_signed_deg(float(cell["azimuth"]), bearing))
+        if dist <= 0.50 and off >= 90.0:
+            continue
+        if dist <= 0.50:
+            continue
+        rows.append({
+            "site": str(cell.get("site") or ""),
+            "sector": str(cell.get("sector") or ""),
+            "name": str(cell.get("name") or ""),
+            "az": float(cell["azimuth"]),
+            "slat": float(cell["lat"]),
+            "slon": float(cell["lon"]),
+            "lat": float(lat),
+            "lon": float(lon),
+            "dist": dist,
+            "bearing": bearing,
+        })
+    if not rows:
+        return []
+    table = pd.DataFrame(rows)
+
+    def toward(part: pd.DataFrame, target_az: float, own_az: float) -> pd.DataFrame:
+        off_target = part["bearing"].map(lambda bearing: abs(_signed_deg(target_az, bearing)))
+        off_own = part["bearing"].map(lambda bearing: abs(_signed_deg(own_az, bearing)))
+        return part.loc[(off_target <= 55.0) & (off_own >= 70.0)]
+
+    swaps: list[dict] = []
+    for site, site_rows in table.groupby("site", sort=False):
+        sectors = []
+        for sector, part in site_rows.groupby("sector", sort=False):
+            sectors.append({
+                "sector": str(sector),
+                "az": float(part["az"].median()),
+                "lat": float(part["slat"].median()),
+                "lon": float(part["slon"].median()),
+                "rows": part,
+            })
+        for index, left in enumerate(sectors):
+            for right in sectors[index + 1:]:
+                if float(_equirect_km(left["lat"], left["lon"], right["lat"], right["lon"])) > 0.15:
+                    continue
+                left_in_right = toward(left["rows"], right["az"], left["az"])
+                right_in_left = toward(right["rows"], left["az"], right["az"])
+                if len(left_in_right) < min_samples or len(right_in_left) < min_samples:
+                    continue
+                swaps.append({
+                    "site": str(site),
+                    "a": left["sector"],
+                    "b": right["sector"],
+                    "a_az": left["az"],
+                    "b_az": right["az"],
+                    "lat": left["lat"],
+                    "lon": left["lon"],
+                    "a_n": int(len(left_in_right)),
+                    "b_n": int(len(right_in_left)),
+                    "a_points": left_in_right[["lat", "lon", "name", "dist"]].to_dict("records"),
+                    "b_points": right_in_left[["lat", "lon", "name", "dist"]].to_dict("records"),
+                })
+    swaps.sort(key=lambda item: -(item["a_n"] + item["b_n"]))
+    return swaps
+
+
+def plot_feeder_swap_map(idle: pd.DataFrame, swap: dict, path: Path) -> Path:
+    """Idle coverage around one swapped sector pair, with a dash for each serving cell."""
+    points = swap["a_points"] + swap["b_points"]
+    lats = [swap["lat"]] + [float(item["lat"]) for item in points]
+    lons = [swap["lon"]] + [float(item["lon"]) for item in points]
+    lat0 = float(np.mean(lats))
+    lon0 = float(np.mean(lons))
+    km_lon = _km_per_deg_lon(lat0)
+    reach = 0.0
+    for lat, lon in zip(lats, lons):
+        reach = max(reach, abs(lat - lat0) * 111.32, abs(lon - lon0) * km_lon)
+    half = max(1.6, reach + 0.45)
+    west, east = lon0 - half / km_lon, lon0 + half / km_lon
+    south, north = lat0 - half / 111.32, lat0 + half / 111.32
+    fig, ax = plt.subplots(figsize=(8.2, 7.4))
+    ax.set_xlim(west, east)
+    ax.set_ylim(south, north)
+    ax.set_aspect("equal", adjustable="box")
+    local = idle[idle["Longitude"].between(west, east) & idle["Latitude"].between(south, north)]
+    if not local.empty:
+        _draw_coverage_points(
+            ax, local, rsrp_map_class(local["RSRP"]), MAP_RSRP_LABELS, MAP_RSRP_COLORS,
+            max_points=6000, poor_on_top=True, bin_m=MAP_BIN_M, column="RSRP", route_casing=True,
+        )
+    stub_km = 0.22
+    arm_km = 0.62
+
+    def along(azimuth: float, distance_km: float) -> tuple[float, float]:
+        rad = np.radians(float(azimuth) % 360.0)
+        return (
+            swap["lon"] + distance_km * np.sin(rad) / km_lon,
+            swap["lat"] + distance_km * np.cos(rad) / 111.32,
+        )
+
+    def draw_group(records: list[dict], azimuth: float, color: str) -> None:
+        grouped: dict[str, list[dict]] = {}
+        for item in records:
+            grouped.setdefault(str(item["name"]), []).append(item)
+        lon_tip, lat_tip = along(azimuth, stub_km)
+        names = list(grouped.items())
+        for index, (name, items) in enumerate(names):
+            lat1 = float(np.mean([item["lat"] for item in items]))
+            lon1 = float(np.mean([item["lon"] for item in items]))
+            ax.plot([lon_tip, lon1], [lat_tip, lat1], color=color, lw=1.7, ls=(0, (6, 3)), zorder=24)
+            dist_m = float(np.mean([item["dist"] for item in items])) * 1000.0
+            dx = (lon1 - lon_tip) * km_lon
+            dy = (lat1 - lat_tip) * 111.32
+            norm = math.hypot(dx, dy) or 1.0
+            shift = (index - (len(names) - 1) / 2.0) * 0.16
+            label_lon = lon1 + (-dy / norm) * shift / km_lon
+            label_lat = lat1 + (dx / norm) * shift / 111.32
+            _ink(ax, label_lon, label_lat, f"{name}\n{dist_m:,.0f} m", 7, "#F7FEFF")
+
+    for azimuth, label in ((swap["a_az"], swap["a"]), (swap["b_az"], swap["b"])):
+        lon_tip, lat_tip = along(azimuth, arm_km)
+        ax.plot([swap["lon"], lon_tip], [swap["lat"], lat_tip], color="#7FDBFF", lw=2.6, solid_capstyle="round", zorder=22)
+        _ink(ax, lon_tip, lat_tip, label, 8, "#EAF8FF")
+    draw_group(swap["a_points"], swap["a_az"], "#E74C3C")
+    draw_group(swap["b_points"], swap["b_az"], "#5DADE2")
+    _add_basemap(ax)
+    add_map_scale_bar(ax, boxed=False)
+    hide_map_axes(ax)
+    fig.subplots_adjust(0, 0, 1, 1)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=110)
+    plt.close(fig)
+    _paint_swap_caption(path, f"{swap['a']}  ↔  {swap['b']}")
+    return path
+
+
+def _paint_swap_caption(path: Path, title: str) -> None:
+    from PIL import Image, ImageDraw, ImageFont
+
+    image = Image.open(path).convert("RGB")
+    bar = 54
+    canvas = Image.new("RGB", (image.width, image.height + bar), "#0B2540")
+    canvas.paste(image, (0, bar))
+    draw = ImageDraw.Draw(canvas)
+    bold = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
+    small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 13)
+    draw.text((12, 4), f"Feeder swap   {title}", fill="#FFFFFF", font=bold)
+    draw.text((12, 28), "Red dash: first sector heard in the other area.   Blue dash: the other way.", fill="#D6E4F0", font=small)
+    canvas.save(path)
+
+
+def with_tight_outline(samples: pd.DataFrame, spot: pd.Series, column: str = "RSRP") -> pd.Series:
+    """Copy of the spot whose circle hugs the red samples."""
+    display = spot.copy()
+    for key, value in tight_bad_spot_outline(samples, spot, column).items():
+        display[key] = value
+    return display
+
+
 def plot_idle_area_map(idle: pd.DataFrame, active: pd.DataFrame, spot: pd.Series, path: Path) -> Path:
-    """Idle RSRP on the same window and scale as the active bad-spot map."""
+    """Idle RSRP on the same window as the active map. The circle hugs the red samples."""
     (west, east, south, north), _plan = _serial_spot_extent(active, spot, "RSRP", "Active")
-    # The scale bar uses the active window, so it reads the same length on both maps.
     mid_lat = (south + north) / 2.0
     span_km = (east - west) * _km_per_deg_lon(mid_lat)
     bar_km = 0.2
     for choice in (0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 40.0):
         if choice <= (span_km / 5.0) * 1.35:
             bar_km = choice
-    # A little more idle road than the active window, with the picture widened
-    # by the same fraction so the kilometres-per-centimetre stay the same.
-    pad_lon = (east - west) * 0.06
-    pad_lat = (north - south) * 0.06
-    west, east, south, north = west - pad_lon, east + pad_lon, south - pad_lat, north + pad_lat
+    display = with_tight_outline(active, spot, "RSRP")
     fig, ax = plt.subplots(figsize=(9.4, 8.6))
     ax.set_xlim(west, east)
     ax.set_ylim(south, north)
@@ -5519,10 +5735,12 @@ def plot_idle_area_map(idle: pd.DataFrame, active: pd.DataFrame, spot: pd.Series
     else:
         ax.text(0.5, 0.5, "No idle drive in this area", transform=ax.transAxes, ha="center", va="center", fontsize=11, color="#14202B")
     # Same sites and the same yellow serving lines as the active map.
-    draw_bad_spot_sector_pies(ax, spot, samples=active_local, column="RSRP", serving=True)
-    active_names = {cell["name"] for cell in _area_serving_cells(active, spot)} if active is not None else set()
-    _draw_area_serving_lines(ax, idle, spot, color="#2E86C1", skip=active_names)
-    _add_spot_outline(ax, spot)
+    # The circle and the lines use the tight outline, so green road outside the
+    # red samples is not treated as the bad spot.
+    draw_bad_spot_sector_pies(ax, display, samples=active_local, column="RSRP", serving=True)
+    active_names = {cell["name"] for cell in _area_serving_cells(active, display)} if active is not None else set()
+    _draw_area_serving_lines(ax, idle, display, color="#2E86C1", skip=active_names)
+    _add_spot_outline(ax, display)
     _add_basemap(ax)
     add_map_scale_bar(ax, km=bar_km, boxed=False)
     hide_map_axes(ax)

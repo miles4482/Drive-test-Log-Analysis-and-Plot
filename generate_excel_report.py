@@ -71,6 +71,7 @@ from merge_and_analyze import (
     strongest_fix,
     strongest_location,
     _equirect_km,
+    _km_per_deg_lon,
     plot_rsrp_bad_spot_map,
     plot_road_map,
     plot_rsrp_coverage_map,
@@ -89,7 +90,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.81"
+REPORT_VERSION = "1.82"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -3071,6 +3072,436 @@ def refit_idle_area_scale(src: Path, dest: Path, pngs: list[Path]) -> Path:
 
     parts[sheet_path] = xml.encode("utf-8")
     parts["xl/drawings/drawing8.xml"] = drawing.encode("utf-8")
+    tmp = dest.with_suffix(".xlsx.tmp")
+    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name in names:
+            zf.writestr(name, parts[name])
+    tmp.replace(dest)
+    print(f"Wrote {dest} ({dest.stat().st_size / 1e6:.1f} MB)", flush=True)
+    return dest
+
+
+def _col_index(letters: str) -> int:
+    number = 0
+    for char in letters:
+        number = number * 26 + (ord(char) - 64)
+    return number
+
+
+def _col_letters(index: int) -> str:
+    out = ""
+    while index:
+        index, rem = divmod(index - 1, 26)
+        out = chr(65 + rem) + out
+    return out
+
+
+def _shift_sheet_columns(xml: str, first: int = 9, last: int = 19, delta: int = 7) -> str:
+    """Move columns I–S seven places right, to P–Z. A–H stay where they are."""
+
+    def moved(letters: str, row: str) -> str:
+        index = _col_index(letters)
+        if first <= index <= last:
+            index += delta
+        return f"{_col_letters(index)}{row}"
+
+    xml = re.sub(
+        r'\br="([A-Z]+)(\d+)"',
+        lambda match: f'r="{moved(match.group(1), match.group(2))}"',
+        xml,
+    )
+    xml = re.sub(
+        r'ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"',
+        lambda match: (
+            f'ref="{moved(match.group(1), match.group(2))}:{moved(match.group(3), match.group(4))}"'
+        ),
+        xml,
+    )
+
+    def dimension(match: re.Match) -> str:
+        return f'<dimension ref="A1:Z{match.group(1)}" />'
+
+    return re.sub(r'<dimension ref="[A-Z]+\d+:[A-Z]+(\d+)"\s*/>', dimension, xml, count=1)
+
+
+def _replace_inline_text(xml: str, row: int, text: str) -> str:
+    pattern = rf'(<row r="{row}"[^>]*>.*?<t(?: xml:space="preserve")?>)(.*?)(</t>)'
+    updated, count = re.subn(
+        pattern,
+        lambda match: match.group(1) + _xml_text(text) + match.group(3),
+        xml,
+        count=1,
+        flags=re.S,
+    )
+    if count != 1:
+        raise SystemExit(f"note text on row {row} was not replaced")
+    return updated
+
+
+def _title_rows(xml: str) -> dict[int, int]:
+    headers: dict[int, int] = {}
+    for match in re.finditer(r'<t(?: xml:space="preserve")?>Bad Spot (\d+)</t>', xml):
+        start = xml.rfind('<row r="', 0, match.start())
+        row = int(re.match(r'<row r="(\d+)"', xml[start:]).group(1))
+        if 's="5"' in xml[start:match.start()]:
+            headers[int(match.group(1))] = row
+    return headers
+
+
+def _rescale_ellipses(drawing: str, sheet_xml: str, scales: list[dict]) -> str:
+    """Shrink each movable circle onto the red-sample box. The picture itself stays."""
+    col_px, default_width, row_pt, default_pt = _sheet_metric(sheet_xml.encode("utf-8"))
+    px_emu = 9525
+    pt_emu = 12700
+
+    def col_emu(index0: int) -> int:
+        return col_px.get(index0 + 1, _column_width_px(default_width)) * px_emu
+
+    def row_emu(index0: int) -> int:
+        return int(round(row_pt.get(index0 + 1, default_pt) * pt_emu))
+
+    def walk(index: int, offset: float, size_of) -> tuple[int, int]:
+        guard = 0
+        while offset < 0 and index > 0 and guard < 40:
+            index -= 1
+            offset += size_of(index)
+            guard += 1
+        guard = 0
+        while offset >= size_of(index) and guard < 40:
+            offset -= size_of(index)
+            index += 1
+            guard += 1
+        return index, int(max(0, round(offset)))
+
+    def place(match: re.Match) -> str:
+        block = match.group(0)
+        if 'prst="ellipse"' not in block:
+            return block
+        name = re.search(r'name="Circle (\d+)"', block)
+        found = re.search(
+            r"<from><col>(\d+)</col><colOff>(\d+)</colOff><row>(\d+)</row><rowOff>(\d+)</rowOff></from>",
+            block,
+        )
+        ext = re.search(r'<ext cx="(\d+)" cy="(\d+)"\s*/>', block)
+        if name is None or found is None or ext is None:
+            return block
+        spec = scales[int(name.group(1)) - 1]
+        old_w = float(spec["old_w"]) or 1.0
+        old_h = float(spec["old_h"]) or 1.0
+        col, col_off, row, row_off = (int(value) for value in found.groups())
+        old_cx, old_cy = (int(value) for value in ext.groups())
+        new_cx = max(1, int(round(old_cx * float(spec["new_w"]) / old_w)))
+        new_cy = max(1, int(round(old_cy * float(spec["new_h"]) / old_h)))
+        km_lon = _km_per_deg_lon(float(spec["old_lat"]))
+        shift_x = (float(spec["new_lon"]) - float(spec["old_lon"])) * km_lon / old_w * old_cx
+        shift_y = (float(spec["old_lat"]) - float(spec["new_lat"])) * 111.32 / old_h * old_cy
+        new_col, new_col_off = walk(col, col_off + old_cx / 2.0 + shift_x - new_cx / 2.0, col_emu)
+        new_row, new_row_off = walk(row, row_off + old_cy / 2.0 + shift_y - new_cy / 2.0, row_emu)
+        block = re.sub(
+            r"<from><col>\d+</col><colOff>\d+</colOff><row>\d+</row><rowOff>\d+</rowOff></from>",
+            f"<from><col>{new_col}</col><colOff>{new_col_off}</colOff><row>{new_row}</row><rowOff>{new_row_off}</rowOff></from>",
+            block,
+            count=1,
+        )
+        return re.sub(
+            r'cx="\d+" cy="\d+"',
+            f'cx="{new_cx}" cy="{new_cy}"',
+            block,
+        )
+
+    return re.sub(r"<oneCellAnchor>.*?</oneCellAnchor>", place, drawing, flags=re.S)
+
+
+def _feeder_sheet_xml(titles: list[str], picture_rows: list[int]) -> bytes:
+    rows = [
+        f'<row r="1" ht="24" customHeight="1">{_inline_cell("A1", 5, "Feeder swap")}</row>',
+        (
+            '<row r="2" ht="32" customHeight="1">'
+            + _inline_cell(
+                "A2", 34,
+                "Idle mode only. Two sectors of one site, each heard in the other's forward area. "
+                "A sample within 500 m is left out, so a backlobe next to the site is not counted.",
+            )
+            + "</row>"
+        ),
+        (
+            '<row r="3" ht="20" customHeight="1">'
+            + _inline_cell(
+                "A3", 34,
+                "Red dash: the first sector's cells heard in the other sector's area. "
+                "Blue dash: the other way. Cyan arm: the sector's own azimuth.",
+            )
+            + "</row>"
+        ),
+        (
+            '<row r="4" ht="32" customHeight="1">'
+            + _inline_cell(
+                "A4", 34,
+                "SGULP07 was checked. SGULP07A serves its own north road and SGULP07B serves its own south road, "
+                "so that site is not a feeder swap.",
+            )
+            + "</row>"
+        ),
+    ]
+    merges = ["A1:L1", "A2:L2", "A3:L3", "A4:L4"]
+    for title, row in zip(titles, picture_rows):
+        label_row = row - 1
+        rows.append(
+            f'<row r="{label_row}" ht="20" customHeight="1">{_inline_cell(f"A{label_row}", 33, title)}</row>'
+        )
+        merges.append(f"A{label_row}:L{label_row}")
+    last = picture_rows[-1] + 40 if picture_rows else 4
+    xml = (
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<sheetPr><outlinePr summaryBelow="1" summaryRight="1" /><pageSetUpPr fitToPage="1" /></sheetPr>'
+        f'<dimension ref="A1:L{last}" />'
+        '<sheetViews><sheetView showGridLines="0" view="normal" zoomScale="100" workbookViewId="0">'
+        '<selection activeCell="A1" sqref="A1" /></sheetView></sheetViews>'
+        '<sheetFormatPr baseColWidth="8" defaultRowHeight="15" />'
+        '<cols><col width="18" customWidth="1" min="1" max="1" />'
+        '<col width="14" customWidth="1" min="2" max="12" /></cols>'
+        f'<sheetData>{"".join(rows)}</sheetData>'
+        f'<mergeCells count="{len(merges)}">'
+        + "".join(f'<mergeCell ref="{ref}"/>' for ref in merges)
+        + "</mergeCells>"
+        '<printOptions gridLines="0" />'
+        '<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3" />'
+        '<pageSetup orientation="landscape" paperSize="9" fitToHeight="0" fitToWidth="1" />'
+        '<drawing xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId1" />'
+        "</worksheet>"
+    )
+    return xml.encode("utf-8")
+
+
+def _add_feeder_sheet(parts: dict[str, bytes], names: list[str], pngs: list[tuple[str, Path]]) -> list[str]:
+    """Add the idle-only Feeder swap sheet. Each swap gets one map and its dashed serving lines."""
+    import io
+    from PIL import Image
+
+    if not pngs:
+        raise SystemExit("no feeder swaps to place")
+    titles = [title for title, _path in pngs]
+    # One map under a label row. 42 rows clears a picture about 36 rows tall.
+    picture_rows = [8 + index * 42 for index in range(len(pngs))]
+    parts["xl/worksheets/sheet16.xml"] = _feeder_sheet_xml(titles, picture_rows)
+    parts["xl/worksheets/_rels/sheet16.xml.rels"] = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" '
+        'Target="/xl/drawings/drawing16.xml" Id="rId1" /></Relationships>'
+    ).encode("utf-8")
+
+    anchors = []
+    rels = [
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+    ]
+    row_emu = 15 * 12700
+    for index, ((_title, path), sheet_row) in enumerate(zip(pngs, picture_rows), start=1):
+        with Image.open(path) as image:
+            aspect = image.height / image.width
+            buf = io.BytesIO()
+            image.convert("RGB").save(buf, "JPEG", quality=70, optimize=True)
+        media = f"xl/media/feeder_swap_{index:02d}.jpg"
+        parts[media] = buf.getvalue()
+        rels.append(
+            '<Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" '
+            f'Target="/{media}" Id="rId{index}" />'
+        )
+        cx = 6800000
+        cy = max(1, int(cx * aspect))
+        # Keep the picture inside the rows reserved for this swap.
+        cap = 40 * row_emu
+        if cy > cap:
+            cy = cap
+            cx = max(1, int(cy / aspect))
+        drawing_row = sheet_row - 1
+        anchors.append(
+            "<oneCellAnchor>"
+            f"<from><col>0</col><colOff>0</colOff><row>{drawing_row}</row><rowOff>0</rowOff></from>"
+            f'<ext cx="{cx}" cy="{cy}" />'
+            "<pic><nvPicPr>"
+            f'<cNvPr id="{index + 1}" name="Feeder swap {index}" descr="Feeder swap" /><cNvPicPr /></nvPicPr>'
+            f'<blipFill><a:blip cstate="print" r:embed="rId{index}" /><a:stretch><a:fillRect /></a:stretch></blipFill>'
+            '<spPr><a:prstGeom prst="rect" /></spPr></pic><clientData /></oneCellAnchor>'
+        )
+    rels.append("</Relationships>")
+    parts["xl/drawings/_rels/drawing16.xml.rels"] = "".join(rels).encode("utf-8")
+    parts["xl/drawings/drawing16.xml"] = (
+        '<wsDr xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
+        'xmlns="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing">'
+        + "".join(anchors)
+        + "</wsDr>"
+    ).encode("utf-8")
+
+    workbook = parts["xl/workbook.xml"].decode("utf-8")
+    if 'name="Feeder swap"' not in workbook:
+        workbook = workbook.replace(
+            '<sheet name="_ChartData"',
+            '<sheet name="Feeder swap" sheetId="16" state="visible" r:id="rId18" />'
+            '<sheet name="_ChartData"',
+            1,
+        )
+        parts["xl/workbook.xml"] = workbook.encode("utf-8")
+    rels_xml = parts["xl/_rels/workbook.xml.rels"].decode("utf-8")
+    if 'Id="rId18"' not in rels_xml:
+        rels_xml = rels_xml.replace(
+            "</Relationships>",
+            '<Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+            'Target="/xl/worksheets/sheet16.xml" Id="rId18" /></Relationships>',
+            1,
+        )
+        parts["xl/_rels/workbook.xml.rels"] = rels_xml.encode("utf-8")
+    content = parts["[Content_Types].xml"].decode("utf-8")
+    if "/xl/worksheets/sheet16.xml" not in content:
+        content = content.replace(
+            "</Types>",
+            '<Override PartName="/xl/worksheets/sheet16.xml" '
+            'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml" />'
+            '<Override PartName="/xl/drawings/drawing16.xml" '
+            'ContentType="application/vnd.openxmlformats-officedocument.drawing+xml" /></Types>',
+            1,
+        )
+        parts["[Content_Types].xml"] = content.encode("utf-8")
+    if "xl/worksheets/sheet16.xml" not in names:
+        names.append("xl/worksheets/sheet16.xml")
+    for extra in (
+        "xl/worksheets/_rels/sheet16.xml.rels",
+        "xl/drawings/drawing16.xml",
+        "xl/drawings/_rels/drawing16.xml.rels",
+    ):
+        if extra not in names:
+            names.append(extra)
+    for index in range(1, len(pngs) + 1):
+        media = f"xl/media/feeder_swap_{index:02d}.jpg"
+        if media not in names:
+            names.append(media)
+    return names
+
+
+def publish_report_v182(
+    src: Path,
+    dest: Path,
+    idle_pngs: list[Path],
+    notes: list[tuple[str, str]],
+    active_scales: list[dict],
+    idle_scales: list[dict],
+    feeder_pngs: list[tuple[str, Path]],
+) -> Path:
+    """v1.82 layout on the v1.80 workbook.
+
+    Idle pictures match the active picture size. Eight rows stay clear under each
+    picture so the next bad-spot name is not covered. The description moves from
+    columns I–S to P–Z. Circles shrink onto the red samples. A Feeder swap sheet
+    is added. The workbook is not opened with openpyxl, so the circles stay.
+    """
+    import io
+    from PIL import Image
+
+    if len(idle_pngs) != 99 or len(notes) != 99 or len(active_scales) != 99:
+        raise SystemExit("v1.82 expects 99 idle maps, notes and circle scales")
+    with zipfile.ZipFile(src) as zf:
+        names = zf.namelist()
+        parts = {name: zf.read(name) for name in names}
+
+    active_sheet = _sheet_part_path(parts, "Bad Spot RSRP_Active")
+    idle_sheet = _sheet_part_path(parts, "Bad Spot RSRP")
+    xml = parts[active_sheet].decode("utf-8")
+    headers = _title_rows(xml)
+    if len(headers) != 99:
+        raise SystemExit(f"found {len(headers)} active titles, expected 99")
+    for number, (coverage, serving) in enumerate(notes, start=1):
+        xml = _replace_inline_text(xml, headers[number] + 42, "Idle vs active")
+        xml = _replace_inline_text(xml, headers[number] + 43, coverage + "\n" + serving)
+    xml = _shift_sheet_columns(xml)
+    parts[idle_sheet] = _shift_sheet_columns(parts[idle_sheet].decode("utf-8")).encode("utf-8")
+
+    drawing = parts["xl/drawings/drawing8.xml"].decode("utf-8")
+    rels = parts["xl/drawings/_rels/drawing8.xml.rels"].decode("utf-8")
+    rid_to = {}
+    for target, rid in re.findall(r'Target="([^"]+)"[^>]*Id="(rId\d+)"', rels):
+        rid_to[rid] = target.lstrip("/")
+    for rid, target in re.findall(r'Id="(rId\d+)"[^>]*Target="([^"]+)"', rels):
+        rid_to[rid] = target.lstrip("/")
+    blocks = re.findall(r"<oneCellAnchor>.*?</oneCellAnchor>", drawing, flags=re.S)
+    active_size: list[tuple[int, int, int]] = []
+    idle_index: dict[int, int] = {}
+    for index, block in enumerate(blocks):
+        if "<pic>" not in block:
+            continue
+        col = int(re.search(r"<col>(\d+)</col>", block).group(1))
+        if col != 0:
+            continue
+        name = re.search(r'name="([^"]+)"', block).group(1)
+        row = int(re.search(r"<row>(\d+)</row>", block).group(1))
+        if name.startswith("Idle area"):
+            idle_index[int(name.split()[-1])] = index
+        else:
+            ext = re.search(r'<ext cx="(\d+)" cy="(\d+)"', block)
+            active_size.append((row, int(ext.group(1)), int(ext.group(2))))
+    active_size.sort()
+    serial = active_size[1:]
+    if len(serial) != 99 or len(idle_index) != 99:
+        raise SystemExit(f"pictures active {len(serial)} idle {len(idle_index)}")
+
+    new_cy: dict[int, int] = {}
+    for number, png in enumerate(idle_pngs, start=1):
+        with Image.open(png) as image:
+            buf = io.BytesIO()
+            image.convert("RGB").save(buf, "JPEG", quality=70, optimize=True)
+        block = blocks[idle_index[number]]
+        rid = re.search(r'r:embed="(rId\d+)"', block).group(1)
+        parts[rid_to[rid]] = buf.getvalue()
+        _row, cx, cy = serial[number - 1]
+        new_cy[number] = cy
+        blocks[idle_index[number]] = re.sub(
+            r'<ext cx="\d+" cy="\d+"', f'<ext cx="{cx}" cy="{cy}"', block, count=1,
+        )
+    idle_rows = {}
+    for number, index in idle_index.items():
+        idle_rows[number] = headers[number] + 50
+        blocks[index] = re.sub(
+            r"<row>\d+</row>", f"<row>{idle_rows[number]}</row>", blocks[index], count=1,
+        )
+    drawing = re.sub(
+        r"<oneCellAnchor>.*?</oneCellAnchor>",
+        lambda match, pending=blocks: _consume(pending),
+        drawing,
+        flags=re.S,
+    )
+    row_emu = 15 * 12700
+    content_rows = [int(row) for row in re.findall(r'<row r="(\d+)"', xml)]
+    tail = [row for row in content_rows if row > headers[99] + 48]
+    bounds = {number: headers[number + 1] for number in range(1, 99)}
+    if tail:
+        bounds[99] = tail[0]
+    for number in range(99, 0, -1):
+        nxt = bounds.get(number)
+        if nxt is None:
+            continue
+        end = idle_rows[number] + math.ceil(new_cy[number] / row_emu)
+        if end <= nxt - 9:
+            continue
+        count = end - (nxt - 9)
+
+        def shift_row(match: re.Match, start: int = nxt, count: int = count) -> str:
+            row = int(match.group(1))
+            return f"<row>{row + count if row >= start else row}</row>"
+
+        xml = _shift_rows_down(xml, nxt, count)
+        drawing = re.sub(r"<row>(\d+)</row>", shift_row, drawing)
+        print(f"  inserted {count} rows before bad spot {number + 1}", flush=True)
+
+    parts[active_sheet] = xml.encode("utf-8")
+    drawing = _rescale_ellipses(drawing, xml, active_scales)
+    parts["xl/drawings/drawing8.xml"] = drawing.encode("utf-8")
+    idle_drawing = parts["xl/drawings/drawing5.xml"].decode("utf-8")
+    parts["xl/drawings/drawing5.xml"] = _rescale_ellipses(
+        idle_drawing, parts[idle_sheet].decode("utf-8"), idle_scales,
+    ).encode("utf-8")
+    names = _add_feeder_sheet(parts, names, feeder_pngs)
+
     tmp = dest.with_suffix(".xlsx.tmp")
     with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for name in names:

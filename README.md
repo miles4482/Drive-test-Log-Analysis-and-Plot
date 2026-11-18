@@ -138,9 +138,19 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
+## Download Excel report (v1.82)
+
+**v1.82 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.82.xlsx
+
+The orange circle on each bad spot covers the red samples only, with a small margin, so green road outside the bad spot is left out. The idle map under each Active bad spot is the same size and the same window as the active map. Eight rows stay clear under that picture so the next bad-spot name is not covered by the legend. The description, the parameter table and the idle-versus-active note start further right, with a gap after the map. A new Feeder swap sheet uses the idle log only: two sectors of one site, each heard in the other's forward area, with a dashed line for each serving cell. A sample within 500 m is left out. The web map stays v1.73.
+
+**v1.82 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.82.pptx
+
+The web map stays v1.73: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.73.zip
+
 ## Download Excel report (v1.81)
 
-**v1.81 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.81.xlsx
+**v1.81:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.81.xlsx
 
 The idle map under each Active bad spot uses the same scale as the active map, with a little more road. The yellow dashed lines are the same serving-cell lines as the active map. A blue dash is an idle serving cell that is different. The web map stays v1.73.
 

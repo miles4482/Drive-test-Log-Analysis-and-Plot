@@ -26,11 +26,11 @@ from pptx.util import Emu, Inches, Pt
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
-REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.81.xlsx"
+REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.82.xlsx"
 IDLE_NOTES = OUTPUT / "idle_vs_active_notes.json"
 PLOTS = OUTPUT / "plots"
 DESCRIPTIONS = OUTPUT / "bad_spot_descriptions.json"
-SUMMARY_VERSION = "1.81"
+SUMMARY_VERSION = "1.82"
 DEST = OUTPUT / f"Bogura_DriveTest_Summary_v{SUMMARY_VERSION}.pptx"
 CIRCLES = PLOTS / "bad_spot_circles.json"
 
@@ -295,7 +295,7 @@ def _text(slide, left, top, width, height, text: str, size: int, color: RGBColor
 def _footer(slide, page: int, pages: int) -> None:
     _text(
         slide, Inches(0.4), Inches(7.18), Inches(10), Inches(0.24),
-        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.81  ·  Web v1.73",
+        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.82  ·  Web v1.73",
         11, MUTED,
     )
     _text(
@@ -557,16 +557,17 @@ def _example(prs: Presentation, group: dict, item: dict, record: dict[str, str],
     max_w = 6.55
     note = _idle_note(item["n"]) if group["mode"] == "Active" else None
     if idle_aspect:
-        # Side by side, same width, so the two maps share one scale.
+        # Side by side, the same width and the same geographic window.
         table_h = 0.28 * table_rows
         note_h = 0.95 if note else 0.0
         spare = 6.18 - table_h - note_h - 0.12
         gap = 0.08
-        # The idle window is 12% wider. Its picture is 12% wider so the scale matches.
-        width = (max_w - gap) / 2.12
-        idle_w = width * 1.12
+        width = (max_w - gap) / 2.0
+        idle_w = width
         height = width / aspect
-        idle_h = idle_w / idle_aspect
+        # Same rectangle as the active map. The idle picture's caption bar
+        # makes its own aspect slightly taller, and the sheet shows one size.
+        idle_h = height
         map_h = max(height, idle_h)
         if map_h > spare and map_h > 0:
             fitted = spare / map_h
@@ -953,7 +954,7 @@ def _annex_workbook(prs: Presentation, page: int, pages: int, groups: list[dict]
     if partial:
         deck += "Samples: " + ", ".join(partial) + "."
     rows = [
-        ("Excel v1.81", "The map has the same header, legend and dashed circle as the Excel sheet. On an Active bad spot the idle map uses the same scale as the active map, with a little more road. The yellow dashed serving lines are the same lines as the active map. A blue dash is an idle serving cell that is different. A note beside it compares the two. Active is on the left of the KPI sheets and Idle is on the right. A downtilt of a far cell is not the cover for a red run. That run gets an uptilt, an azimuth turn, or a 4th L900 when no L900 inside 2 km already faces it. The parameter table lists azimuth and tilt changes. A new site leaves Existing blank and fills New Plan."),
+        ("Excel v1.82", "The map has the same header, legend and dashed circle as the Excel sheet. The circle covers the red samples only, with a small margin. On an Active bad spot the idle map is the same size and the same window as the active map. The yellow dashed serving lines are the same lines as the active map. A blue dash is an idle serving cell that is different. A note compares the two. The description sits further right, with a gap after the map. A Feeder swap sheet, from the idle log only, draws a dashed line for each serving cell when two sectors of one site are heard in each other's area. A sample within 500 m is left out. Active is on the left of the KPI sheets and Idle is on the right. A downtilt of a far cell is not the cover for a red run. That run gets an uptilt, an azimuth turn, or a 4th L900 when no L900 inside 2 km already faces it. The parameter table lists azimuth and tilt changes. A new site leaves Existing blank and fills New Plan."),
         ("This deck", deck),
         ("Web v1.69", "The live map is unchanged. Site names are white with a dark edge. Sector names on that map stay small. With KPI set to Blank, Info on a sector or the site centre opens the cell table."),
         ("RSRQ and SINR", "The coverage maps are in this deck. The workbook no longer has separate RSRQ or SINR bad-spot sheets. Poor RSRQ is at or below −20 dB. Poor SINR is at or below 0 dB."),
