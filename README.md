@@ -138,9 +138,19 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
+## Download Excel report (v1.85)
+
+**v1.85 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.85.xlsx
+
+On the Feeder swap maps, each PCI is repeated along the dashed lines until that cell stops serving, about every 500 m, including behind the azimuth. The three arms, the matching dash colours, and the summary at the top stay as in v1.84. The other sheets are unchanged. The web map stays v1.73.
+
+**v1.85 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.85.pptx
+
+The web map stays v1.73: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.73.zip
+
 ## Download Excel report (v1.84)
 
-**v1.84 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.84.xlsx
+**v1.84:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.84.xlsx
 
 The Feeder swap sheet now starts with a summary of the five swaps. Each map keeps all three sector arms. The two swapped sectors are red and blue, the third arm is gold, and the dashed serving lines use that same colour. The lines run out to the samples that sector serves, including behind the azimuth, so the reach is visible. The arm label is the sector name and its PCI values, and those PCI numbers are also drawn on the RSRP map. The other sheets are unchanged. The web map stays v1.73.
 

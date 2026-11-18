@@ -5576,22 +5576,24 @@ def _spider_bins(part: pd.DataFrame) -> list[dict]:
 def _spider_keep(bins: list[dict], lat: float, lon: float, wedge: float = 12.0, limit_km: float = 8.0) -> list[dict]:
     """Serving bins in every direction, including samples behind the azimuth.
 
-    A short list is kept whole. A long list keeps several bins along each
-    direction so the dashes show how far that sector still serves.
+    Each PCI keeps a bin about every 400 m out to its own last sample, so the
+    dashes and the PCI labels continue until that cell stops serving.
     """
-    usable = [item for item in bins if float(item["dist"]) <= limit_km]
-    if len(usable) <= 70:
-        return usable
-    groups: dict[int, list[dict]] = {}
+    usable = [item for item in bins if float(item["dist"]) <= limit_km and item.get("pci") is not None]
+    groups: dict[tuple[int, int], list[dict]] = {}
     for item in usable:
         bearing = _bearing_deg(lat, lon, float(item["lat"]), float(item["lon"]))
-        groups.setdefault(int(bearing // wedge), []).append(item)
+        key = (int(bearing // wedge), int(item["pci"]))
+        groups.setdefault(key, []).append(item)
     kept: list[dict] = []
     for group in groups.values():
         ordered = sorted(group, key=lambda row: float(row["dist"]))
-        picks = {0, len(ordered) - 1, len(ordered) // 3, (2 * len(ordered)) // 3}
-        for index in picks:
-            kept.append(ordered[index])
+        last = -1.0
+        for item in ordered:
+            dist = float(item["dist"])
+            if dist - last >= 0.40 or item is ordered[-1]:
+                kept.append(item)
+                last = dist
     return kept
 
 
@@ -5753,18 +5755,23 @@ def plot_feeder_swap_map(idle: pd.DataFrame, swap: dict, path: Path) -> Path:
                 [site_lon, float(item["lon"])], [site_lat, float(item["lat"])],
                 color=color, lw=1.15, ls=(0, (5, 3)), zorder=23, alpha=0.95,
             )
-        labelled: set[int] = set()
-        ordered = sorted(bins, key=lambda row: -float(row["dist"]))
+        # Each PCI is repeated along its own dashes, about every 500 m, out to its last sample.
+        labelled_at: dict[int, list[tuple[float, float]]] = {}
+        ordered = sorted(bins, key=lambda row: float(row["dist"]))
         for item in ordered:
             pci = item.get("pci")
-            if pci is None or int(pci) in labelled:
+            if pci is None or float(item["dist"]) < 0.55:
                 continue
-            labelled.add(int(pci))
-            bearing = _bearing_deg(site_lat, site_lon, float(item["lat"]), float(item["lon"]))
-            lon_p, lat_p = along(bearing, float(item["dist"]) + 0.18)
-            _ink(ax, lon_p, lat_p, str(int(pci)), 7, color)
+            pci = int(pci)
+            lon_p = float(item["lon"])
+            lat_p = float(item["lat"])
+            previous = labelled_at.setdefault(pci, [])
+            if any(_equirect_km(lat_p, lon_p, prev_lat, prev_lon) < 0.45 for prev_lon, prev_lat in previous):
+                continue
+            previous.append((lon_p, lat_p))
+            _ink(ax, lon_p, lat_p, str(pci), 6.5, color)
         if ordered:
-            far = ordered[0]
+            far = ordered[-1]
             bearing = _bearing_deg(site_lat, site_lon, float(far["lat"]), float(far["lon"]))
             # Offset the reach label off the PCI number so both stay readable.
             side = (bearing + 90.0) % 360.0
