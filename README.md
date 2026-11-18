@@ -138,9 +138,19 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
+## Download Excel report (v1.84)
+
+**v1.84 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.84.xlsx
+
+The Feeder swap sheet now starts with a summary of the five swaps. Each map keeps all three sector arms. The two swapped sectors are red and blue, the third arm is gold, and the dashed serving lines use that same colour. The lines run out to the samples that sector serves, including behind the azimuth, so the reach is visible. The arm label is the sector name and its PCI values, and those PCI numbers are also drawn on the RSRP map. The other sheets are unchanged. The web map stays v1.73.
+
+**v1.84 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.84.pptx
+
+The web map stays v1.73: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.73.zip
+
 ## Download Excel report (v1.83)
 
-**v1.83 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.83.xlsx
+**v1.83:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.83.xlsx
 
 Each bad-spot map is smaller, and the active map and the idle map under it stay the same size. The description, the parameter table and the comparison note start just to the right of that map, with a short gap. Three rows stay clear under the picture so the next bad-spot name is still visible. The circle, the suggestions and the Feeder swap sheet are unchanged. The web map stays v1.73.
 

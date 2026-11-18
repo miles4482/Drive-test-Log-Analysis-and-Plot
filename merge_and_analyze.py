@@ -451,6 +451,7 @@ def _serving_cell_index() -> tuple[dict, dict]:
             et = pd.to_numeric(row.get("E_tilt"), errors="coerce")
             mt = pd.to_numeric(row.get("M_tilt"), errors="coerce")
             ht = pd.to_numeric(row.get("Height"), errors="coerce")
+            pci = pd.to_numeric(row.get("PCI"), errors="coerce")
             rec = {
                 "lat": float(lat),
                 "lon": float(lon),
@@ -462,6 +463,7 @@ def _serving_cell_index() -> tuple[dict, dict]:
                 "etilt": None if pd.isna(et) else float(et),
                 "mtilt": None if pd.isna(mt) else float(mt),
                 "height": None if pd.isna(ht) else float(ht),
+                "pci": None if pd.isna(pci) else int(pci),
             }
             key = (int(enb), int(cid))
             previous = pair.get(key)
@@ -5518,6 +5520,81 @@ def tight_bad_spot_outline(samples: pd.DataFrame, spot: pd.Series, column: str =
     }
 
 
+def _site_sector_arms(site: str) -> list[dict]:
+    """Every sector of one site, with the dump azimuth and the PCI values on that sector."""
+    load_site_sectors()
+    cells = _SITE_CELLS
+    if cells is None or cells.empty or "SiteName" not in cells.columns:
+        return []
+    part = cells[cells["SiteName"].astype(str) == str(site)]
+    arms: list[dict] = []
+    for sector, group in part.groupby("Sector", sort=False):
+        pcis: list[int] = []
+        for value in pd.to_numeric(group.get("PCI"), errors="coerce").dropna():
+            number = int(value)
+            if number not in pcis:
+                pcis.append(number)
+        azimuths = pd.to_numeric(group["Azimuth"], errors="coerce").dropna()
+        lats = pd.to_numeric(group["Lat"], errors="coerce").dropna()
+        lons = pd.to_numeric(group["Lon"], errors="coerce").dropna()
+        if lats.empty or lons.empty or azimuths.empty:
+            continue
+        arms.append({
+            "sector": str(sector),
+            "az": float(azimuths.median()) % 360.0,
+            "lat": float(lats.median()),
+            "lon": float(lons.median()),
+            "pcis": sorted(pcis),
+        })
+    arms.sort(key=lambda item: item["sector"])
+    return arms
+
+
+def _spider_bins(part: pd.DataFrame) -> list[dict]:
+    """50 m bins of the samples one sector serves, past the 500 m backlobe gate."""
+    if part is None or part.empty:
+        return []
+    work = part.copy()
+    lat0 = float(work["lat"].mean())
+    dlat = 50.0 / 111320.0
+    dlon = 50.0 / max(_km_per_deg_lon(lat0) * 1000.0, 1.0)
+    work["_by"] = np.floor(work["lat"].to_numpy(dtype=float) / dlat).astype("int64")
+    work["_bx"] = np.floor(work["lon"].to_numpy(dtype=float) / dlon).astype("int64")
+    bins: list[dict] = []
+    for _, grp in work.groupby(["_by", "_bx"], sort=False):
+        pcis = [int(value) for value in grp["pci"].dropna().tolist()]
+        pci = max(set(pcis), key=pcis.count) if pcis else None
+        bins.append({
+            "lat": float(grp["lat"].mean()),
+            "lon": float(grp["lon"].mean()),
+            "dist": float(grp["dist"].median()),
+            "pci": pci,
+        })
+    return bins
+
+
+def _spider_keep(bins: list[dict], lat: float, lon: float, wedge: float = 12.0, limit_km: float = 8.0) -> list[dict]:
+    """Serving bins in every direction, including samples behind the azimuth.
+
+    A short list is kept whole. A long list keeps several bins along each
+    direction so the dashes show how far that sector still serves.
+    """
+    usable = [item for item in bins if float(item["dist"]) <= limit_km]
+    if len(usable) <= 70:
+        return usable
+    groups: dict[int, list[dict]] = {}
+    for item in usable:
+        bearing = _bearing_deg(lat, lon, float(item["lat"]), float(item["lon"]))
+        groups.setdefault(int(bearing // wedge), []).append(item)
+    kept: list[dict] = []
+    for group in groups.values():
+        ordered = sorted(group, key=lambda row: float(row["dist"]))
+        picks = {0, len(ordered) - 1, len(ordered) // 3, (2 * len(ordered)) // 3}
+        for index in picks:
+            kept.append(ordered[index])
+    return kept
+
+
 def find_feeder_swaps(samples: pd.DataFrame, min_samples: int = 12) -> list[dict]:
     """Idle sectors whose cells serve each other's area.
 
@@ -5559,6 +5636,7 @@ def find_feeder_swaps(samples: pd.DataFrame, min_samples: int = 12) -> list[dict
             "lon": float(lon),
             "dist": dist,
             "bearing": bearing,
+            "pci": cell.get("pci"),
         })
     if not rows:
         return []
@@ -5588,6 +5666,15 @@ def find_feeder_swaps(samples: pd.DataFrame, min_samples: int = 12) -> list[dict
                 right_in_left = toward(right["rows"], left["az"], right["az"])
                 if len(left_in_right) < min_samples or len(right_in_left) < min_samples:
                     continue
+                arms = _site_sector_arms(str(site))
+                by_sector = {item["sector"]: item for item in sectors}
+                spiders = {}
+                for arm in arms:
+                    part = by_sector.get(arm["sector"])
+                    spiders[arm["sector"]] = _spider_keep(
+                        _spider_bins(part["rows"] if part is not None else pd.DataFrame()),
+                        arm["lat"], arm["lon"],
+                    )
                 swaps.append({
                     "site": str(site),
                     "a": left["sector"],
@@ -5600,23 +5687,42 @@ def find_feeder_swaps(samples: pd.DataFrame, min_samples: int = 12) -> list[dict
                     "b_n": int(len(right_in_left)),
                     "a_points": left_in_right[["lat", "lon", "name", "dist"]].to_dict("records"),
                     "b_points": right_in_left[["lat", "lon", "name", "dist"]].to_dict("records"),
+                    "arms": arms,
+                    "spiders": spiders,
                 })
     swaps.sort(key=lambda item: -(item["a_n"] + item["b_n"]))
     return swaps
 
 
 def plot_feeder_swap_map(idle: pd.DataFrame, swap: dict, path: Path) -> Path:
-    """Idle coverage around one swapped sector pair, with a dash for each serving cell."""
-    points = swap["a_points"] + swap["b_points"]
-    lats = [swap["lat"]] + [float(item["lat"]) for item in points]
-    lons = [swap["lon"]] + [float(item["lon"]) for item in points]
+    """Idle RSRP around a swapped site. Three arms, PCI on each arm, dashes in the arm colour."""
+    arms = list(swap.get("arms") or [])
+    if not arms:
+        arms = [
+            {"sector": swap["a"], "az": swap["a_az"], "lat": swap["lat"], "lon": swap["lon"], "pcis": []},
+            {"sector": swap["b"], "az": swap["b_az"], "lat": swap["lat"], "lon": swap["lon"], "pcis": []},
+        ]
+    spiders = swap.get("spiders") or {}
+    drawn: list[tuple[dict, str, list[dict]]] = []
+    # The two swapped sectors take red and blue. The remaining sector stays gold.
+    palette = {swap["a"]: "#E74C3C", swap["b"]: "#2E86C1"}
+    for arm in arms:
+        color = palette.get(arm["sector"], "#F4D03F")
+        drawn.append((arm, color, list(spiders.get(arm["sector"]) or [])))
+
+    lats = [float(swap["lat"])]
+    lons = [float(swap["lon"])]
+    for _arm, _color, bins in drawn:
+        for item in bins:
+            lats.append(float(item["lat"]))
+            lons.append(float(item["lon"]))
     lat0 = float(np.mean(lats))
     lon0 = float(np.mean(lons))
     km_lon = _km_per_deg_lon(lat0)
     reach = 0.0
     for lat, lon in zip(lats, lons):
         reach = max(reach, abs(lat - lat0) * 111.32, abs(lon - lon0) * km_lon)
-    half = max(1.6, reach + 0.45)
+    half = max(1.8, reach + 0.55)
     west, east = lon0 - half / km_lon, lon0 + half / km_lon
     south, north = lat0 - half / 111.32, lat0 + half / 111.32
     fig, ax = plt.subplots(figsize=(8.2, 7.4))
@@ -5624,46 +5730,59 @@ def plot_feeder_swap_map(idle: pd.DataFrame, swap: dict, path: Path) -> Path:
     ax.set_ylim(south, north)
     ax.set_aspect("equal", adjustable="box")
     local = idle[idle["Longitude"].between(west, east) & idle["Latitude"].between(south, north)]
-    if not local.empty:
+    if not local.empty and "RSRP" in local.columns:
         _draw_coverage_points(
             ax, local, rsrp_map_class(local["RSRP"]), MAP_RSRP_LABELS, MAP_RSRP_COLORS,
             max_points=6000, poor_on_top=True, bin_m=MAP_BIN_M, column="RSRP", route_casing=True,
         )
-    stub_km = 0.22
-    arm_km = 0.62
+    site_lat = float(swap["lat"])
+    site_lon = float(swap["lon"])
+    arm_km = 0.72
 
     def along(azimuth: float, distance_km: float) -> tuple[float, float]:
         rad = np.radians(float(azimuth) % 360.0)
         return (
-            swap["lon"] + distance_km * np.sin(rad) / km_lon,
-            swap["lat"] + distance_km * np.cos(rad) / 111.32,
+            site_lon + distance_km * np.sin(rad) / km_lon,
+            site_lat + distance_km * np.cos(rad) / 111.32,
         )
 
-    def draw_group(records: list[dict], azimuth: float, color: str) -> None:
-        grouped: dict[str, list[dict]] = {}
-        for item in records:
-            grouped.setdefault(str(item["name"]), []).append(item)
-        lon_tip, lat_tip = along(azimuth, stub_km)
-        names = list(grouped.items())
-        for index, (name, items) in enumerate(names):
-            lat1 = float(np.mean([item["lat"] for item in items]))
-            lon1 = float(np.mean([item["lon"] for item in items]))
-            ax.plot([lon_tip, lon1], [lat_tip, lat1], color=color, lw=1.7, ls=(0, (6, 3)), zorder=24)
-            dist_m = float(np.mean([item["dist"] for item in items])) * 1000.0
-            dx = (lon1 - lon_tip) * km_lon
-            dy = (lat1 - lat_tip) * 111.32
-            norm = math.hypot(dx, dy) or 1.0
-            shift = (index - (len(names) - 1) / 2.0) * 0.16
-            label_lon = lon1 + (-dy / norm) * shift / km_lon
-            label_lat = lat1 + (dx / norm) * shift / 111.32
-            _ink(ax, label_lon, label_lat, f"{name}\n{dist_m:,.0f} m", 7, "#F7FEFF")
-
-    for azimuth, label in ((swap["a_az"], swap["a"]), (swap["b_az"], swap["b"])):
+    for arm, color, bins in drawn:
+        azimuth = float(arm["az"])
+        for item in bins:
+            ax.plot(
+                [site_lon, float(item["lon"])], [site_lat, float(item["lat"])],
+                color=color, lw=1.15, ls=(0, (5, 3)), zorder=23, alpha=0.95,
+            )
+        labelled: set[int] = set()
+        ordered = sorted(bins, key=lambda row: -float(row["dist"]))
+        for item in ordered:
+            pci = item.get("pci")
+            if pci is None or int(pci) in labelled:
+                continue
+            labelled.add(int(pci))
+            bearing = _bearing_deg(site_lat, site_lon, float(item["lat"]), float(item["lon"]))
+            lon_p, lat_p = along(bearing, float(item["dist"]) + 0.18)
+            _ink(ax, lon_p, lat_p, str(int(pci)), 7, color)
+        if ordered:
+            far = ordered[0]
+            bearing = _bearing_deg(site_lat, site_lon, float(far["lat"]), float(far["lon"]))
+            # Offset the reach label off the PCI number so both stay readable.
+            side = (bearing + 90.0) % 360.0
+            lon_d, lat_d = along(bearing, float(far["dist"]) + 0.18)
+            rad = np.radians(side)
+            lon_d += 0.16 * np.sin(rad) / km_lon
+            lat_d += 0.16 * np.cos(rad) / 111.32
+            _ink(ax, lon_d, lat_d, f"{float(far['dist']):.1f} km", 6.5, "#F7FEFF")
         lon_tip, lat_tip = along(azimuth, arm_km)
-        ax.plot([swap["lon"], lon_tip], [swap["lat"], lat_tip], color="#7FDBFF", lw=2.6, solid_capstyle="round", zorder=22)
-        _ink(ax, lon_tip, lat_tip, label, 8, "#EAF8FF")
-    draw_group(swap["a_points"], swap["a_az"], "#E74C3C")
-    draw_group(swap["b_points"], swap["b_az"], "#5DADE2")
+        ax.plot(
+            [site_lon, lon_tip], [site_lat, lat_tip],
+            color=color, lw=3.2, solid_capstyle="round", zorder=26,
+        )
+        pcis = arm.get("pcis") or []
+        pci_text = ", ".join(str(int(value)) for value in pcis)
+        label = f"{arm['sector']}({pci_text})" if pci_text else str(arm["sector"])
+        lon_label, lat_label = along(azimuth, arm_km + 0.42)
+        _ink(ax, lon_label, lat_label, label, 7.5, color)
     _add_basemap(ax)
     add_map_scale_bar(ax, boxed=False)
     hide_map_axes(ax)
@@ -5672,11 +5791,15 @@ def plot_feeder_swap_map(idle: pd.DataFrame, swap: dict, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=110)
     plt.close(fig)
-    _paint_swap_caption(path, f"{swap['a']}  ↔  {swap['b']}")
+    third = [arm["sector"] for arm, color, _bins in drawn if color == "#F4D03F"]
+    note = f"{swap['a']} red   ·   {swap['b']} blue"
+    if third:
+        note += f"   ·   {third[0]} gold   ·   PCI on the arm and on the road"
+    _paint_swap_caption(path, f"{swap['a']}  ↔  {swap['b']}", note)
     return path
 
 
-def _paint_swap_caption(path: Path, title: str) -> None:
+def _paint_swap_caption(path: Path, title: str, note: str | None = None) -> None:
     from PIL import Image, ImageDraw, ImageFont
 
     image = Image.open(path).convert("RGB")
@@ -5685,9 +5808,9 @@ def _paint_swap_caption(path: Path, title: str) -> None:
     canvas.paste(image, (0, bar))
     draw = ImageDraw.Draw(canvas)
     bold = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
-    small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 13)
+    small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
     draw.text((12, 4), f"Feeder swap   {title}", fill="#FFFFFF", font=bold)
-    draw.text((12, 28), "Red dash: first sector heard in the other area.   Blue dash: the other way.", fill="#D6E4F0", font=small)
+    draw.text((12, 28), note or "Dash colour matches the arm. Numbers on the road are PCI.", fill="#D6E4F0", font=small)
     canvas.save(path)
 
 

@@ -90,7 +90,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.83"
+REPORT_VERSION = "1.84"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -3212,7 +3212,7 @@ def _rescale_ellipses(drawing: str, sheet_xml: str, scales: list[dict]) -> str:
     return re.sub(r"<oneCellAnchor>.*?</oneCellAnchor>", place, drawing, flags=re.S)
 
 
-def _feeder_sheet_xml(titles: list[str], picture_rows: list[int]) -> bytes:
+def _feeder_sheet_xml(titles: list[str], picture_rows: list[int], summary: list[dict] | None = None) -> bytes:
     rows = [
         f'<row r="1" ht="24" customHeight="1">{_inline_cell("A1", 5, "Feeder swap")}</row>',
         (
@@ -3225,11 +3225,12 @@ def _feeder_sheet_xml(titles: list[str], picture_rows: list[int]) -> bytes:
             + "</row>"
         ),
         (
-            '<row r="3" ht="20" customHeight="1">'
+            '<row r="3" ht="32" customHeight="1">'
             + _inline_cell(
                 "A3", 34,
-                "Red dash: the first sector's cells heard in the other sector's area. "
-                "Blue dash: the other way. Cyan arm: the sector's own azimuth.",
+                "Each site keeps three arms. The two swapped sectors are red and blue. The third arm is gold. "
+                "Dashed lines use that same colour and run out to the samples the sector serves, including behind the azimuth. "
+                "The arm label is the sector and its PCI values.",
             )
             + "</row>"
         ),
@@ -3244,6 +3245,31 @@ def _feeder_sheet_xml(titles: list[str], picture_rows: list[int]) -> bytes:
         ),
     ]
     merges = ["A1:L1", "A2:L2", "A3:L3", "A4:L4"]
+    if summary:
+        header = (
+            '<row r="6" ht="20" customHeight="1">'
+            + _inline_cell("A6", 33, "Site")
+            + _inline_cell("B6", 33, "Sector")
+            + _inline_cell("C6", 33, "Azimuth")
+            + _inline_cell("D6", 33, "PCI")
+            + _inline_cell("E6", 33, "Heard the other way")
+            + _inline_cell("F6", 33, "Role")
+            + "</row>"
+        )
+        rows.append(header)
+        for offset, item in enumerate(summary):
+            row = 7 + offset
+            heard = "" if item.get("heard") in (None, "") else str(item["heard"])
+            rows.append(
+                f'<row r="{row}" ht="18" customHeight="1">'
+                + _inline_cell(f"A{row}", 34, str(item["site"]))
+                + _inline_cell(f"B{row}", 34, str(item["sector"]))
+                + _inline_cell(f"C{row}", 34, str(item["azimuth"]))
+                + _inline_cell(f"D{row}", 34, str(item["pci"]))
+                + _inline_cell(f"E{row}", 34, heard)
+                + _inline_cell(f"F{row}", 34, str(item["role"]))
+                + "</row>"
+            )
     for title, row in zip(titles, picture_rows):
         label_row = row - 1
         rows.append(
@@ -3258,8 +3284,12 @@ def _feeder_sheet_xml(titles: list[str], picture_rows: list[int]) -> bytes:
         '<sheetViews><sheetView showGridLines="0" view="normal" zoomScale="100" workbookViewId="0">'
         '<selection activeCell="A1" sqref="A1" /></sheetView></sheetViews>'
         '<sheetFormatPr baseColWidth="8" defaultRowHeight="15" />'
-        '<cols><col width="18" customWidth="1" min="1" max="1" />'
-        '<col width="14" customWidth="1" min="2" max="12" /></cols>'
+        '<cols><col width="14" customWidth="1" min="1" max="1" />'
+        '<col width="16" customWidth="1" min="2" max="2" />'
+        '<col width="12" customWidth="1" min="3" max="3" />'
+        '<col width="22" customWidth="1" min="4" max="4" />'
+        '<col width="22" customWidth="1" min="5" max="5" />'
+        '<col width="16" customWidth="1" min="6" max="12" /></cols>'
         f'<sheetData>{"".join(rows)}</sheetData>'
         f'<mergeCells count="{len(merges)}">'
         + "".join(f'<mergeCell ref="{ref}"/>' for ref in merges)
@@ -3273,7 +3303,12 @@ def _feeder_sheet_xml(titles: list[str], picture_rows: list[int]) -> bytes:
     return xml.encode("utf-8")
 
 
-def _add_feeder_sheet(parts: dict[str, bytes], names: list[str], pngs: list[tuple[str, Path]]) -> list[str]:
+def _add_feeder_sheet(
+    parts: dict[str, bytes],
+    names: list[str],
+    pngs: list[tuple[str, Path]],
+    summary: list[dict] | None = None,
+) -> list[str]:
     """Add the idle-only Feeder swap sheet. Each swap gets one map and its dashed serving lines."""
     import io
     from PIL import Image
@@ -3281,9 +3316,10 @@ def _add_feeder_sheet(parts: dict[str, bytes], names: list[str], pngs: list[tupl
     if not pngs:
         raise SystemExit("no feeder swaps to place")
     titles = [title for title, _path in pngs]
-    # One map under a label row. 42 rows clears a picture about 36 rows tall.
-    picture_rows = [8 + index * 42 for index in range(len(pngs))]
-    parts["xl/worksheets/sheet16.xml"] = _feeder_sheet_xml(titles, picture_rows)
+    # The summary table sits above the maps. 42 rows clears a picture about 36 rows tall.
+    first_picture = 9 + len(summary or [])
+    picture_rows = [first_picture + index * 42 for index in range(len(pngs))]
+    parts["xl/worksheets/sheet16.xml"] = _feeder_sheet_xml(titles, picture_rows, summary)
     parts["xl/worksheets/_rels/sheet16.xml.rels"] = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
@@ -3866,6 +3902,21 @@ def publish_report_v183(src: Path, dest: Path) -> Path:
         parts[drawing_name] = drawing.encode("utf-8")
         print(f"  fitted {sheet_key} tail {tail}", flush=True)
 
+    tmp = dest.with_suffix(".xlsx.tmp")
+    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name in names:
+            zf.writestr(name, parts[name])
+    tmp.replace(dest)
+    print(f"Wrote {dest} ({dest.stat().st_size / 1e6:.1f} MB)", flush=True)
+    return dest
+
+
+def publish_report_v184(src: Path, dest: Path, pngs: list[tuple[str, Path]], summary: list[dict]) -> Path:
+    """Replace only the Feeder swap sheet. Every other sheet stays as in v1.83."""
+    with zipfile.ZipFile(src) as zf:
+        names = zf.namelist()
+        parts = {name: zf.read(name) for name in names}
+    names = _add_feeder_sheet(parts, names, pngs, summary)
     tmp = dest.with_suffix(".xlsx.tmp")
     with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for name in names:
