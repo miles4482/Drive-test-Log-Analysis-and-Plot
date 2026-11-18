@@ -90,7 +90,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.85"
+REPORT_VERSION = "1.86"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -3228,7 +3228,7 @@ def _feeder_sheet_xml(titles: list[str], picture_rows: list[int], summary: list[
             '<row r="3" ht="32" customHeight="1">'
             + _inline_cell(
                 "A3", 34,
-                "Each site keeps three arms. The two swapped sectors are red and blue. The third arm is gold. "
+                "Each site keeps three arms. The two swapped sectors are red and cyan. The third arm is yellow. "
                 "Dashed lines use that same colour and run out to the samples the sector serves, including behind the azimuth. "
                 "The arm label is the sector and its PCI values.",
             )
@@ -3902,6 +3902,96 @@ def publish_report_v183(src: Path, dest: Path) -> Path:
         parts[drawing_name] = drawing.encode("utf-8")
         print(f"  fitted {sheet_key} tail {tail}", flush=True)
 
+    tmp = dest.with_suffix(".xlsx.tmp")
+    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name in names:
+            zf.writestr(name, parts[name])
+    tmp.replace(dest)
+    print(f"Wrote {dest} ({dest.stat().st_size / 1e6:.1f} MB)", flush=True)
+    return dest
+
+
+def _pull_idle_under_active(drawing: str, sheet_xml: str) -> str:
+    """Sit each idle map on the row where the active map above it ends.
+
+    The two pictures share a width, so the idle map stays clear of the text
+    that starts just to the right. The orange circle on the active map stays.
+    """
+    _col_emu, row_emu = _sheet_axes(sheet_xml)
+    blocks = re.findall(r"<oneCellAnchor>.*?</oneCellAnchor>", drawing, flags=re.S)
+    pictures = []
+    for index, block in enumerate(blocks):
+        if "<pic>" not in block:
+            continue
+        name = re.search(r'name="([^"]+)"', block)
+        box = _anchor_box(block)
+        if name is None or box is None or box[0] != 0 or name.group(1) == "Image 1":
+            continue
+        pictures.append((index, name.group(1), box))
+    actives = [item for item in pictures if not item[1].startswith("Idle")]
+    moved = 0
+    for index, _name, box in pictures:
+        if not _name.startswith("Idle"):
+            continue
+        above = [item for item in actives if item[2][2] < box[2]]
+        if not above:
+            continue
+        active = max(above, key=lambda item: item[2][2])
+        top = _abs_along(active[2][2], active[2][3], row_emu) + active[2][5]
+        new_row, new_off = _walk_along(top, row_emu)
+        old_top = _abs_along(box[2], box[3], row_emu)
+        delta = top - old_top
+        blocks[index] = re.sub(
+            r"<from><col>\d+</col><colOff>\d+</colOff><row>\d+</row><rowOff>\d+</rowOff></from>",
+            f"<from><col>0</col><colOff>0</colOff><row>{new_row}</row><rowOff>{new_off}</rowOff></from>",
+            blocks[index],
+            count=1,
+        )
+        # A circle painted on this idle picture moves with it. The active circle does not.
+        if delta:
+            for shape, shape_block in enumerate(blocks):
+                if 'prst="ellipse"' not in shape_block:
+                    continue
+                found = _anchor_box(shape_block)
+                if found is None:
+                    continue
+                center = _abs_along(found[2], found[3], row_emu) + found[5] / 2.0
+                if old_top <= center <= old_top + box[5]:
+                    shape_row, shape_off = _walk_along(
+                        _abs_along(found[2], found[3], row_emu) + delta, row_emu,
+                    )
+                    blocks[shape] = re.sub(
+                        r"<from><col>(\d+)</col><colOff>(\d+)</colOff><row>\d+</row><rowOff>\d+</rowOff></from>",
+                        lambda match, row=shape_row, off=shape_off: (
+                            f"<from><col>{match.group(1)}</col><colOff>{match.group(2)}</colOff>"
+                            f"<row>{row}</row><rowOff>{off}</rowOff></from>"
+                        ),
+                        shape_block,
+                        count=1,
+                    )
+        moved += 1
+    print(f"  pulled {moved} idle maps up under the active map", flush=True)
+    return re.sub(
+        r"<oneCellAnchor>.*?</oneCellAnchor>",
+        lambda match, pending=blocks: _consume(pending),
+        drawing,
+        flags=re.S,
+    )
+
+
+def publish_report_v186(src: Path, dest: Path, pngs: list[tuple[str, Path]], summary: list[dict]) -> Path:
+    """Brighter feeder colours, and the idle map flush under the active map."""
+    with zipfile.ZipFile(src) as zf:
+        names = zf.namelist()
+        parts = {name: zf.read(name) for name in names}
+    active_sheet = _sheet_part_path(parts, "Bad Spot RSRP_Active")
+    xml = parts[active_sheet].decode("utf-8")
+    drawing = _pull_idle_under_active(parts["xl/drawings/drawing8.xml"].decode("utf-8"), xml)
+    headers = _title_rows(xml)
+    xml, drawing = _close_tail(xml, drawing, headers, _tail_row(xml, headers))
+    parts[active_sheet] = xml.encode("utf-8")
+    parts["xl/drawings/drawing8.xml"] = drawing.encode("utf-8")
+    names = _add_feeder_sheet(parts, names, pngs, summary)
     tmp = dest.with_suffix(".xlsx.tmp")
     with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for name in names:

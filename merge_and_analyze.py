@@ -5707,9 +5707,10 @@ def plot_feeder_swap_map(idle: pd.DataFrame, swap: dict, path: Path) -> Path:
     spiders = swap.get("spiders") or {}
     drawn: list[tuple[dict, str, list[dict]]] = []
     # The two swapped sectors take red and blue. The remaining sector stays gold.
-    palette = {swap["a"]: "#E74C3C", swap["b"]: "#2E86C1"}
+    # Yellow stays. Red and cyan are bright enough to read on the satellite photo.
+    palette = {swap["a"]: "#FF2D2D", swap["b"]: "#00E5FF"}
     for arm in arms:
-        color = palette.get(arm["sector"], "#F4D03F")
+        color = palette.get(arm["sector"], "#FFE14A")
         drawn.append((arm, color, list(spiders.get(arm["sector"]) or [])))
 
     lats = [float(swap["lat"])]
@@ -5753,7 +5754,11 @@ def plot_feeder_swap_map(idle: pd.DataFrame, swap: dict, path: Path) -> Path:
         for item in bins:
             ax.plot(
                 [site_lon, float(item["lon"])], [site_lat, float(item["lat"])],
-                color=color, lw=1.15, ls=(0, (5, 3)), zorder=23, alpha=0.95,
+                color="#141414", lw=3.1, ls=(0, (5, 3)), zorder=22, solid_capstyle="round",
+            )
+            ax.plot(
+                [site_lon, float(item["lon"])], [site_lat, float(item["lat"])],
+                color=color, lw=1.9, ls=(0, (5, 3)), zorder=23, solid_capstyle="round",
             )
         # Each PCI is repeated along its own dashes, about every 500 m, out to its last sample.
         labelled_at: dict[int, list[tuple[float, float]]] = {}
@@ -5783,7 +5788,11 @@ def plot_feeder_swap_map(idle: pd.DataFrame, swap: dict, path: Path) -> Path:
         lon_tip, lat_tip = along(azimuth, arm_km)
         ax.plot(
             [site_lon, lon_tip], [site_lat, lat_tip],
-            color=color, lw=3.2, solid_capstyle="round", zorder=26,
+            color="#141414", lw=6.2, solid_capstyle="round", zorder=25,
+        )
+        ax.plot(
+            [site_lon, lon_tip], [site_lat, lat_tip],
+            color=color, lw=4.0, solid_capstyle="round", zorder=26,
         )
         pcis = arm.get("pcis") or []
         pci_text = ", ".join(str(int(value)) for value in pcis)
@@ -5798,10 +5807,10 @@ def plot_feeder_swap_map(idle: pd.DataFrame, swap: dict, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=110)
     plt.close(fig)
-    third = [arm["sector"] for arm, color, _bins in drawn if color == "#F4D03F"]
-    note = f"{swap['a']} red   ·   {swap['b']} blue"
+    third = [arm["sector"] for arm, color, _bins in drawn if color == "#FFE14A"]
+    note = f"{swap['a']} red   ·   {swap['b']} cyan"
     if third:
-        note += f"   ·   {third[0]} gold   ·   PCI on the arm and on the road"
+        note += f"   ·   {third[0]} yellow   ·   PCI on the arm and on the road"
     _paint_swap_caption(path, f"{swap['a']}  ↔  {swap['b']}", note)
     return path
 
