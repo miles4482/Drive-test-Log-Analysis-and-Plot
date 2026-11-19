@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish Bogura Drive-Test Report v1.92 from v1.90 (Neon restyle; chart XML fixed).
+"""Publish Bogura Drive-Test Report v1.93 from v1.90 (Neon restyle; Excel-openable).
 
 Gemini 4 Neon (xhigh) design: strip clutter notes, replace harsh yellow section
 bars, restyle banners/tables/cards, keep every map, chart, and movable circle.
@@ -207,11 +207,51 @@ def clear_row_cells(row: ET.Element) -> None:
         row.remove(c)
 
 
+def parse_merge_bounds(ref: str) -> tuple[int, int, int, int] | None:
+    m = re.fullmatch(r"([A-Z]+)(\d+):([A-Z]+)(\d+)", ref or "")
+    if not m:
+        return None
+    c1, r1, c2, r2 = col_index(m.group(1)), int(m.group(2)), col_index(m.group(3)), int(m.group(4))
+    if r1 > r2 or c1 > c2:
+        return None
+    return c1, r1, c2, r2
+
+
+def merges_overlap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> bool:
+    return a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3]
+
+
+def sanitize_merges(sheet: ET.Element) -> None:
+    """Drop invalid / overlapping merges. First kept ref wins (call with preferred first)."""
+    cleaned: list[str] = []
+    bounds: list[tuple[int, int, int, int]] = []
+    for ref in collect_merges(sheet):
+        b = parse_merge_bounds(ref)
+        if b is None:
+            continue
+        if any(merges_overlap(b, kb) for kb in bounds):
+            continue
+        cleaned.append(ref)
+        bounds.append(b)
+    set_merges(sheet, cleaned)
+
+
 def delete_rows(sheet: ET.Element, rows: set[int]) -> None:
     sd = sheet.find(q("sheetData"))
     for row in list(sd.findall(q("row"))):
         if int(row.get("r")) in rows:
             sd.remove(row)
+    merges = sheet.find(q("mergeCells"))
+    if merges is None:
+        return
+    for mc in list(merges.findall(q("mergeCell"))):
+        b = parse_merge_bounds(mc.get("ref"))
+        if b is None:
+            merges.remove(mc)
+            continue
+        _, r1, _, r2 = b
+        if any(r in rows for r in range(r1, r2 + 1)):
+            merges.remove(mc)
 
 
 def shift_sheet_rows(sheet: ET.Element, delta: int, min_row: int) -> None:
@@ -586,6 +626,31 @@ def build_styles() -> bytes:
         "</cellXfs>",
         '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>',
         '<tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleLight16"/>',
+        # Keep indexed palette from the source workbook so Excel theme/index colours resolve.
+        "<colors><indexedColors>"
+        '<rgbColor rgb="00000000"/><rgbColor rgb="00FFFFFF"/><rgbColor rgb="00FF0000"/>'
+        '<rgbColor rgb="0000FF00"/><rgbColor rgb="000000FF"/><rgbColor rgb="00FFFF00"/>'
+        '<rgbColor rgb="00FF00FF"/><rgbColor rgb="0000FFFF"/><rgbColor rgb="00000000"/>'
+        '<rgbColor rgb="00FFFFFF"/><rgbColor rgb="00FF0000"/><rgbColor rgb="0000FF00"/>'
+        '<rgbColor rgb="000000FF"/><rgbColor rgb="00FFFF00"/><rgbColor rgb="00FF00FF"/>'
+        '<rgbColor rgb="0000FFFF"/><rgbColor rgb="00800000"/><rgbColor rgb="00008000"/>'
+        '<rgbColor rgb="00000080"/><rgbColor rgb="00808000"/><rgbColor rgb="00800080"/>'
+        '<rgbColor rgb="00008080"/><rgbColor rgb="00C0C0C0"/><rgbColor rgb="00808080"/>'
+        '<rgbColor rgb="009999FF"/><rgbColor rgb="00993366"/><rgbColor rgb="00FFFFCC"/>'
+        '<rgbColor rgb="00CCFFFF"/><rgbColor rgb="00660066"/><rgbColor rgb="00FF8080"/>'
+        '<rgbColor rgb="000066CC"/><rgbColor rgb="00CCCCFF"/><rgbColor rgb="00000080"/>'
+        '<rgbColor rgb="00FF00FF"/><rgbColor rgb="00FFFF00"/><rgbColor rgb="0000FFFF"/>'
+        '<rgbColor rgb="00800080"/><rgbColor rgb="00800000"/><rgbColor rgb="00008080"/>'
+        '<rgbColor rgb="000000FF"/><rgbColor rgb="0000CCFF"/><rgbColor rgb="00CCFFFF"/>'
+        '<rgbColor rgb="00CCFFCC"/><rgbColor rgb="00FFFF99"/><rgbColor rgb="0099CCFF"/>'
+        '<rgbColor rgb="00FF99CC"/><rgbColor rgb="00CC99FF"/><rgbColor rgb="00FFCC99"/>'
+        '<rgbColor rgb="003366FF"/><rgbColor rgb="0033CCCC"/><rgbColor rgb="0099CC00"/>'
+        '<rgbColor rgb="00FFCC00"/><rgbColor rgb="00FF9900"/><rgbColor rgb="00FF6600"/>'
+        '<rgbColor rgb="00666699"/><rgbColor rgb="00969696"/><rgbColor rgb="00003366"/>'
+        '<rgbColor rgb="00339966"/><rgbColor rgb="00003300"/><rgbColor rgb="00333300"/>'
+        '<rgbColor rgb="00993300"/><rgbColor rgb="00993366"/><rgbColor rgb="00333399"/>'
+        '<rgbColor rgb="00333333"/>'
+        "</indexedColors></colors>",
         "</styleSheet>",
     ]
     return "".join(xml).encode("utf-8")
@@ -606,7 +671,6 @@ def shift_drawing_rows(drawing_xml: bytes, delta: int, min_row_0based: int = 0) 
 
 
 def polish_charts(parts: dict[str, bytes]) -> None:
-    range_colors = ["15803D", "22C55E", "EAB308", "F87171", "DC2626"]
     title_rpr = (
         '<a:rPr sz="1050" b="1">'
         '<a:solidFill><a:srgbClr val="0F2942"/></a:solidFill>'
@@ -624,19 +688,14 @@ def polish_charts(parts: dict[str, bytes]) -> None:
         xml = xml.replace('srgbClr val="48C9B0"', 'srgbClr val="0D9488"')
         xml = xml.replace('srgbClr val="5DADE2"', 'srgbClr val="2563EB"')
         xml = xml.replace('<a:ln w="25000">', '<a:ln w="28575">')
-        # RSRP ranges chart: per-point colours
+        # Recolor series fill only. Do not inject <dPt> after <val> — wrong CT_Ser
+        # child order makes Excel report the workbook as corrupt.
         if "RSRP ranges (dBm)" in xml and "C0392B" in xml:
-            dpts = []
-            for i, color in enumerate(range_colors):
-                dpts.append(
-                    f'<dPt><idx val="{i}"/><spPr><a:solidFill><a:srgbClr val="{color}"/></a:solidFill></spPr></dPt>'
-                )
             xml = xml.replace(
                 '<spPr><a:solidFill><a:srgbClr val="C0392B"/></a:solidFill>',
                 '<spPr><a:solidFill><a:srgbClr val="15803D"/></a:solidFill>',
                 1,
             )
-            xml = xml.replace("</ser>", "".join(dpts) + "</ser>", 1)
         parts[name] = xml.encode("utf-8")
 
 
@@ -1541,48 +1600,38 @@ def transform_bad_spot_sheet(sheet: ET.Element, mode: str, count: int) -> None:
                         c.set("s", str(S["kpi_float_g"] if zebra else S["kpi_float_w"]))
                     else:
                         c.set("s", str(S["wrap_g"] if zebra else S["wrap_w"]))
-        # merge Final Solution Q:V
-        merges = [m for m in collect_merges(sheet) if not re.search(r"[A-Z]+(\d+)", m) or True]
-        # rebuild merges: keep non-summary, add Q:V for data rows
-        kept = []
+        # rebuild merges: preferred banners first, then body merges, then summary Q:V
+        # v1.91/v1.92 left A1:W1 + A1:V1 (and A4:W7 / A4:W4) overlapping — Excel rejects that.
+        kept: list[str] = ["A1:V1", "A2:V2", "A4:V4"]
+        header_set = set(headers)
         for m in collect_merges(sheet):
-            # drop old X merges / E merges in summary area and A4:W7 remnants already shifted
-            nums = [int(x) for x in re.findall(r"\d+", m)]
-            if nums and min(nums) >= summary_header:
-                continue
-            kept.append(m)
-        kept.extend(["A1:V1", "A2:V2", "A4:V4"])
-        for r in headers:
-            # extend bad spot header across to Q
-            kept = [m for m in kept if not m.startswith(f"A{r}:")]
-            kept.append(f"A{r}:Q{r}")
-        for r in range(summary_header + 1, summary_header + 1 + count):
-            kept.append(f"Q{r}:V{r}")
-        # also keep description merges (shifted already)
-        # re-add all existing non-conflicting description merges
-        existing = collect_merges(sheet)
-        for m in existing:
             nums = [int(x) for x in re.findall(r"\d+", m)]
             if not nums:
                 continue
             if min(nums) >= summary_header:
                 continue
-            if m in kept:
+            # drop old title / methodology / pre-shift combined-header merges in rows 1–4
+            if m.startswith("A") and min(nums) <= 4:
                 continue
-            # skip old banner merges we'll replace
-            if m in ("A1:W1", "A2:W2", "A3:W3", "A4:W7", "A9:W9", "A1:V1", "A2:V2", "A4:V4"):
+            if m in ("A1:W1", "A2:W2", "A3:W3", "A4:W7", "A9:W9", "A4:W4", "A1:V1", "A2:V2", "A4:V4"):
                 continue
-            if re.match(r"A\d+:H\d+$", m) and int(re.findall(r"\d+", m)[0]) in headers:
-                continue
+            if re.match(r"A\d+:[A-Z]+\d+$", m):
+                top = int(re.findall(r"\d+", m)[0])
+                if top in header_set:
+                    continue
             kept.append(m)
-        # unique preserve order
-        seen = set()
-        uniq = []
+        for r in headers:
+            kept.append(f"A{r}:Q{r}")
+        for r in range(summary_header + 1, summary_header + 1 + count):
+            kept.append(f"Q{r}:V{r}")
+        seen: set[str] = set()
+        uniq: list[str] = []
         for m in kept:
             if m not in seen:
                 seen.add(m)
                 uniq.append(m)
         set_merges(sheet, uniq)
+        sanitize_merges(sheet)
 
     # normalize Q width
     cols = sheet.find(q("cols"))
@@ -1607,6 +1656,8 @@ def transform_bad_spot_sheet(sheet: ET.Element, mode: str, count: int) -> None:
                 el.set("max", str(cidx))
                 el.set("width", "13")
                 el.set("customWidth", "1")
+
+    sanitize_merges(sheet)
 
 
 def transform_drawing_vs(drawing: bytes) -> bytes:
@@ -1636,8 +1687,9 @@ def transform_drawing_cover(drawing: bytes) -> bytes:
 
 
 def sheet_xml_bytes(sheet: ET.Element) -> bytes:
-    # ET may omit default ns prefix formatting; serialize carefully
-    return ET.tostring(sheet, encoding="utf-8", xml_declaration=True)
+    # Match Excel-friendly declaration (double quotes, standalone).
+    body = ET.tostring(sheet, encoding="utf-8")
+    return b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + body
 
 
 def publish(src: Path, dest: Path) -> Path:
@@ -1811,21 +1863,40 @@ def verify(path: Path) -> list[str]:
             problems.append(f"cover duplicate merges {len(merges)-len(set(merges))}")
         if len(merges) > 400:
             problems.append(f"cover merges still high: {len(merges)}")
+        # overlapping merges make Excel report the file as corrupt
+        for name in zf.namelist():
+            if not name.startswith("xl/worksheets/sheet") or not name.endswith(".xml"):
+                continue
+            root = ET.fromstring(zf.read(name))
+            refs = [m.get("ref") for m in root.findall(f".//{{{NS_MAIN}}}mergeCell")]
+            bounds = []
+            for ref in refs:
+                b = parse_merge_bounds(ref)
+                if b is None:
+                    problems.append(f"{name}: invalid merge {ref!r}")
+                    continue
+                if any(merges_overlap(b, kb) for _, kb in bounds):
+                    problems.append(f"{name}: overlapping merge {ref}")
+                    break
+                bounds.append((ref, b))
         # chart title runs must not nest <a:r>
         for name in zf.namelist():
             if not name.startswith("xl/charts/chart") or not name.endswith(".xml"):
                 continue
             text = zf.read(name).decode("utf-8")
-            if re.search(r"<a:r>[^<]*<a:r>", text) or "<a:r><a:rPr" in text and "</a:rPr><a:r>" in text:
-                # specifically the v1.91 corruption pattern
-                if "</a:rPr><a:r><a:t>" in text:
-                    problems.append(f"{name}: nested <a:r> title corruption")
+            if "</a:rPr><a:r><a:t>" in text:
+                problems.append(f"{name}: nested <a:r> title corruption")
+            if re.search(r"</val>\s*<dPt>", text):
+                problems.append(f"{name}: dPt after val (invalid ser order)")
+        styles = zf.read("xl/styles.xml").decode("utf-8")
+        if "<colors>" not in styles:
+            problems.append("styles missing <colors>")
     return problems
 
 
 if __name__ == "__main__":
     src = Path("output/Bogura_DriveTest_Report_v1.90.xlsx")
-    dest = Path("output/Bogura_DriveTest_Report_v1.92.xlsx")
+    dest = Path("output/Bogura_DriveTest_Report_v1.93.xlsx")
     publish(src, dest)
     probs = verify(dest)
     print("problems:", probs)
