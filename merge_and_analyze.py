@@ -5716,11 +5716,11 @@ def _spider_keep(bins: list[dict], lat: float, lon: float, wedge: float = 12.0, 
 
 
 def find_feeder_swaps(samples: pd.DataFrame, min_samples: int = 12) -> list[dict]:
-    """Idle sectors whose cells serve each other's area.
+    """Idle sectors whose cells serve another sector of the same site.
 
-    A swap is two sectors of one site. Cells of A are heard in B's direction,
-    and cells of B are heard in A's direction. A sample within 500 m on the
-    back lobe is ignored.
+    A two-sector swap is mutual: cells of A are heard in B's direction, and
+    cells of B are heard in A's direction. A three-sector swap is a rotation:
+    A is heard on B, B on C, and C on A. A sample within 500 m is ignored.
     """
     if samples is None or samples.empty or "Cell Id" not in samples.columns:
         return []
@@ -5778,6 +5778,64 @@ def find_feeder_swaps(samples: pd.DataFrame, min_samples: int = 12) -> list[dict
                 "lon": float(part["slon"].median()),
                 "rows": part,
             })
+        by_sector = {item["sector"]: item for item in sectors}
+
+        def with_arms(record: dict) -> dict:
+            arms = _site_sector_arms(str(site))
+            spiders = {}
+            for arm in arms:
+                part = by_sector.get(arm["sector"])
+                spiders[arm["sector"]] = _spider_keep(
+                    _spider_bins(part["rows"] if part is not None else pd.DataFrame()),
+                    arm["lat"], arm["lon"],
+                )
+            record["arms"] = arms
+            record["spiders"] = spiders
+            return record
+
+        cycle = None
+        if len(sectors) == 3:
+            named = [item["sector"] for item in sectors]
+            by_name = {item["sector"]: item for item in sectors}
+            close = all(
+                float(_equirect_km(left["lat"], left["lon"], right["lat"], right["lon"])) <= 0.15
+                for index, left in enumerate(sectors)
+                for right in sectors[index + 1:]
+            )
+            if close:
+                best = None
+                for order in (tuple(named), (named[0], named[2], named[1])):
+                    x, y, z = order
+                    heard_xy = toward(by_name[x]["rows"], by_name[y]["az"], by_name[x]["az"])
+                    heard_yz = toward(by_name[y]["rows"], by_name[z]["az"], by_name[y]["az"])
+                    heard_zx = toward(by_name[z]["rows"], by_name[x]["az"], by_name[z]["az"])
+                    if min(len(heard_xy), len(heard_yz), len(heard_zx)) < min_samples:
+                        continue
+                    score = len(heard_xy) + len(heard_yz) + len(heard_zx)
+                    if best is None or score > best[0]:
+                        best = (score, order, heard_xy, heard_yz, heard_zx)
+                if best is not None:
+                    _score, order, heard_xy, heard_yz, heard_zx = best
+                    x, y, z = order
+                    cycle = with_arms({
+                        "kind": "cycle",
+                        "site": str(site),
+                        "cycle": [x, y, z],
+                        "a": x,
+                        "b": y,
+                        "c": z,
+                        "a_az": by_name[x]["az"],
+                        "b_az": by_name[y]["az"],
+                        "c_az": by_name[z]["az"],
+                        "lat": by_name[x]["lat"],
+                        "lon": by_name[x]["lon"],
+                        "a_n": int(len(heard_xy)),
+                        "b_n": int(len(heard_yz)),
+                        "c_n": int(len(heard_zx)),
+                    })
+        if cycle is not None:
+            swaps.append(cycle)
+            continue
         for index, left in enumerate(sectors):
             for right in sectors[index + 1:]:
                 if float(_equirect_km(left["lat"], left["lon"], right["lat"], right["lon"])) > 0.15:
@@ -5786,16 +5844,8 @@ def find_feeder_swaps(samples: pd.DataFrame, min_samples: int = 12) -> list[dict
                 right_in_left = toward(right["rows"], left["az"], right["az"])
                 if len(left_in_right) < min_samples or len(right_in_left) < min_samples:
                     continue
-                arms = _site_sector_arms(str(site))
-                by_sector = {item["sector"]: item for item in sectors}
-                spiders = {}
-                for arm in arms:
-                    part = by_sector.get(arm["sector"])
-                    spiders[arm["sector"]] = _spider_keep(
-                        _spider_bins(part["rows"] if part is not None else pd.DataFrame()),
-                        arm["lat"], arm["lon"],
-                    )
-                swaps.append({
+                swaps.append(with_arms({
+                    "kind": "pair",
                     "site": str(site),
                     "a": left["sector"],
                     "b": right["sector"],
@@ -5807,11 +5857,81 @@ def find_feeder_swaps(samples: pd.DataFrame, min_samples: int = 12) -> list[dict
                     "b_n": int(len(right_in_left)),
                     "a_points": left_in_right[["lat", "lon", "name", "dist"]].to_dict("records"),
                     "b_points": right_in_left[["lat", "lon", "name", "dist"]].to_dict("records"),
-                    "arms": arms,
-                    "spiders": spiders,
+                }))
+    pairs = [item for item in swaps if item.get("kind") != "cycle"]
+    cycles = [item for item in swaps if item.get("kind") == "cycle"]
+    pairs.sort(key=lambda item: -(item["a_n"] + item["b_n"]))
+    cycles.sort(key=lambda item: -(item["a_n"] + item["b_n"] + item.get("c_n", 0)))
+    return pairs + cycles
+
+
+def feeder_palette(swap: dict) -> dict[str, str]:
+    """Arm colour. A rotation colours all three sectors. A pair leaves the third yellow."""
+    if swap.get("kind") == "cycle":
+        colors = ("#FF2D2D", "#00E5FF", "#D500F9")
+        return {name: colors[index] for index, name in enumerate(swap["cycle"])}
+    return {swap["a"]: "#FF2D2D", swap["b"]: "#00E5FF"}
+
+
+def feeder_title(swap: dict) -> str:
+    if swap.get("kind") == "cycle":
+        order = list(swap["cycle"])
+        return f"{order[0]} → {order[1]} → {order[2]}"
+    return f"{swap['a']}  ↔  {swap['b']}"
+
+
+def feeder_web_payload(swaps: list[dict]) -> list[dict]:
+    """Compact feeder-swap records for the web map."""
+    payload: list[dict] = []
+    for swap in swaps:
+        palette = feeder_palette(swap)
+        kind = "cycle" if swap.get("kind") == "cycle" else "pair"
+        if kind == "cycle":
+            order = list(swap["cycle"])
+            counts = [int(swap["a_n"]), int(swap["b_n"]), int(swap["c_n"])]
+        else:
+            order = [swap["a"], swap["b"]]
+            counts = {swap["a"]: int(swap["a_n"]), swap["b"]: int(swap["b_n"])}
+        arms_out = []
+        for arm in swap.get("arms") or []:
+            sector = arm["sector"]
+            if kind == "cycle":
+                index = order.index(sector)
+                heard = f"{counts[index]} on {order[(index + 1) % 3]}"
+                role = "3-sector swap"
+            elif sector in counts:
+                heard = str(counts[sector])
+                role = "Swap"
+            else:
+                heard = ""
+                role = "Third sector"
+            arms_out.append({
+                "sector": sector,
+                "az": round(float(arm["az"]), 1),
+                "color": palette.get(sector, "#FFE14A"),
+                "pci": [int(value) for value in (arm.get("pcis") or [])],
+                "heard": heard,
+                "role": role,
+            })
+        lines = []
+        for sector, bins in (swap.get("spiders") or {}).items():
+            color = palette.get(sector, "#FFE14A")
+            for item in bins:
+                lines.append({
+                    "color": color,
+                    "lat": round(float(item["lat"]), 6),
+                    "lon": round(float(item["lon"]), 6),
                 })
-    swaps.sort(key=lambda item: -(item["a_n"] + item["b_n"]))
-    return swaps
+        payload.append({
+            "site": swap["site"],
+            "lat": round(float(swap["lat"]), 6),
+            "lon": round(float(swap["lon"]), 6),
+            "kind": kind,
+            "title": feeder_title(swap),
+            "arms": arms_out,
+            "lines": lines,
+        })
+    return payload
 
 
 def plot_feeder_swap_map(idle: pd.DataFrame, swap: dict, path: Path) -> Path:
@@ -5824,9 +5944,9 @@ def plot_feeder_swap_map(idle: pd.DataFrame, swap: dict, path: Path) -> Path:
         ]
     spiders = swap.get("spiders") or {}
     drawn: list[tuple[dict, str, list[dict]]] = []
-    # The two swapped sectors take red and blue. The remaining sector stays gold.
-    # Yellow stays. Red and cyan are bright enough to read on the satellite photo.
-    palette = {swap["a"]: "#FF2D2D", swap["b"]: "#00E5FF"}
+    # A pair uses red and cyan. The remaining sector stays yellow.
+    # A three-sector rotation colours every arm: red, cyan, then violet.
+    palette = feeder_palette(swap)
     for arm in arms:
         color = palette.get(arm["sector"], "#FFE14A")
         drawn.append((arm, color, list(spiders.get(arm["sector"]) or [])))
@@ -5925,11 +6045,19 @@ def plot_feeder_swap_map(idle: pd.DataFrame, swap: dict, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=110)
     plt.close(fig)
-    third = [arm["sector"] for arm, color, _bins in drawn if color == "#FFE14A"]
-    note = f"{swap['a']} red   ·   {swap['b']} cyan"
-    if third:
-        note += f"   ·   {third[0]} yellow   ·   PCI on the arm and on the road"
-    _paint_swap_caption(path, f"{swap['a']}  ↔  {swap['b']}", note)
+    if swap.get("kind") == "cycle":
+        words = ("red", "cyan", "violet")
+        order = list(swap["cycle"])
+        note = "3-sector rotation. " + "   ·   ".join(
+            f"{name} {words[index]}" for index, name in enumerate(order)
+        )
+    else:
+        third = [arm["sector"] for arm, color, _bins in drawn if color == "#FFE14A"]
+        note = f"{swap['a']} red   ·   {swap['b']} cyan"
+        if third:
+            note += f"   ·   {third[0]} yellow"
+    note += "   ·   PCI on the arm and on the road"
+    _paint_swap_caption(path, feeder_title(swap), note)
     return path
 
 

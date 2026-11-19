@@ -90,7 +90,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.88"
+REPORT_VERSION = "1.89"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -3212,34 +3212,67 @@ def _rescale_ellipses(drawing: str, sheet_xml: str, scales: list[dict]) -> str:
     return re.sub(r"<oneCellAnchor>.*?</oneCellAnchor>", place, drawing, flags=re.S)
 
 
+def feeder_summary_rows(swaps: list[dict]) -> list[dict]:
+    """One summary row per sector, in the same order as the feeder maps."""
+    rows: list[dict] = []
+    for swap in swaps:
+        arms = {arm["sector"]: arm for arm in (swap.get("arms") or [])}
+
+        def row(sector: str, heard: str, role: str) -> dict:
+            arm = arms.get(sector, {})
+            azimuth = arm.get("az", swap.get("a_az"))
+            pcis = arm.get("pcis") or []
+            return {
+                "site": swap["site"],
+                "sector": sector,
+                "azimuth": f"{int(round(float(azimuth)))}°",
+                "pci": ", ".join(str(int(value)) for value in pcis),
+                "heard": heard,
+                "role": role,
+            }
+
+        if swap.get("kind") == "cycle":
+            order = list(swap["cycle"])
+            counts = [swap["a_n"], swap["b_n"], swap["c_n"]]
+            for index, sector in enumerate(order):
+                nxt = order[(index + 1) % 3]
+                rows.append(row(sector, f"{counts[index]} on {nxt}", "3-sector swap"))
+            continue
+        rows.append(row(swap["a"], str(swap["a_n"]), "Swap"))
+        rows.append(row(swap["b"], str(swap["b_n"]), "Swap"))
+        for sector in arms:
+            if sector not in (swap["a"], swap["b"]):
+                rows.append(row(sector, "", "Third sector"))
+    return rows
+
+
 def _feeder_sheet_xml(titles: list[str], picture_rows: list[int], summary: list[dict] | None = None) -> bytes:
     rows = [
         f'<row r="1" ht="24" customHeight="1">{_inline_cell("A1", 5, "Feeder swap")}</row>',
         (
-            '<row r="2" ht="32" customHeight="1">'
+            '<row r="2" ht="36" customHeight="1">'
             + _inline_cell(
                 "A2", 34,
-                "Idle mode only. Two sectors of one site, each heard in the other's forward area. "
-                "A sample within 500 m is left out, so a backlobe next to the site is not counted.",
+                "Idle mode only. Two sectors of one site, each heard in the other's forward area, "
+                "or all three sectors heard in a rotation. A sample within 500 m is left out.",
             )
             + "</row>"
         ),
         (
-            '<row r="3" ht="32" customHeight="1">'
+            '<row r="3" ht="36" customHeight="1">'
             + _inline_cell(
                 "A3", 34,
-                "Each site keeps three arms. The two swapped sectors are red and cyan. The third arm is yellow. "
-                "Dashed lines use that same colour and run out to the samples the sector serves, including behind the azimuth. "
-                "The arm label is the sector and its PCI values.",
+                "Each site keeps three arms. A two-sector swap is red and cyan, and the third arm is yellow. "
+                "A three-sector rotation uses red, cyan and violet. Dashes match the arm and run out to where that sector serves, including behind the azimuth.",
             )
             + "</row>"
         ),
         (
-            '<row r="4" ht="32" customHeight="1">'
+            '<row r="4" ht="36" customHeight="1">'
             + _inline_cell(
                 "A4", 34,
-                "SGULP07 was checked. SGULP07A serves its own north road and SGULP07B serves its own south road, "
-                "so that site is not a feeder swap.",
+                "BOSDR02 is a three-sector rotation: A is heard on C, C on B, and B on A. "
+                "SGULP07A serves its own north road and SGULP07B serves its own south road, so that site is not a swap.",
             )
             + "</row>"
         ),

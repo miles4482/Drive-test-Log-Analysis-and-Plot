@@ -26,11 +26,11 @@ from pptx.util import Emu, Inches, Pt
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
-REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.88.xlsx"
+REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.89.xlsx"
 IDLE_NOTES = OUTPUT / "idle_vs_active_notes.json"
 PLOTS = OUTPUT / "plots"
 DESCRIPTIONS = OUTPUT / "bad_spot_descriptions.json"
-SUMMARY_VERSION = "1.88"
+SUMMARY_VERSION = "1.89"
 DEST = OUTPUT / f"Bogura_DriveTest_Summary_v{SUMMARY_VERSION}.pptx"
 CIRCLES = PLOTS / "bad_spot_circles.json"
 
@@ -295,7 +295,7 @@ def _text(slide, left, top, width, height, text: str, size: int, color: RGBColor
 def _footer(slide, page: int, pages: int) -> None:
     _text(
         slide, Inches(0.4), Inches(7.18), Inches(10), Inches(0.24),
-        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.88  ·  Web v1.73",
+        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.89  ·  Web v1.89",
         11, MUTED,
     )
     _text(
@@ -954,9 +954,9 @@ def _annex_workbook(prs: Presentation, page: int, pages: int, groups: list[dict]
     if partial:
         deck += "Samples: " + ", ".join(partial) + "."
     rows = [
-        ("Excel v1.88", "On Bad Spot RSRP_Active a short gap sits under each active map so its legend stays visible, and the idle circle is the same dashed orange as the active circle. On Active Bad Spot 4 the circle shifts so the blank just east of the intersection is inside it, and the green road beyond that blank stays outside. The map has the same header, legend and dashed circle as the Excel sheet. The circle covers the red samples, with a small margin. On an Active bad spot the idle map is the same size and the same window as the active map, and both maps are smaller so the sheet is easier to read. The yellow dashed serving lines are the same lines as the active map. A blue dash is an idle serving cell that is different. A note compares the two. The description sits just to the right of that map. The Feeder swap sheet keeps three arms. Yellow stays. The other two arms are bright red and bright cyan so they show on the satellite photo, and the dashes use that same colour. Each PCI is repeated along those dashes until that cell stops serving. On an Active bad spot the idle map sits just under the active map, with a short gap so the legend shows. Both circles are orange. A summary of the swaps sits at the top of that sheet. A sample within 500 m is left out. Active is on the left of the KPI sheets and Idle is on the right. A downtilt of a far cell is not the cover for a red run. That run gets an uptilt, an azimuth turn, or a 4th L900 when no L900 inside 2 km already faces it. The parameter table lists azimuth and tilt changes. A new site leaves Existing blank and fills New Plan."),
+        ("Excel v1.89", "The Feeder swap sheet now includes BOSDR02, a three-sector rotation: A is heard on C, C on B, and B on A. All three arms are coloured red, cyan and violet. A two-sector swap stays red and cyan, and its third arm stays yellow. On Bad Spot RSRP_Active a short gap sits under each active map so its legend stays visible, and both circles are dashed orange. A sample within 500 m is left out of a feeder swap. Each PCI is repeated along its dashes until that cell stops serving."),
         ("This deck", deck),
-        ("Web v1.69", "The live map is unchanged. Site names are white with a dark edge. Sector names on that map stay small. With KPI set to Blank, Info on a sector or the site centre opens the cell table."),
+        ("Web v1.89", "Feeder draws the idle feeder swaps. Click a site for the sectors. A three-sector rotation uses red, cyan and violet. A two-sector swap stays red and cyan, with the third arm yellow. Site names stay white with a dark edge."),
         ("RSRQ and SINR", "The coverage maps are in this deck. The workbook no longer has separate RSRQ or SINR bad-spot sheets. Poor RSRQ is at or below −20 dB. Poor SINR is at or below 0 dB."),
     ]
     top = 0.95
@@ -965,6 +965,33 @@ def _annex_workbook(prs: Presentation, page: int, pages: int, groups: list[dict]
         _text(slide, Inches(0.58), Inches(top + 0.18), Inches(2.5), Inches(1.0), label, 16, NAVY, True, anchor=MSO_ANCHOR.MIDDLE)
         _text(slide, Inches(3.2), Inches(top + 0.16), Inches(9.4), Inches(1.05), body, 15, INK, anchor=MSO_ANCHOR.MIDDLE)
         top += 1.48
+    _footer(slide, page, pages)
+
+
+def _feeder(prs: Presentation, page: int, pages: int) -> None:
+    """One slide for the idle feeder swaps, with the three-sector rotation beside the list."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _heading(slide, "Feeder swap  ·  idle mode")
+    _text(
+        slide, Inches(0.36), Inches(0.68), Inches(12.6), Inches(0.48),
+        "Two sectors count when each is heard in the other's area. Three sectors count when that hearing goes around the site. A sample within 500 m is left out.",
+        14, MUTED,
+    )
+    image = PLOTS / "feeder" / "BOSDR02.png"
+    if not image.exists():
+        raise SystemExit(f"Missing {image}")
+    slide.shapes.add_picture(str(image), Inches(0.28), Inches(1.22), Inches(7.15), Inches(5.7))
+    payload = json.loads((OUTPUT / "feeder_swaps.json").read_text())
+    top = 1.22
+    for item in payload:
+        cycle = item.get("kind") == "cycle"
+        _box(slide, Inches(7.6), Inches(top), Inches(5.35), Inches(0.84), PAPER, LINE)
+        if cycle:
+            _box(slide, Inches(7.6), Inches(top), Inches(0.08), Inches(0.84), RGBColor(0xD5, 0x00, 0xF9))
+        label = "3-sector rotation" if cycle else "2-sector swap"
+        _text(slide, Inches(7.82), Inches(top + 0.06), Inches(5.0), Inches(0.28), f"{item['site']}   ·   {label}", 13, NAVY, True)
+        _text(slide, Inches(7.82), Inches(top + 0.36), Inches(5.0), Inches(0.4), item["title"], 12, INK)
+        top += 0.9
     _footer(slide, page, pages)
 
 
@@ -1019,8 +1046,8 @@ def build() -> Path:
         raise SystemExit("Missing example data: " + ", ".join(missing))
 
     example_count = sum(len(group["items"]) for group in groups)
-    # cover, 3 KPI, bad-spot summary, examples, annex, 6 annex detail slides
-    pages = 1 + len(KPI_SLIDES) + 1 + example_count + 1 + 6
+    # cover, 3 KPI, bad-spot summary, examples, feeder, annex, 6 annex detail slides
+    pages = 1 + len(KPI_SLIDES) + 1 + example_count + 1 + 1 + 6
     prs = Presentation()
     prs.slide_width = Inches(13.333)
     prs.slide_height = Inches(7.5)
@@ -1037,6 +1064,8 @@ def build() -> Path:
         for ordinal, item in enumerate(group["items"], start=1):
             _example(prs, group, item, rows[(group["mode"], item["n"])], ordinal, page, pages)
             page += 1
+    _feeder(prs, page, pages)
+    page += 1
     _annex(prs, page, pages)
     page += 1
     _annex_off_angle(prs, page, pages)

@@ -138,9 +138,21 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
+## Download Excel report (v1.89)
+
+**v1.89 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.89.xlsx
+
+The Feeder swap sheet adds BOSDR02. Its three sectors are a rotation: A is heard on C, C on B, and B on A. All three arms are coloured. The five two-sector swaps stay red and cyan, with the third arm yellow. The other sheets are unchanged.
+
+**v1.89 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.89.pptx
+
+**v1.89 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.89.zip
+
+The web map has a Feeder button. It draws these idle swaps. Click a site for the sectors.
+
 ## Download Excel report (v1.88)
 
-**v1.88 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.88.xlsx
+**v1.88:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.88.xlsx
 
 On Bad Spot RSRP_Active a short gap sits under each active map so the legend on that map stays visible. The circle on every idle map is the same dashed orange as the circle on the active map. The other sheets are unchanged. The web map stays v1.73.
 

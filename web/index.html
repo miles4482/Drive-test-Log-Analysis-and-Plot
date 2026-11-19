@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bogura Drive Test Web v1.73</title>
+<title>Bogura Drive Test Web v1.89</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   html, body { margin: 0; height: 100%; font-family: "Segoe UI", Calibri, sans-serif; color: #1a1a1a; }
@@ -106,7 +106,7 @@
 <body>
 <div id="app">
   <header>
-    <h1>Bogura coverage v1.73</h1>
+    <h1>Bogura coverage v1.89</h1>
     <label>Windows
       <select id="split">
         <option value="1" selected>1</option>
@@ -116,6 +116,7 @@
       </select>
     </label>
     <button type="button" id="info">Info</button>
+    <button type="button" id="feeder">Feeder</button>
     <span id="status">Click a spot to mark it in every window. Info shows one table.</span>
   </header>
   <div id="stage" class="n1"></div>
@@ -123,6 +124,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="coverage_data.js"></script>
 <script src="bad_spot_descriptions.js"></script>
+<script src="feeder_swaps.js"></script>
 <script>
 const RSRP_COLORS = ["#008000", "#00FF00", "#FFFF00", "#FF6666", "#FF0000"];
 const RSRP_LABELS = ["-95 to 0", "-110 to -95", "-115 to -110", "-120 to -115", "-150 to -120"];
@@ -569,6 +571,7 @@ function combinePacks(packs) {
 }
 
 let infoOn = false;
+let feederOn = false;
 
 function bandwidthText(value) {
   const n = Number(value);
@@ -1243,6 +1246,48 @@ function createView(host, preset) {
   map.on("dblclick", onMapDblClick);
   map.on("mousemove", onMapMove);
 
+  let feederLayer = null;
+  function destinationKm(lat, lon, azimuth, km) {
+    const rad = azimuth * Math.PI / 180;
+    const dlat = km * Math.cos(rad) / 111.32;
+    const dlon = km * Math.sin(rad) / (111.32 * Math.cos(lat * Math.PI / 180));
+    return [lat + dlat, lon + dlon];
+  }
+  function feederPopup(swap) {
+    const rows = (swap.arms || []).map(function (arm) {
+      const pci = (arm.pci || []).join(", ");
+      const heard = arm.heard ? (" · " + arm.heard) : "";
+      return "<div><span class=\"swatch\" style=\"background:" + arm.color + "\"></span>" +
+        esc(arm.sector) + " " + esc(arm.az) + "°" +
+        (pci ? " · PCI " + esc(pci) : "") + esc(heard) + " · " + esc(arm.role) + "</div>";
+    }).join("");
+    const head = swap.kind === "cycle" ? "3-sector rotation" : "2-sector swap";
+    return "<h2>" + esc(swap.site) + " · " + head + "</h2><div>" + esc(swap.title) + "</div>" + rows;
+  }
+  function drawFeeder() {
+    if (feederLayer) {
+      map.removeLayer(feederLayer);
+      feederLayer = null;
+    }
+    if (!feederOn || typeof FEEDER_SWAPS === "undefined") return;
+    feederLayer = L.layerGroup().addTo(map);
+    FEEDER_SWAPS.forEach(function (swap) {
+      (swap.lines || []).forEach(function (line) {
+        const pts = [[swap.lat, swap.lon], [line.lat, line.lon]];
+        L.polyline(pts, { color: "#141414", weight: 5, dashArray: "7 5", interactive: false }).addTo(feederLayer);
+        L.polyline(pts, { color: line.color, weight: 2.5, dashArray: "7 5", interactive: false }).addTo(feederLayer);
+      });
+      (swap.arms || []).forEach(function (arm) {
+        const tip = destinationKm(swap.lat, swap.lon, arm.az, 0.72);
+        L.polyline([[swap.lat, swap.lon], tip], { color: "#141414", weight: 7, interactive: false }).addTo(feederLayer);
+        L.polyline([[swap.lat, swap.lon], tip], { color: arm.color, weight: 4, interactive: false }).addTo(feederLayer);
+      });
+      L.circleMarker([swap.lat, swap.lon], {
+        radius: 7, color: "#111", weight: 2, fillColor: "#ffffff", fillOpacity: 1
+      }).bindPopup(feederPopup(swap), { maxWidth: 420 }).addTo(feederLayer);
+    });
+  }
+
   const api = {
     host: host,
     map: map,
@@ -1268,6 +1313,7 @@ function createView(host, preset) {
       };
     },
     applyPreset: applyPreset,
+    setFeeder: function () { drawFeeder(); },
     closeMenu: function (target) {
       const menu = q(".menu");
       if (menu.contains(target)) return;
@@ -1280,6 +1326,7 @@ function createView(host, preset) {
     }
   };
   if (preset) applyPreset(preset);
+  if (feederOn) drawFeeder();
   map.on("moveend", function () {
     showLatLong();
     broadcastView(api);
@@ -1341,6 +1388,21 @@ document.getElementById("info").addEventListener("click", function () {
     if (!infoOn) view.clearInfo();
     view.draw();
   });
+});
+document.getElementById("feeder").addEventListener("click", function () {
+  feederOn = !feederOn;
+  this.classList.toggle("on", feederOn);
+  views.forEach(function (view) { view.setFeeder(); });
+  const status = document.getElementById("status");
+  if (!feederOn) {
+    status.textContent = "Feeder swaps are off.";
+    return;
+  }
+  status.textContent = "Feeder swaps are on. Click a site. Red and cyan are a two-sector swap. Violet joins them on a three-sector rotation.";
+  if (views[0] && typeof FEEDER_SWAPS !== "undefined" && FEEDER_SWAPS.length) {
+    const focus = FEEDER_SWAPS.filter(function (swap) { return swap.kind === "cycle"; })[0] || FEEDER_SWAPS[0];
+    views[0].map.setView([focus.lat, focus.lon], 14);
+  }
 });
 document.addEventListener("click", function (ev) {
   views.forEach(function (view) { view.closeMenu(ev.target); });

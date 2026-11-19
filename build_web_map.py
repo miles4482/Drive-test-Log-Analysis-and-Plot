@@ -445,6 +445,12 @@ def package_web() -> Path:
             '<script src="bad_spot_descriptions.js"></script>',
             "<script>\n" + descriptions.read_text() + "</script>",
         )
+    feeder = WEB_DIR / "feeder_swaps.js"
+    if feeder.exists():
+        page = page.replace(
+            '<script src="feeder_swaps.js"></script>',
+            "<script>\n" + feeder.read_text() + "</script>",
+        )
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     dest = OUTPUT_DIR / f"Bogura_DriveTest_Web_v{version}.zip"
     inner = f"Bogura_DriveTest_Web_v{version}.html"
