@@ -90,7 +90,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.91"
+REPORT_VERSION = "1.92"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -4168,7 +4168,10 @@ def publish_report_v190(src: Path, dest: Path, extra_in: float = 0.20) -> Path:
 
 
 def publish_report_v191(src: Path, dest: Path) -> Path:
-    """Gemini 4 Neon executive restyle across every sheet, preserving maps and circles."""
+    """Gemini 4 Neon executive restyle across every sheet, preserving maps and circles.
+
+    Also used for v1.92 (same transform; chart title rPr nesting fixed).
+    """
     from publish_report_v191 import publish
 
     path = publish(src, dest)

@@ -138,9 +138,15 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
+## Download Excel report (v1.92)
+
+**v1.92 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.92.xlsx
+
+Same Neon restyle as v1.91, with a chart XML fix so Excel opens the file. Title runs keep valid `<a:r>` markup. Maps, movable circles, and the 0.40 inch active-to-idle gap stay as they were. The summary stays v1.89 and the web map stays v1.89.
+
 ## Download Excel report (v1.91)
 
-**v1.91 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.91.xlsx
+**v1.91:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.91.xlsx
 
 Every sheet is restyled for a cleaner executive look. Instruction notes such as “How to read this workbook”, “Gridlines off”, and the long bad-spot methodology paragraphs are removed. Section bars, table headers, parameter cards, and solution badges use a navy / slate / teal palette. Maps, movable circles, and the 0.40 inch active-to-idle gap stay as they were. The summary stays v1.89 and the web map stays v1.89.
 

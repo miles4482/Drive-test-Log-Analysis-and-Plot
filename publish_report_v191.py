@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish Bogura Drive-Test Report v1.91 from v1.90.
+"""Publish Bogura Drive-Test Report v1.92 from v1.90 (Neon restyle; chart XML fixed).
 
 Gemini 4 Neon (xhigh) design: strip clutter notes, replace harsh yellow section
 bars, restyle banners/tables/cards, keep every map, chart, and movable circle.
@@ -607,18 +607,19 @@ def shift_drawing_rows(drawing_xml: bytes, delta: int, min_row_0based: int = 0) 
 
 def polish_charts(parts: dict[str, bytes]) -> None:
     range_colors = ["15803D", "22C55E", "EAB308", "F87171", "DC2626"]
+    title_rpr = (
+        '<a:rPr sz="1050" b="1">'
+        '<a:solidFill><a:srgbClr val="0F2942"/></a:solidFill>'
+        '<a:latin typeface="Segoe UI"/>'
+        "</a:rPr>"
+    )
     for name, data in list(parts.items()):
         if not name.startswith("xl/charts/chart") or not name.endswith(".xml"):
             continue
         xml = data.decode("utf-8")
-        # typography
-        xml = re.sub(
-            r"(<a:r><a:t>)",
-            r'<a:r><a:rPr sz="1050" b="1"><a:solidFill><a:srgbClr val="0F2942"/></a:solidFill>'
-            r'<a:latin typeface="Segoe UI"/></a:rPr>\1',
-            xml,
-            count=1,
-        )
+        # Insert rPr inside the first title run: <a:r><a:t>… → <a:r><a:rPr…/><a:t>…
+        # Do NOT wrap another <a:r> (that nested-tag bug made Excel reject v1.91).
+        xml = re.sub(r"(<a:r>)(<a:t>)", rf"\1{title_rpr}\2", xml, count=1)
         # series colour upgrades for KPI vs charts
         xml = xml.replace('srgbClr val="48C9B0"', 'srgbClr val="0D9488"')
         xml = xml.replace('srgbClr val="5DADE2"', 'srgbClr val="2563EB"')
@@ -632,7 +633,7 @@ def polish_charts(parts: dict[str, bytes]) -> None:
                 )
             xml = xml.replace(
                 '<spPr><a:solidFill><a:srgbClr val="C0392B"/></a:solidFill>',
-                "<spPr><a:solidFill><a:srgbClr val=\"15803D\"/></a:solidFill>",
+                '<spPr><a:solidFill><a:srgbClr val="15803D"/></a:solidFill>',
                 1,
             )
             xml = xml.replace("</ser>", "".join(dpts) + "</ser>", 1)
@@ -1716,9 +1717,19 @@ def publish(src: Path, dest: Path) -> Path:
 
 def verify(path: Path) -> list[str]:
     import zipfile
+    from xml.etree import ElementTree as XET
 
     problems = []
     with zipfile.ZipFile(path) as zf:
+        # every XML part must parse (Excel rejects the whole file on one bad chart)
+        for name in zf.namelist():
+            if not name.endswith(".xml") and not name.endswith(".rels"):
+                continue
+            raw = zf.read(name)
+            try:
+                XET.fromstring(raw)
+            except XET.ParseError as exc:
+                problems.append(f"XML parse {name}: {exc}")
         # clutter tokens
         for name in zf.namelist():
             if not name.startswith("xl/worksheets/sheet") or not name.endswith(".xml"):
@@ -1772,17 +1783,12 @@ def verify(path: Path) -> list[str]:
                 row = int(fr.find(f"{{{NS_DRAW}}}row").text)
                 row_off = int(fr.find(f"{{{NS_DRAW}}}rowOff").text)
                 pics.append((nm, row, row_off))
-        actives = sorted([(n, r, o) for n, r, o in pics if n.startswith("Image") or n.startswith("Picture") or True])
-        # pair by vertical order: every active then idle
-        # Use names
         active_pics = [(n, r, o) for n, r, o in pics if n.startswith("Image")]
         idle_pics = [(n, r, o) for n, r, o in pics if n.startswith("Idle")]
         if len(idle_pics) != 99:
             problems.append(f"idle pics {len(idle_pics)}, expected 99")
-        # sort by row
         active_sorted = sorted(active_pics, key=lambda x: x[1])
         idle_sorted = sorted(idle_pics, key=lambda x: x[1])
-        # skip combined view (first image)
         serial_actives = active_sorted[1:]
         if len(serial_actives) != 99:
             problems.append(f"active serial pics {len(serial_actives)}, expected 99")
@@ -1793,26 +1799,33 @@ def verify(path: Path) -> list[str]:
                     bad += 1
             if bad:
                 problems.append(f"active-idle gap mismatch on {bad} spots")
-        # ellipses
         ellipses = d8.count('prst="ellipse"')
         if ellipses != 99:
             problems.append(f"drawing8 ellipses {ellipses}, expected 99")
         d5 = zf.read("xl/drawings/drawing5.xml").decode("utf-8")
         if d5.count('prst="ellipse"') != 26:
             problems.append(f"drawing5 ellipses {d5.count('prst=\"ellipse\"')}, expected 26")
-        # cover merges unique
         cover = ET.fromstring(zf.read("xl/worksheets/sheet1.xml"))
         merges = [m.get("ref") for m in cover.findall(f".//{{{NS_MAIN}}}mergeCell")]
         if len(merges) != len(set(merges)):
             problems.append(f"cover duplicate merges {len(merges)-len(set(merges))}")
         if len(merges) > 400:
             problems.append(f"cover merges still high: {len(merges)}")
+        # chart title runs must not nest <a:r>
+        for name in zf.namelist():
+            if not name.startswith("xl/charts/chart") or not name.endswith(".xml"):
+                continue
+            text = zf.read(name).decode("utf-8")
+            if re.search(r"<a:r>[^<]*<a:r>", text) or "<a:r><a:rPr" in text and "</a:rPr><a:r>" in text:
+                # specifically the v1.91 corruption pattern
+                if "</a:rPr><a:r><a:t>" in text:
+                    problems.append(f"{name}: nested <a:r> title corruption")
     return problems
 
 
 if __name__ == "__main__":
     src = Path("output/Bogura_DriveTest_Report_v1.90.xlsx")
-    dest = Path("output/Bogura_DriveTest_Report_v1.91.xlsx")
+    dest = Path("output/Bogura_DriveTest_Report_v1.92.xlsx")
     publish(src, dest)
     probs = verify(dest)
     print("problems:", probs)
