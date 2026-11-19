@@ -142,7 +142,15 @@ GitHub shows `index.html` as a file, not as a running map. Download the `web` fo
 
 **v1.93 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.93.xlsx
 
-Same Neon restyle as v1.91/v1.92, with overlapping merge cells removed so Excel opens the file. Maps, movable circles, and the 0.40 inch active-to-idle gap stay as they were. The summary stays v1.89 and the web map stays v1.89.
+Same Neon restyle as v1.91/v1.92, with overlapping merge cells removed so Excel opens the file. Maps, movable circles, and the 0.40 inch active-to-idle gap stay as they were. The web map stays v1.89.
+
+## Download summary presentation (v1.93)
+
+**v1.93 summary (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.93.pptx
+
+Rebuilt from Excel v1.93. Footer reads Excel v1.93 and Web v1.89. Heading bars use the Neon navy. The web map stays v1.89.
+
+**v1.89 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.89.pptx
 
 ## Download Excel report (v1.92)
 

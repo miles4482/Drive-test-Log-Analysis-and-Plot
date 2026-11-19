@@ -26,15 +26,16 @@ from pptx.util import Emu, Inches, Pt
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
-REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.89.xlsx"
+REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.93.xlsx"
 IDLE_NOTES = OUTPUT / "idle_vs_active_notes.json"
 PLOTS = OUTPUT / "plots"
 DESCRIPTIONS = OUTPUT / "bad_spot_descriptions.json"
-SUMMARY_VERSION = "1.89"
+SUMMARY_VERSION = "1.93"
 DEST = OUTPUT / f"Bogura_DriveTest_Summary_v{SUMMARY_VERSION}.pptx"
 CIRCLES = PLOTS / "bad_spot_circles.json"
 
-NAVY = RGBColor(0x1B, 0x4F, 0x72)
+# Neon navy to match Excel v1.91+ restyle
+NAVY = RGBColor(0x0F, 0x29, 0x42)
 INK = RGBColor(0x1A, 0x1A, 0x1A)
 MUTED = RGBColor(0x5D, 0x6D, 0x7E)
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)
@@ -295,7 +296,7 @@ def _text(slide, left, top, width, height, text: str, size: int, color: RGBColor
 def _footer(slide, page: int, pages: int) -> None:
     _text(
         slide, Inches(0.4), Inches(7.18), Inches(10), Inches(0.24),
-        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.89  ·  Web v1.89",
+        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.93  ·  Web v1.89",
         11, MUTED,
     )
     _text(
@@ -954,7 +955,7 @@ def _annex_workbook(prs: Presentation, page: int, pages: int, groups: list[dict]
     if partial:
         deck += "Samples: " + ", ".join(partial) + "."
     rows = [
-        ("Excel v1.89", "The Feeder swap sheet now includes BOSDR02, a three-sector rotation: A is heard on C, C on B, and B on A. All three arms are coloured red, cyan and violet. A two-sector swap stays red and cyan, and its third arm stays yellow. On Bad Spot RSRP_Active a short gap sits under each active map so its legend stays visible, and both circles are dashed orange. A sample within 500 m is left out of a feeder swap. Each PCI is repeated along its dashes until that cell stops serving."),
+        ("Excel v1.93", "Neon restyle across every sheet: navy / slate / teal bars, clutter notes removed, and overlapping merges fixed so Excel opens the file. Feeder includes BOSDR02 as a three-sector rotation (red, cyan, violet). On Bad Spot RSRP_Active a 0.40 inch gap sits under each active map so its legend stays visible, and both circles are dashed orange. A sample within 500 m is left out of a feeder swap."),
         ("This deck", deck),
         ("Web v1.89", "Feeder draws the idle feeder swaps. Click a site for the sectors. A three-sector rotation uses red, cyan and violet. A two-sector swap stays red and cyan, with the third arm yellow. Site names stay white with a dark edge."),
         ("RSRQ and SINR", "The coverage maps are in this deck. The workbook no longer has separate RSRQ or SINR bad-spot sheets. Poor RSRQ is at or below −20 dB. Poor SINR is at or below 0 dB."),
