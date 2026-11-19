@@ -138,9 +138,15 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
+## Download Excel report (v1.90)
+
+**v1.90 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.90.xlsx
+
+On Bad Spot RSRP_Active the idle map sits 0.40 inch under the active map, the same clearance the text has beside the map. The active legend stays visible. Every other sheet is unchanged. The summary stays v1.89 and the web map stays v1.89.
+
 ## Download Excel report (v1.89)
 
-**v1.89 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.89.xlsx
+**v1.89:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.89.xlsx
 
 The Feeder swap sheet adds BOSDR02. Its three sectors are a rotation: A is heard on C, C on B, and B on A. All three arms are coloured. The five two-sector swaps stay red and cyan, with the third arm yellow. The other sheets are unchanged.
 

@@ -90,7 +90,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.89"
+REPORT_VERSION = "1.90"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -4141,6 +4141,30 @@ def _move_circle_on_picture(drawing: str, sheet_xml: str, name: str, old: dict, 
         drawing,
         flags=re.S,
     )
+
+
+def publish_report_v190(src: Path, dest: Path, extra_in: float = 0.20) -> Path:
+    """Open the active-to-idle gap on Bad Spot RSRP_Active to match the gap beside the map.
+
+    v1.88 left 0.20 inch. The text beside each map sits about 0.40 inch clear of the
+    picture, so the idle map moves down by the same extra 0.20 inch. Every other
+    sheet stays as it was.
+    """
+    with zipfile.ZipFile(src) as zf:
+        names = zf.namelist()
+        parts = {name: zf.read(name) for name in names}
+    active_sheet = _sheet_part_path(parts, "Bad Spot RSRP_Active")
+    xml = parts[active_sheet].decode("utf-8")
+    parts["xl/drawings/drawing8.xml"] = _open_idle_gap(
+        parts["xl/drawings/drawing8.xml"].decode("utf-8"), xml, int(round(extra_in * 914400)),
+    ).encode("utf-8")
+    tmp = dest.with_suffix(".xlsx.tmp")
+    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name in names:
+            zf.writestr(name, parts[name])
+    tmp.replace(dest)
+    print(f"Wrote {dest} ({dest.stat().st_size / 1e6:.1f} MB)", flush=True)
+    return dest
 
 
 def publish_report_v188(src: Path, dest: Path, idle_pngs: dict[int, Path], gap_in: float = 0.20) -> Path:
