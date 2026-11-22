@@ -45,6 +45,7 @@ from merge_and_analyze import (
     SITE_DB_PATH,
     MAP_RSRP_COLORS,
     MAP_RSRP_LABELS,
+    MAP_RSRP_THRESHOLDS,
     MAP_RSRQ_COLORS,
     MAP_RSRQ_LABELS,
     MAP_SINR_COLORS,
@@ -90,7 +91,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.94"
+REPORT_VERSION = "1.95"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -1026,22 +1027,58 @@ def add_line_chart(ws_data, ws_dest, anchor, title, color, cat_col, data_col, mi
     return chart
 
 
-def write_stacked_hist(ws, start_col, values, fine_bins, class_series, class_labels):
+def align_hist_bins(fine_bins, boundaries) -> np.ndarray:
+    """Insert legend boundaries so a fine bin never straddles two colours."""
+    return np.unique(
+        np.concatenate(
+            [
+                np.asarray(fine_bins, dtype=float),
+                np.asarray(boundaries, dtype=float),
+            ]
+        )
+    )
+
+
+def write_stacked_hist(
+    ws,
+    start_col,
+    values,
+    fine_bins,
+    class_series,
+    class_labels,
+    classify_fn=None,
+):
+    """Write stacked hist with at most one legend colour per x-bin.
+
+    When ``classify_fn`` is set, each fine bin's full sample count goes to the
+    series matching the bin midpoint. That stops boundary bins (e.g. -116 dBm
+    straddling -115) from painting yellow and light-red in the same column.
+    """
     values = pd.to_numeric(values, errors="coerce")
     mask = values.notna()
     values = values[mask]
-    classes = class_series.reindex(values.index).astype(str)
     ws.cell(1, start_col, "bin")
     for j, lab in enumerate(class_labels):
         ws.cell(1, start_col + 1 + j, str(lab))
     lefts = fine_bins[:-1]
-    for i, left in enumerate(lefts, start=2):
-        ws.cell(i, start_col, float(left))
-    for j, lab in enumerate(class_labels):
-        subset = values[classes == str(lab)]
-        counts, _ = np.histogram(subset.to_numpy(), bins=fine_bins)
-        for i, n in enumerate(counts, start=2):
-            ws.cell(i, start_col + 1 + j, int(n))
+    rights = fine_bins[1:]
+    if classify_fn is not None:
+        counts_all, _ = np.histogram(values.to_numpy(), bins=fine_bins)
+        mids = 0.5 * (np.asarray(lefts, dtype=float) + np.asarray(rights, dtype=float))
+        mid_labels = classify_fn(pd.Series(mids)).astype(str).to_numpy()
+        for i, (left, n, lab) in enumerate(zip(lefts, counts_all, mid_labels), start=2):
+            ws.cell(i, start_col, float(left))
+            for j, L in enumerate(class_labels):
+                ws.cell(i, start_col + 1 + j, int(n) if str(lab) == str(L) else 0)
+    else:
+        classes = class_series.reindex(values.index).astype(str)
+        for i, left in enumerate(lefts, start=2):
+            ws.cell(i, start_col, float(left))
+        for j, lab in enumerate(class_labels):
+            subset = values[classes == str(lab)]
+            counts, _ = np.histogram(subset.to_numpy(), bins=fine_bins)
+            for i, n in enumerate(counts, start=2):
+                ws.cell(i, start_col + 1 + j, int(n))
     return {
         "cat_col": start_col,
         "data_min": start_col + 1,
@@ -1052,7 +1089,8 @@ def write_stacked_hist(ws, start_col, values, fine_bins, class_series, class_lab
 
 def write_chart_data(ws: Worksheet, df: pd.DataFrame) -> dict:
     """Hidden sheet holding all series used by Excel charts."""
-    rsrp_bins = np.arange(-140, -48, 2)
+    # Include -95 / -115 so 2 dBm bars do not straddle RSRP legend edges.
+    rsrp_bins = align_hist_bins(np.arange(-140, -48, 2), MAP_RSRP_THRESHOLDS)
     rsrq_bins = np.arange(-24, -2.5, 0.5)
     sinr_bins = np.arange(-15, 31, 1)
 
@@ -1061,9 +1099,15 @@ def write_chart_data(ws: Worksheet, df: pd.DataFrame) -> dict:
     sinr_cls = sinr_map_class(df["SINR"])
 
     blocks = {
-        "RSRP": write_stacked_hist(ws, 26, df["RSRP"], rsrp_bins, rsrp_cls, MAP_RSRP_LABELS),
-        "RSRQ": write_stacked_hist(ws, 35, df["RSRQ"], rsrq_bins, rsrq_cls, MAP_RSRQ_LABELS),
-        "SINR": write_stacked_hist(ws, 41, df["SINR"], sinr_bins, sinr_cls, MAP_SINR_LABELS),
+        "RSRP": write_stacked_hist(
+            ws, 26, df["RSRP"], rsrp_bins, rsrp_cls, MAP_RSRP_LABELS, rsrp_map_class
+        ),
+        "RSRQ": write_stacked_hist(
+            ws, 35, df["RSRQ"], rsrq_bins, rsrq_cls, MAP_RSRQ_LABELS, rsrq_map_class
+        ),
+        "SINR": write_stacked_hist(
+            ws, 41, df["SINR"], sinr_bins, sinr_cls, MAP_SINR_LABELS, sinr_map_class
+        ),
     }
 
     percentiles = list(range(0, 101, 2))
@@ -2085,13 +2129,19 @@ def route_length_km(df: pd.DataFrame) -> float:
 
 def write_active_histograms(ws: Worksheet, df: pd.DataFrame) -> dict:
     """Legend-coloured histogram series for the plotted Active rows."""
-    rsrp_bins = np.arange(-140, -48, 2)
+    rsrp_bins = align_hist_bins(np.arange(-140, -48, 2), MAP_RSRP_THRESHOLDS)
     rsrq_bins = np.arange(-24, -2.5, 0.5)
     sinr_bins = np.arange(-15, 31, 1)
     return {
-        "RSRP": write_stacked_hist(ws, 60, df["RSRP"], rsrp_bins, rsrp_map_class(df["RSRP"]), MAP_RSRP_LABELS),
-        "RSRQ": write_stacked_hist(ws, 68, df["RSRQ"], rsrq_bins, rsrq_map_class(df["RSRQ"]), MAP_RSRQ_LABELS),
-        "SINR": write_stacked_hist(ws, 76, df["SINR"], sinr_bins, sinr_map_class(df["SINR"]), MAP_SINR_LABELS),
+        "RSRP": write_stacked_hist(
+            ws, 60, df["RSRP"], rsrp_bins, rsrp_map_class(df["RSRP"]), MAP_RSRP_LABELS, rsrp_map_class
+        ),
+        "RSRQ": write_stacked_hist(
+            ws, 68, df["RSRQ"], rsrq_bins, rsrq_map_class(df["RSRQ"]), MAP_RSRQ_LABELS, rsrq_map_class
+        ),
+        "SINR": write_stacked_hist(
+            ws, 76, df["SINR"], sinr_bins, sinr_map_class(df["SINR"]), MAP_SINR_LABELS, sinr_map_class
+        ),
     }
 
 
@@ -4170,6 +4220,16 @@ def publish_report_v190(src: Path, dest: Path, extra_in: float = 0.20) -> Path:
 def publish_report_v194(src: Path, dest: Path) -> Path:
     """Excel-openable Neon pass: recolour styles + scrub clutter on v1.90 bytes."""
     from publish_report_v194 import publish
+
+    path = publish(src, dest)
+    if dest.resolve() != REPORT_XLSX.resolve():
+        shutil.copy2(dest, REPORT_XLSX)
+    return path
+
+
+def publish_report_v195(src: Path, dest: Path) -> Path:
+    """Collapse dual-colour RSRP hist bins; keep v1.94 package otherwise intact."""
+    from publish_report_v195 import publish
 
     path = publish(src, dest)
     if dest.resolve() != REPORT_XLSX.resolve():
