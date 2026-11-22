@@ -90,7 +90,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.93"
+REPORT_VERSION = "1.94"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -4165,6 +4165,16 @@ def publish_report_v190(src: Path, dest: Path, extra_in: float = 0.20) -> Path:
     tmp.replace(dest)
     print(f"Wrote {dest} ({dest.stat().st_size / 1e6:.1f} MB)", flush=True)
     return dest
+
+
+def publish_report_v194(src: Path, dest: Path) -> Path:
+    """Excel-openable Neon pass: recolour styles + scrub clutter on v1.90 bytes."""
+    from publish_report_v194 import publish
+
+    path = publish(src, dest)
+    if dest.resolve() != REPORT_XLSX.resolve():
+        shutil.copy2(dest, REPORT_XLSX)
+    return path
 
 
 def publish_report_v191(src: Path, dest: Path) -> Path:

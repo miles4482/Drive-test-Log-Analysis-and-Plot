@@ -138,19 +138,27 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
-## Download Excel report (v1.93)
+## Download Excel report (v1.94)
 
-**v1.93 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.93.xlsx
+**v1.94 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.94.xlsx
 
-Same Neon restyle as v1.91/v1.92, with overlapping merge cells removed so Excel opens the file. Maps, movable circles, and the 0.40 inch active-to-idle gap stay as they were. The web map stays v1.89.
+Excel-openable Neon pass. Built from the last known-good v1.90 package: navy / teal colours in styles, instruction clutter removed, charts and drawings left unchanged. Do not use v1.91–v1.93 (Excel rejects those). The web map stays v1.89.
 
-## Download summary presentation (v1.93)
+## Download summary presentation (v1.94)
 
-**v1.93 summary (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.93.pptx
+**v1.94 summary (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.94.pptx
 
-Rebuilt from Excel v1.93. Footer reads Excel v1.93 and Web v1.89. Heading bars use the Neon navy. The web map stays v1.89.
+Rebuilt from Excel v1.94. Footer reads Excel v1.94 and Web v1.89. The web map stays v1.89.
+
+**v1.93 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.93.pptx
 
 **v1.89 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.89.pptx
+
+## Download Excel report (v1.93)
+
+**v1.93:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.93.xlsx
+
+Full ElementTree Neon rewrite — Excel may report the file as corrupt. Use v1.94 instead.
 
 ## Download Excel report (v1.92)
 
