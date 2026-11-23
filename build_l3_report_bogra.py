@@ -232,6 +232,7 @@ PARAM_WHITELIST = {
     "phich_Duration",
     "subframeAssignment",
     "specialSubframePatterns",
+    "tdd_SpecialSubframe_r11",
     "maxLayersMIMO_r10",
     "altCQI_Table_r12",
     "discardTimer",
@@ -305,6 +306,7 @@ SECTION_ORDER = (
     "Mobility",
     "Power",
     "Idle mode",
+    "Frame structure",
     "Connected DRX",
     "MAC",
     "Scheduling request",
@@ -340,8 +342,20 @@ _OTHERS_SECTION = {
 }
 
 
-def publish_section(section: str, group: str) -> str:
+# TDD-Config and the fields that describe the radio frame. SRS subframe config stays under SRS.
+_FRAME_GROUP = {
+    "subframeAssignment": "TDD UL/DL configuration",
+    "specialSubframePatterns": "Special subframe",
+    "tdd_SpecialSubframe_r11": "Special subframe",
+    "ul_CyclicPrefixLength": "Cyclic prefix",
+    "tdd_AckNackFeedbackMode": "TDD ACK/NACK",
+}
+
+
+def publish_section(section: str, group: str, param: str = "") -> str:
     """Keep Mobility / Power / Idle. Name the old Others groups."""
+    if param in _FRAME_GROUP:
+        return "Frame structure"
     if group == "TPC (group)":
         return "Power"
     if section == "Others":
@@ -1804,7 +1818,17 @@ def _comparison_rows(values):
         robi, gp = by_op["Robi"], by_op["Grameenphone"]
         if not robi and not gp:
             continue
-        published = publish_section(section, group)
+        published = publish_section(section, group, param)
+        if param in _FRAME_GROUP:
+            if section == "Mobility" or "mobility" in group.lower():
+                where = "handover"
+            elif "SCell" in group or "Carrier" in group:
+                where = "SCell"
+            elif section == "Idle mode" or "sib" in group.lower():
+                where = "SIB"
+            else:
+                where = "dedicated"
+            group = f"{_FRAME_GROUP[param]} — {where}"
         status = compare_status_param(param, robi, gp)
         note = _WHY.get(param, "") if status == "Different" else ""
         rows.append(
@@ -1924,7 +1948,7 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
     cover.sheet_view.showGridLines = False
     cover["A1"] = "L3 REPORT FOR BOGRA"
     cover["A1"].font = Font(name="Calibri", size=20, bold=True, color="1F4E78")
-    cover["A2"] = "Version 3 — full comparison, one sheet per section, difference sheets"
+    cover["A2"] = "Version 4 — Frame structure section for TDD subframe parameters"
     cover["A2"].font = Font(name="Calibri", size=13, color="595959")
     cover["A4"] = "Version"
     cover["B4"] = "What it contains"
@@ -1935,7 +1959,8 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
     versions = [
         ("v1", "Every decoded parameter. Sections: Mobility, Power, Idle mode, Others.", "L3_REPORT_FOR_BOGRA_v1.xlsx"),
         ("v2", "Only settings that are stable on both networks, with the idle-search finding.", "L3_REPORT_FOR_BOGRA_v2.xlsx"),
-        ("v3 (this file)", "v1 list, v2 meaning column, and a named section for each former Others group. Comparison, one sheet per section, and a difference sheet per section.", "L3_REPORT_FOR_BOGRA_v3.xlsx"),
+        ("v3", "Full list, named sections, one sheet per section, and a difference sheet per section.", "L3_REPORT_FOR_BOGRA_v3.xlsx"),
+        ("v4 (this file)", "v3, with subframeAssignment, specialSubframePatterns, cyclic prefix, and TDD ACK/NACK moved to Frame structure.", "L3_REPORT_FOR_BOGRA_v4.xlsx"),
     ]
     for i, (ver, what, fname) in enumerate(versions, 5):
         cover.cell(i, 1, ver)
@@ -1945,15 +1970,18 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
             cover.cell(i, col).alignment = Alignment(wrap_text=True, vertical="top")
             cover.cell(i, col).font = Font(name="Calibri", size=11)
         cover.row_dimensions[i].height = 36
-    cover["A9"] = (
+    cover["A10"] = (
         f"Source: Layer 3_Active Mode_Data_Robi_v1.7z. "
         f"Robi {sum(msg_counts['Robi'].values()):,} messages, "
         f"Grameenphone {sum(msg_counts['Grameenphone'].values()):,}. "
+        "Frame structure holds subframeAssignment, specialSubframePatterns, tdd-SpecialSubframe-r11, "
+        "ul-CyclicPrefixLength, and tdd-AckNackFeedbackMode, including the copies broadcast in SIB2, "
+        "sent at handover, and configured on an SCell. "
         "Robi value and GP value are the most common settings, with sample share. "
         "Meaning converts mapped fields (RSRP index to dBm, a3-Offset and hysteresis to dB, q-RxLevMin to dBm)."
     )
-    cover["A9"].alignment = Alignment(wrap_text=True, vertical="top")
-    cover.merge_cells("A9:C11")
+    cover["A10"].alignment = Alignment(wrap_text=True, vertical="top")
+    cover.merge_cells("A10:C12")
     cover.column_dimensions["A"].width = 18
     cover.column_dimensions["B"].width = 88
     cover.column_dimensions["C"].width = 36
@@ -1989,10 +2017,10 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
     wb.save(out_path)
 
     lines = [
-        "# L3 REPORT FOR BOGRA — v3",
+        "# L3 REPORT FOR BOGRA — v4",
         "",
         "Robi vs Grameenphone. Every decoded Layer-3 parameter is on the Comparison sheet.",
-        "Mobility, Power, and Idle mode stay first. Parameters that were grouped as Others now have their own section when the IE has a known home (Connected DRX, MAC, RLC and PDCP, CQI and MIMO, Carrier Aggregation, Security, and the rest).",
+        "v4 adds a Frame structure section. subframeAssignment, specialSubframePatterns, tdd-SpecialSubframe-r11, ul-CyclicPrefixLength, and tdd-AckNackFeedbackMode sit there, whether they were read from SIB2, a handover, or an SCell.",
         "",
         "Meaning columns convert the mapped 3GPP value (RSRP index to dBm, offset and hysteresis to dB, q-RxLevMin to dBm). A note is filled where the two dominant values change UE behaviour.",
         "",
@@ -2002,9 +2030,10 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
         "| --- | --- | --- |",
         "| v1 | `output/L3_REPORT_FOR_BOGRA_v1.xlsx` | Full list. Sections: Mobility, Power, Idle mode, Others. |",
         "| v2 | `output/L3_REPORT_FOR_BOGRA_v2.xlsx` | Stable settings only, with the idle-search finding. |",
-        "| v3 | `output/L3_REPORT_FOR_BOGRA_v3.xlsx` | Full list, named sections, one sheet per section, difference sheets. Current. |",
+        "| v3 | `output/L3_REPORT_FOR_BOGRA_v3.xlsx` | Full list, named sections, one sheet per section, difference sheets. |",
+        "| v4 | `output/L3_REPORT_FOR_BOGRA_v4.xlsx` | v3 plus a Frame structure section for the TDD subframe parameters. Current. |",
         "",
-        f"Parameters in v3: {len(rows)}. Rows that differ: {len(diff_rows)}.",
+        f"Parameters in v4: {len(rows)}. Rows that differ: {len(diff_rows)}.",
         "",
         "## Sections",
         "",
@@ -2038,7 +2067,7 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--l3-dir", type=Path, default=DEFAULT_L3_DIR)
-    ap.add_argument("--out", type=Path, default=ROOT / "output" / "L3_REPORT_FOR_BOGRA_v3.xlsx")
+    ap.add_argument("--out", type=Path, default=ROOT / "output" / "L3_REPORT_FOR_BOGRA_v4.xlsx")
     args = ap.parse_args()
     print(f"Scanning {args.l3_dir} ...")
     values, msg_counts, _events = scan(args.l3_dir)
