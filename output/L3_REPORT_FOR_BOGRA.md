@@ -1,4 +1,4 @@
-# L3 REPORT FOR BOGRA — v7
+# L3 REPORT FOR BOGRA — v8
 
 Robi vs Grameenphone parameter comparison, plus on-net VoLTE call setup time for Robi, Grameenphone, and Banglalink.
 Call setup time is the caller's SIP INVITE to 180 Ringing. Power stays first on the Comparison sheet.
@@ -13,9 +13,10 @@ Call setup time is the caller's SIP INVITE to 180 Ringing. Power stays first on 
 | v4 | `output/L3_REPORT_FOR_BOGRA_v4.xlsx` | Frame structure section for the TDD subframe parameters. |
 | v5 | `output/L3_REPORT_FOR_BOGRA_v5.xlsx` | Mapped meaning inside the Robi and GP value cells. |
 | v6 | `output/L3_REPORT_FOR_BOGRA_v6.xlsx` | Power first on Comparison and Differences. |
-| v7 | `output/L3_REPORT_FOR_BOGRA_v7.xlsx` | v6 plus VoLTE call setup time and the Robi actions. Current. |
+| v7 | `output/L3_REPORT_FOR_BOGRA_v7.xlsx` | VoLTE call setup time and the Robi actions. |
+| v8 | `output/L3_REPORT_FOR_BOGRA_v8.xlsx` | Setup time split into segments against Banglalink. Current. |
 
-Parameters in v7: 247. Rows that differ: 63.
+Parameters in v8: 247. Rows that differ: 63.
 
 ## Sections
 

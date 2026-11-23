@@ -26,7 +26,7 @@ Borga_Active_mode_11Nov26.7z  -->  1.csv … 15.csv  -->  output/Bogura_active_m
 
 ## L3 REPORT FOR BOGRA (Robi vs GP)
 
-Current file is **v7**. Each publish is a new version. Previous workbooks stay in the repo.
+Current file is **v8**. Each publish is a new version. Previous workbooks stay in the repo.
 
 | Version | File | Contents |
 | --- | --- | --- |
@@ -37,8 +37,9 @@ Current file is **v7**. Each publish is a new version. Previous workbooks stay i
 | v5 | `output/L3_REPORT_FOR_BOGRA_v5.xlsx` | v4, with the mapped meaning inside the Robi value and GP value cells. |
 | v6 | `output/L3_REPORT_FOR_BOGRA_v6.xlsx` | v5, with Power first on the Comparison sheet. |
 | v7 | `output/L3_REPORT_FOR_BOGRA_v7.xlsx` | v6 plus on-net VoLTE call setup time for Robi, Grameenphone, and Banglalink. |
+| v8 | `output/L3_REPORT_FOR_BOGRA_v8.xlsx` | Call setup split into segments. The slow Robi step is the caller voice bearer. |
 
-`output/L3_REPORT_FOR_BOGRA.xlsx` is a copy of v7.
+`output/L3_REPORT_FOR_BOGRA.xlsx` is a copy of v8.
 
 ```bash
 python3 -c "import py7zr; py7zr.SevenZipFile('Layer 3_Active Mode_Data_Robi_v1.7z').extractall('extracted/l3')"
