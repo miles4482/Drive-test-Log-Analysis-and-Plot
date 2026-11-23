@@ -1329,6 +1329,428 @@ def build_workbook(values, msg_counts, event_profiles, out_path: Path):
     return out_path, len(rows), sec_stat
 
 
+# Identity, geography, and per-cell indexes. They describe where the UE was,
+# not a setting an operator chose once for the network.
+_NOT_A_POLICY = {
+    "carrierFreq",
+    "dl_CarrierFreq",
+    "ul_CarrierFreq",
+    "dl_CarrierFreq_r10",
+    "dl_CarrierFreq_r12",
+    "targetPhysCellId",
+    "startingARFCN",
+    "freqBandIndicator",
+    "bandIndicator",
+    "rootSequenceIndex",
+    "gp0",
+    "gp1",
+    "gapOffset",
+    "nextHopChainingCount",
+    "keyChangeIndicator",
+    "handoverType",
+    "codebookSubsetRestriction",
+    "sr_ConfigIndex",
+    "priority",
+    "logicalChannelGroup",
+    "cellIndividualOffset",
+    "neighCellConfig",
+    "systemInfoValueTag",
+}
+
+_WHY = {
+    "s_NonIntraSearch": (
+        "This is the idle threshold for looking at other LTE layers. "
+        "With q-RxLevMin at -128 dBm, Robi keeps measuring other layers until serving RSRP is about -74 dBm. "
+        "GP stops that search once serving RSRP is only about -118 dBm."
+    ),
+    "threshServingLow": (
+        "Idle rule for leaving a higher-priority layer. "
+        "Robi treats the serving cell as low from about -116 dBm. GP waits until about -122 dBm."
+    ),
+    "s_IntraSearch": (
+        "Both still measure the same frequency across almost the whole drive. "
+        "The 4 dB gap (about -66 dBm vs -70 dBm) is small next to the inter-layer gap."
+    ),
+    "cellReselectionPriority": (
+        "Absolute priority of the serving frequency the UE was camped on. "
+        "Robi's typical camped layer is priority 5. GP's is priority 3. This follows the band plan, not a single timer."
+    ),
+    "t300": (
+        "How long the UE waits for RRC setup before it gives up. "
+        "Robi allows 1 s. On most GP cells the wait is 200 ms, so a weak setup fails and retries sooner."
+    ),
+    "threshold_RSRP": (
+        "Event A4: a neighbour must beat this level to be reported. "
+        "Robi accepts a neighbour around -124 dBm. GP asks for about -116 dBm, so the report starts later."
+    ),
+    "measCycleSCell_r10": (
+        "How often a deactivated secondary cell is measured. "
+        "Robi uses 320 ms on most carriers. The GP samples that carry this field use 640 ms."
+    ),
+    "maxHARQ_Msg3Tx": (
+        "How many times Msg3 is retransmitted during access. GP allows more attempts (8 vs 5)."
+    ),
+    "pusch_HoppingOffset": (
+        "PUSCH frequency-hopping offset in the common config. Robi uses 0. GP uses 22 on most cells."
+    ),
+    "zeroCorrelationZoneConfig": (
+        "PRACH zero-correlation zone. One step apart (10 vs 11). A cell-radius planning choice, not a mobility policy."
+    ),
+    "specialSubframePatterns": (
+        "TDD special-subframe pattern on the cells that broadcast it. Robi ssp7, GP ssp5."
+    ),
+}
+
+
+def _clean_raw(v: str) -> str:
+    return re.sub(r"\s*\(\d+\)\s*$", "", str(v).split("\t")[0]).strip()
+
+
+def _dom(counter: Counter):
+    if not counter:
+        return "", 0.0, 0
+    total = sum(counter.values())
+    val, cnt = counter.most_common(1)[0]
+    return val, cnt / total, total
+
+
+def _policy_rows(values):
+    """One row per distinct (parameter, Robi value, GP value), keeping the largest sample."""
+    best = {}
+    for (section, group, param), by_op in values.items():
+        if param in _NOT_A_POLICY:
+            continue
+        robi, gp = by_op["Robi"], by_op["Grameenphone"]
+        rv, rs, nr = _dom(robi)
+        gv, gs, ng = _dom(gp)
+        if nr < 40 or ng < 40:
+            continue
+        status = compare_status_param(param, robi, gp)
+        key = (param, _clean_raw(rv), _clean_raw(gv))
+        score = min(nr, ng)
+        prev = best.get(key)
+        if prev is None or score > prev["score"]:
+            best[key] = {
+                "section": section,
+                "group": group,
+                "param": param,
+                "nr": nr,
+                "ng": ng,
+                "rs": rs,
+                "gs": gs,
+                "robi": interpret(param, rv),
+                "gp": interpret(param, gv),
+                "status": status,
+                "score": score,
+                "why": _WHY.get(param, ""),
+            }
+    return list(best.values())
+
+
+def _write_md(path: Path, differ, shared, mixed, msg_counts):
+    lines = [
+        "# L3 report for Bogura",
+        "",
+        "Robi and Grameenphone, from the Active Mode Layer-3 decode "
+        "(`Layer 3_Active Mode_Data_Robi_v1.7z`).",
+        "",
+        "A value is treated as the operator setting only when it is the same on at least 70% of the cells that broadcast it, and both operators have at least 40 samples. Frequencies, PCI, and per-cell indexes are left out of that table. They describe the drive, not a policy.",
+        "",
+        f"Messages in the dump: Robi {sum(msg_counts['Robi'].values()):,}, Grameenphone {sum(msg_counts['Grameenphone'].values()):,}.",
+        "",
+        "## What is different",
+        "",
+        "The idle UE is where the two networks do not behave the same.",
+        "",
+        "Robi keeps searching other LTE layers until the serving cell is strong (s-NonIntraSearch 54 dB, about -74 dBm given q-RxLevMin -128 dBm). Grameenphone stops that search once the serving cell is merely above the minimum (10 dB, about -118 dBm). Robi also calls the serving cell low sooner (threshServingLow 12 dB vs 6 dB) and waits 1 s for RRC setup. Most GP cells wait 200 ms.",
+        "",
+        "Connected handover is much closer. A3 offset, hysteresis, time-to-trigger, s-Measure, and the L3 RSRP/RSRQ filter are the same. Uplink power (p0-NominalPUSCH -67 dBm, alpha 0.7, p0-NominalPUCCH -115 dBm) is the same. Paging (rf128) is the same. Security is eea2 / eia2 on both.",
+        "",
+        "| What changes | Robi | GP | How stable |",
+        "| --- | --- | --- | --- |",
+    ]
+    for row in differ:
+        lines.append(
+            f"| {row['param']} | {row['robi']} | {row['gp']} | "
+            f"Robi {row['rs']:.0%} of {row['nr']}, GP {row['gs']:.0%} of {row['ng']} |"
+        )
+    lines += [
+        "",
+        "### Why those rows matter",
+        "",
+    ]
+    for row in differ:
+        if row["why"]:
+            lines.append(f"- **{row['param']}.** {row['why']}")
+    lines += [
+        "",
+        "## What is the same",
+        "",
+        f"{len(shared)} settings are the same dominant value on both networks, each on at least 90% of samples.",
+        "",
+        "| Setting | Value | Robi samples | GP samples |",
+        "| --- | --- | ---: | ---: |",
+    ]
+    for row in shared:
+        lines.append(f"| {row['param']} | {row['robi']} | {row['nr']} | {row['ng']} |")
+    lines += [
+        "",
+        "## Not one network-wide value",
+        "",
+        "These are configured, but the dominant value is under 70% on at least one operator. Do not quote a single number for them.",
+        "",
+        "| Setting | Robi mode | GP mode |",
+        "| --- | --- | --- |",
+    ]
+    for row in mixed[:25]:
+        lines.append(
+            f"| {row['param']} | {row['robi']} ({row['rs']:.0%}) | {row['gp']} ({row['gs']:.0%}) |"
+        )
+    lines += [
+        "",
+        "Workbook: `output/L3_REPORT_FOR_BOGRA.xlsx`.",
+        "",
+    ]
+    path.write_text("\n".join(lines))
+
+
+def build_analyst_workbook(values, msg_counts, event_profiles, out_path: Path):
+    rows = _policy_rows(values)
+    differ = [
+        r for r in rows
+        if r["status"] == "Different" and r["rs"] >= 0.70 and r["gs"] >= 0.70
+    ]
+    # Lead with the idle behaviour gap, then setup, then the smaller radio deltas.
+    lead = [
+        "s_NonIntraSearch",
+        "threshServingLow",
+        "s_IntraSearch",
+        "cellReselectionPriority",
+        "t300",
+        "threshold_RSRP",
+        "measCycleSCell_r10",
+        "maxHARQ_Msg3Tx",
+        "pusch_HoppingOffset",
+        "zeroCorrelationZoneConfig",
+        "specialSubframePatterns",
+    ]
+    differ.sort(key=lambda r: lead.index(r["param"]) if r["param"] in lead else 50)
+
+    shared = [
+        r for r in rows
+        if r["status"].startswith("Same") and r["rs"] >= 0.90 and r["gs"] >= 0.90
+    ]
+    shared.sort(key=lambda r: (-min(r["nr"], r["ng"]), r["param"]))
+
+    mixed = [
+        r for r in rows
+        if r["rs"] < 0.70 or r["gs"] < 0.70
+    ]
+    mixed.sort(key=lambda r: -min(r["nr"], r["ng"]))
+
+    wb = Workbook()
+    thin = Border(
+        left=Side(style="thin", color="D9D9D9"),
+        right=Side(style="thin", color="D9D9D9"),
+        top=Side(style="thin", color="D9D9D9"),
+        bottom=Side(style="thin", color="D9D9D9"),
+    )
+    navy = PatternFill("solid", fgColor="1F4E78")
+    head_font = Font(color="FFFFFF", bold=True, name="Calibri", size=11)
+    body = Font(name="Calibri", size=11)
+    title_font = Font(name="Calibri", size=20, bold=True, color="1F4E78")
+
+    cover = wb.active
+    cover.title = "Findings"
+    cover.sheet_view.showGridLines = False
+    cover["A1"] = "L3 report for Bogura"
+    cover["A1"].font = title_font
+    cover["A2"] = "Robi and Grameenphone — what each network actually sets"
+    cover["A2"].font = Font(name="Calibri", size=13, color="595959")
+    cover.merge_cells("A4:B4")
+    cover["A4"] = (
+        "Source: Layer 3_Active Mode_Data_Robi_v1.7z, downlink RRC only "
+        "(setup, reconfiguration, system information, handover, release). "
+        f"Robi {sum(msg_counts['Robi'].values()):,} messages, "
+        f"Grameenphone {sum(msg_counts['Grameenphone'].values()):,}."
+    )
+    cover["A4"].alignment = Alignment(wrap_text=True, vertical="top")
+    cover.row_dimensions[4].height = 48
+
+    cover["A6"] = "The difference that matters"
+    cover["A6"].font = Font(name="Calibri", size=14, bold=True, color="1F4E78")
+    cover.merge_cells("A7:B10")
+    cover["A7"] = (
+        "Idle mode, not handover and not power.\n\n"
+        "Robi keeps the UE measuring other LTE layers until the serving cell is strong "
+        "(s-NonIntraSearch 54 dB → about -74 dBm, with q-RxLevMin -128 dBm). "
+        "Grameenphone stops that search once serving is only slightly above the camping minimum "
+        "(10 dB → about -118 dBm). Robi also marks the serving cell as low earlier "
+        "(threshServingLow 12 dB vs 6 dB) and allows 1 s for RRC setup. Most GP cells allow 200 ms.\n\n"
+        "Connected A3 handover, uplink power, paging, and AS security are the same setting on both."
+    )
+    cover["A7"].alignment = Alignment(wrap_text=True, vertical="top")
+    cover.row_dimensions[7].height = 36
+    cover.row_dimensions[8].height = 36
+    cover.row_dimensions[9].height = 36
+    cover.row_dimensions[10].height = 36
+
+    cover["A12"] = "How a number got into this report"
+    cover["A12"].font = Font(name="Calibri", size=14, bold=True, color="1F4E78")
+    cover.merge_cells("A13:B15")
+    cover["A13"] = (
+        "Both operators need at least 40 samples. The value shown is the one seen most often. "
+        "It is called the setting only when that value covers at least 70% of samples. "
+        "EARFCN, PCI, gap offset, and root sequence are omitted here: they change with the cell, "
+        "they are not a network-wide choice. The Appendix sheet still lists every decoded leaf."
+    )
+    cover["A13"].alignment = Alignment(wrap_text=True, vertical="top")
+    cover.column_dimensions["A"].width = 36
+    cover.column_dimensions["B"].width = 88
+
+    def paint_header(ws, headers):
+        for c, h in enumerate(headers, 1):
+            cell = ws.cell(1, c, h)
+            cell.fill = navy
+            cell.font = head_font
+            cell.alignment = Alignment(wrap_text=True, vertical="center")
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}1"
+        ws.row_dimensions[1].height = 22
+        ws.sheet_view.showGridLines = False
+
+    def paint_row(ws, r, cols, fill=None):
+        for c in range(1, cols + 1):
+            cell = ws.cell(r, c)
+            cell.font = body
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+            cell.border = thin
+            if fill is not None:
+                cell.fill = fill
+
+    diff_ws = wb.create_sheet("Different settings")
+    diff_headers = [
+        "What it changes",
+        "Parameter",
+        "Robi",
+        "Grameenphone",
+        "Robi share",
+        "GP share",
+        "Why it matters",
+    ]
+    paint_header(diff_ws, diff_headers)
+    amber = PatternFill("solid", fgColor="FDE9D9")
+    for i, row in enumerate(differ, 2):
+        diff_ws.cell(i, 1, row["group"])
+        diff_ws.cell(i, 2, row["param"])
+        diff_ws.cell(i, 3, row["robi"])
+        diff_ws.cell(i, 4, row["gp"])
+        diff_ws.cell(i, 5, f"{row['rs']:.0%} of {row['nr']}")
+        diff_ws.cell(i, 6, f"{row['gs']:.0%} of {row['ng']}")
+        diff_ws.cell(i, 7, row["why"])
+        paint_row(diff_ws, i, len(diff_headers), amber if i <= 6 else None)
+        diff_ws.row_dimensions[i].height = 48
+    for col, width in zip("ABCDEFG", (42, 28, 22, 22, 16, 16, 78)):
+        diff_ws.column_dimensions[col].width = width
+
+    same_ws = wb.create_sheet("Shared settings")
+    same_headers = ["Parameter", "Setting on both", "Robi samples", "GP samples", "Seen in"]
+    paint_header(same_ws, same_headers)
+    for i, row in enumerate(shared, 2):
+        same_ws.cell(i, 1, row["param"])
+        same_ws.cell(i, 2, row["robi"])
+        same_ws.cell(i, 3, row["nr"])
+        same_ws.cell(i, 4, row["ng"])
+        same_ws.cell(i, 5, row["group"])
+        paint_row(same_ws, i, len(same_headers))
+    for col, width in zip("ABCDE", (34, 36, 16, 16, 42)):
+        same_ws.column_dimensions[col].width = width
+
+    mix_ws = wb.create_sheet("Varies by cell")
+    mix_headers = ["Parameter", "Robi most common", "Robi share", "GP most common", "GP share", "Seen in"]
+    paint_header(mix_ws, mix_headers)
+    for i, row in enumerate(mixed, 2):
+        mix_ws.cell(i, 1, row["param"])
+        mix_ws.cell(i, 2, row["robi"])
+        mix_ws.cell(i, 3, f"{row['rs']:.0%} of {row['nr']}")
+        mix_ws.cell(i, 4, row["gp"])
+        mix_ws.cell(i, 5, f"{row['gs']:.0%} of {row['ng']}")
+        mix_ws.cell(i, 6, row["group"])
+        paint_row(mix_ws, i, len(mix_headers))
+    for col, width in zip("ABCDEF", (32, 28, 16, 28, 16, 40)):
+        mix_ws.column_dimensions[col].width = width
+
+    # Compact event picture: top signature per event per operator.
+    ev = wb.create_sheet("Handover events")
+    ev_headers = ["Event", "Operator", "Share of that event", "Count", "Profile"]
+    paint_header(ev, ev_headers)
+    er = 2
+    for event in ("eventA3", "eventA2", "eventA1", "eventA4", "eventA5", "eventA6_r10"):
+        if event not in event_profiles:
+            continue
+        for op in OPS:
+            counter = event_profiles[event][op]
+            if not counter:
+                continue
+            total = sum(counter.values())
+            sig, cnt = counter.most_common(1)[0]
+            pretty = sig
+            pretty = re.sub(
+                r"threshold_RSRP=(-?\d+)",
+                lambda m: f"RSRP {int(m.group(1)) - 140} dBm",
+                pretty,
+            )
+            pretty = re.sub(
+                r"a3_Offset=(-?\d+)",
+                lambda m: f"A3 offset {int(m.group(1)) * 0.5:g} dB",
+                pretty,
+            )
+            pretty = re.sub(
+                r"hysteresis=(-?\d+)",
+                lambda m: f"hysteresis {int(m.group(1)) * 0.5:g} dB",
+                pretty,
+            )
+            ev.cell(er, 1, event)
+            ev.cell(er, 2, "GP" if op == "Grameenphone" else op)
+            ev.cell(er, 3, f"{cnt / total:.0%}")
+            ev.cell(er, 4, cnt)
+            ev.cell(er, 5, pretty)
+            paint_row(ev, er, len(ev_headers))
+            er += 1
+    for col, width in zip("ABCDE", (16, 14, 22, 12, 88)):
+        ev.column_dimensions[col].width = width
+
+    # Appendix: every kept leaf, for anyone who wants the raw inventory.
+    appendix = wb.create_sheet("Appendix")
+    app_headers = ["Section", "Group", "Parameter", "Robi", "Grameenphone", "Status", "Robi n", "GP n"]
+    paint_header(appendix, app_headers)
+    raw_rows = []
+    for (section, group, param), by_op in values.items():
+        robi, gp = by_op["Robi"], by_op["Grameenphone"]
+        if not robi and not gp:
+            continue
+        raw_rows.append((section, group, param, robi, gp))
+    raw_rows.sort(key=lambda item: (item[0], item[1], item[2]))
+    for i, (section, group, param, robi, gp) in enumerate(raw_rows, 2):
+        appendix.cell(i, 1, section)
+        appendix.cell(i, 2, group)
+        appendix.cell(i, 3, param)
+        appendix.cell(i, 4, top_interpreted(param, robi, 3))
+        appendix.cell(i, 5, top_interpreted(param, gp, 3))
+        appendix.cell(i, 6, compare_status_param(param, robi, gp))
+        appendix.cell(i, 7, sum(robi.values()))
+        appendix.cell(i, 8, sum(gp.values()))
+        paint_row(appendix, i, len(app_headers))
+    for col, width in zip("ABCDEFGH", (14, 36, 28, 36, 36, 18, 12, 12)):
+        appendix.column_dimensions[col].width = width
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(out_path)
+    md_path = out_path.with_suffix(".md")
+    _write_md(md_path, differ, shared, mixed, msg_counts)
+    return out_path, len(differ), len(shared), len(mixed)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--l3-dir", type=Path, default=DEFAULT_L3_DIR)
@@ -1336,10 +1758,13 @@ def main():
     args = ap.parse_args()
     print(f"Scanning {args.l3_dir} ...")
     values, msg_counts, event_profiles = scan(args.l3_dir)
-    out, n, sec_stat = build_workbook(values, msg_counts, event_profiles, args.out)
-    print(f"Wrote {out}  ({n} parameter rows)")
-    for s in SECTION_ORDER:
-        print(f"  {s}: {dict(sec_stat[s])}")
+    out, n_diff, n_same, n_mixed = build_analyst_workbook(
+        values, msg_counts, event_profiles, args.out
+    )
+    print(f"Wrote {out}")
+    print(f"  different settings: {n_diff}")
+    print(f"  shared settings: {n_same}")
+    print(f"  varies by cell: {n_mixed}")
 
 
 if __name__ == "__main__":

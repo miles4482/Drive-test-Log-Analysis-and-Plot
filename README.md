@@ -26,18 +26,15 @@ Borga_Active_mode_11Nov26.7z  -->  1.csv … 15.csv  -->  output/Bogura_active_m
 
 ## L3 REPORT FOR BOGRA (Robi vs GP)
 
-Compares every network-configured Layer-3 parameter seen in the Active Mode L3 dump between **Robi** and **Grameenphone**.
+Robi versus Grameenphone Layer-3 settings from the Active Mode decode. The front of the workbook is the settings that are stable on both networks. The idle inter-layer search is the material difference. Frequencies and PCI stay in the appendix.
 
 ```bash
-# extract once (needs py7zr or 7z)
 python3 -c "import py7zr; py7zr.SevenZipFile('Layer 3_Active Mode_Data_Robi_v1.7z').extractall('extracted/l3')"
 python3 build_l3_report_bogra.py
 ```
 
 - Excel: [`output/L3_REPORT_FOR_BOGRA.xlsx`](output/L3_REPORT_FOR_BOGRA.xlsx)
-- Summary: [`output/L3_REPORT_FOR_BOGRA.md`](output/L3_REPORT_FOR_BOGRA.md)
-
-Sheet order follows **Mobility → Power → Idle mode → Others**, plus Cover, Summary, Event Profiles, and Diff only.
+- Write-up: [`output/L3_REPORT_FOR_BOGRA.md`](output/L3_REPORT_FOR_BOGRA.md)
 
 
 ## How to rebuild the final file and plots
