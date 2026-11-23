@@ -6,10 +6,10 @@
 
 Dear Sir / Madam,
 
-Please find below a management summary of the **Layer-3 (L3) parameter comparison** between **Robi** and **Grameenphone (GP)** from the Bogura Active Mode drive-test logs.
+Please find below a management summary of the **Layer-3 (L3) parameter comparison** between **Robi** and **Grameenphone (GP)** from the Bogura Active Mode drive-test logs. A short **VoLTE call setup time** note is included at the end of the major-difference section.
 
-**Source:** Decoded LTE-RRC Active Mode dumps (`Layer 3_Active Mode_Data_Robi_v1.7z`)  
-**Report:** L3 REPORT FOR BOGRA — **v6**  
+**Source:** Decoded LTE-RRC / SIP Active Mode dumps (`Layer 3_Active Mode_Data_Robi_v1.7z`)  
+**Report:** L3 REPORT FOR BOGRA — **v7**  
 **Scope:** 247 network-configured L3 parameters compared on dominant (most common) setting
 
 ---
@@ -23,12 +23,13 @@ Please find below a management summary of the **Layer-3 (L3) parameter compariso
 5. **TDD frame structure is mostly common** (UL/DL configuration **sa2**, normal UL cyclic prefix). The notable difference is **special subframe pattern**: Robi **ssp7** vs GP **ssp5** (SIB and SCell).
 6. **Security algorithms match** (ciphering **eea2**, integrity **eia2**). Paging cycle is the same (**rf128**).
 7. Out of **247** parameters, **63** rows differ on dominant value (including Robi-only / GP-only). Most differences are cell-/carrier-specific (EARFCN, PCI, root sequence) or secondary timers; a smaller set is strategically important (idle search, t300, special subframe, DRX, antenna ports).
+8. **VoLTE (on-net):** Median call setup time (INVITE → 180 Ringing) is **Robi 2.87 s**, **GP 2.46 s**, **Banglalink 0.84 s**. Robi’s main delay is the **caller QCI-1 dedicated bearer** (~2.4 s vs GP ~0.22 s).
 
 ---
 
 ## 2. Section-wise Summary Table
 
-*(Order requested: Power → Idle → Mobility → Frame → others)*
+*(Order: Power → Idle → Mobility → Frame → others)*
 
 | Section | Parameters | Same | Different* | Robi only | GP only | Management read-out |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
@@ -60,9 +61,9 @@ Please find below a management summary of the **Layer-3 (L3) parameter compariso
 
 | Parameter | Robi (dominant) | GP (dominant) | Why it matters |
 | --- | --- | --- | --- |
-| **s-NonIntraSearch** | 27 → **54 dB** | 5 → **10 dB** | Robi continues inter-freq / inter-RAT measurement search until serving level is much stronger (~−74 dBm). GP stops near ~−118 dBm. Affects idle reselection aggressiveness and battery/measurement load. |
+| **s-NonIntraSearch** | 27 → **54 dB** | 5 → **10 dB** | Robi continues inter-freq / inter-RAT measurement search until serving level is much stronger (~−74 dBm). GP stops near ~−118 dBm. Affects idle reselection aggressiveness and measurement load. |
 | **threshServingLow** | 6 → **12 dB** | 3 → **6 dB** | Robi marks the serving cell “low” later (relative to q-RxLevMin). |
-| **t300** | **ms1000** | **ms200** | Robi allows 1 s for RRC Connection Setup; GP typically 200 ms. Impacts setup success under poor radio / congestion. |
+| **t300** | **ms1000** | **ms200** | Robi allows 1 s for RRC Connection Setup; GP typically 200 ms. Impacts setup behaviour under poor radio / congestion. |
 | **cellReselectionPriority** (serving) | **5** | **3** | Different priority ranking of the serving layer. |
 | **threshX-High / threshX-Low** (SIB5) | 7 → **14 dB** / 7 → **14 dB** | 6 → **12 dB** / 1 → **2 dB** | Different bars to move to / from neighbour LTE frequencies. |
 
@@ -84,15 +85,25 @@ Please find below a management summary of the **Layer-3 (L3) parameter compariso
 | **specialSubframePatterns** (SIB & SCell) | **ssp7** | **ssp5** | Different special-subframe DwPTS/GP/UpPTS split |
 | **ul-CyclicPrefixLength** | Normal | Normal | Same |
 
-### D. Other notable gaps
+### D. Other notable L3 gaps
 
 | Section | Difference |
 | --- | --- |
-| **Connected DRX** | Robi longer `onDurationTimer` / `drx-InactivityTimer` (e.g. psf200) vs GP shorter (e.g. psf2 / psf80) — UE may stay awake longer on Robi. |
+| **Connected DRX** | Robi longer `onDurationTimer` / `drx-InactivityTimer` (e.g. psf200) vs GP shorter (e.g. psf2 / psf80). |
 | **CQI / MIMO** | Dominant antenna ports: Robi **an2** vs GP **an4**; codebook restriction follows (2Tx vs 4Tx TM4). |
 | **Carrier Aggregation** | SCell DL bandwidth dominant: Robi **n75** vs GP **n100**; different SCell EARFCNs. |
 | **SRS** | GP more often **setup** dedicated SRS; Robi more often **release**. |
 | **Power** | **No major difference** on dominant settings. |
+
+### E. VoLTE call setup time (on-net, INVITE → 180 Ringing)
+
+| Operator | Median CST | Caller QCI-1 bearer | Called paging (idle UE) |
+| --- | ---: | ---: | ---: |
+| **Robi** | **2,871 ms** (n=23) | **2,414 ms** | 1,756 ms |
+| **Grameenphone** | **2,458 ms** (n=22) | **224 ms** | 1,860 ms |
+| **Banglalink** | **839 ms** (n=22) | **94 ms** | (called UE often still connected) |
+
+**Robi action focus:** (1) bring originating QCI-1 bearer under ~200 ms (Rx/Gx / PCRF / PGW path); (2) shorten INVITE → paging for idle called UE. Ringing/answer delay is similar on all three networks and is not the CST gap.
 
 ---
 
@@ -102,7 +113,7 @@ Please find below a management summary of the **Layer-3 (L3) parameter compariso
 No dominant-value gap. Uplink open-loop power (`p0-NominalPUSCH` −67 dBm, alpha 0.7), PUCCH nominal power, and RS power (18 dBm) are the same on both networks. Power is not a differentiator in this Bogura dump.
 
 **Idle mode**  
-This is the main policy difference. Robi’s high `s-NonIntraSearch` keeps the UE measuring other layers until coverage is strong; GP exits that search early. Combined with different `threshServingLow`, inter-freq thresholds, and a much longer Robi `t300`, idle/camping and RRC setup behaviour will not feel the same even when coverage maps look similar.
+This is the main L3 policy difference. Robi’s high `s-NonIntraSearch` keeps the UE measuring other layers until coverage is strong; GP exits that search early. Combined with different `threshServingLow`, inter-freq thresholds, and a much longer Robi `t300`, idle/camping and RRC setup behaviour will not feel the same even when coverage maps look similar.
 
 **Mobility**  
 Core A3 handover recipe is shared. Differences are mostly thresholds for secondary events, IRAT event presence, measurement-gap details, and handover-target identifiers (PCI/EARFCN). Connected mobility strategy looks broadly similar; idle strategy does not.
@@ -123,14 +134,15 @@ Antenna-port and CA SCell capability differ by operator deployment. Security alg
 
 ## 5. Last Note
 
-This comparison is based on **decoded Active Mode L3 messages** from the Bogura drive test and reports each parameter’s **dominant (most frequent) configured value**, with mapped units and sample share in the workbook. Cell-specific identities (PCI, EARFCN, root sequence) will always differ between operators and should not be read as a “wrong configuration.”  
+This comparison is based on **decoded Active Mode L3 messages** from the Bogura drive test and reports each parameter’s **dominant (most frequent) configured value**, with mapped units and sample share in the workbook. Cell-specific identities (PCI, EARFCN, root sequence) will always differ between operators and should not be read as a “wrong configuration.”
 
 The action-relevant takeaway for management is:
 
-> **Power and connected A3 mobility are largely the same; Idle-mode search / reselection policy and RRC setup timer (`t300`) are not. Treat Idle configuration as the primary L3 differentiator between Robi and GP in Bogura.**
+> **Power and connected A3 mobility are largely the same; Idle-mode search / reselection policy and RRC setup timer (`t300`) are not. Treat Idle configuration as the primary L3 differentiator between Robi and GP in Bogura.**  
+> **Separately, Robi VoLTE setup is slower than GP/BL mainly because the caller voice bearer (QCI 1) takes ~2.4 s — that is a core/IMS bearer-path item, not an RF L3 offset issue.**
 
-Detailed workbook (section sheets + difference sheets):  
-`output/L3_REPORT_FOR_BOGRA_v6.xlsx`  
+Detailed workbook (section sheets, difference sheets, VoLTE CST / actions):  
+`output/L3_REPORT_FOR_BOGRA_v7.xlsx`  
 PR: https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/pull/6
 
 I am available to walk through any section or to prepare a one-page slide version for the next review.
