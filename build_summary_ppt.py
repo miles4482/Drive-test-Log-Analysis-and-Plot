@@ -26,11 +26,11 @@ from pptx.util import Emu, Inches, Pt
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
-REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.96.xlsx"
+REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.97.xlsx"
 IDLE_NOTES = OUTPUT / "idle_vs_active_notes.json"
 PLOTS = OUTPUT / "plots"
 DESCRIPTIONS = OUTPUT / "bad_spot_descriptions.json"
-SUMMARY_VERSION = "1.96"
+SUMMARY_VERSION = "1.97"
 DEST = OUTPUT / f"Bogura_DriveTest_Summary_v{SUMMARY_VERSION}.pptx"
 CIRCLES = PLOTS / "bad_spot_circles.json"
 
@@ -128,25 +128,48 @@ def _example_groups(rows: dict[tuple[str, int], dict[str, str]]) -> list[dict]:
     return groups
 
 def _cover_rows() -> dict[tuple[str, int], dict[str, str]]:
-    ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
-    with zipfile.ZipFile(REPORT) as book:
-        root = ET.fromstring(book.read("xl/worksheets/sheet1.xml"))
+    """Bad-spot rows for example slides.
+
+    v1.97 Cover keeps an executive summary only (no per-spot list), so rows come
+    from bad_spot_descriptions.json. Shape matches the former Cover columns.
+    """
+    solution_name = {
+        "tune": "Tilt and azimuth",
+        "fourth": "4th sector, L900",
+        "new": "New 3-sector site",
+        "ep": "On site EP Check",
+    }
     found: dict[tuple[str, int], dict[str, str]] = {}
-    for row in root.findall("m:sheetData/m:row", ns):
-        cells: dict[str, str] = {}
-        for cell in row.findall("m:c", ns):
-            ref = cell.get("r") or ""
-            col = re.match(r"[A-Z]+", ref)
-            text = cell.find("m:is/m:t", ns)
-            if col and text is not None and text.text:
-                cells[col.group(0)] = text.text
-        mode = cells.get("A")
+    if not DESCRIPTIONS.exists():
+        return found
+    for item in json.loads(DESCRIPTIONS.read_text()):
+        mode = str(item.get("mode") or "")
         if mode not in ("Idle", "Active"):
             continue
-        number = re.search(r"(\d+)", cells.get("B", ""))
-        if number is None:
+        number = int(item.get("n") or 0)
+        if number < 1:
             continue
-        found[(mode, int(number.group(1)))] = cells
+        kind = str(item.get("kind") or "")
+        badge = str(item.get("badge") or "")
+        # Match former Cover column G: tilt/azimuth split later by _slide_solution.
+        if kind == "tune":
+            g = "Tilt and azimuth"
+        else:
+            g = solution_name.get(kind, badge or kind)
+        final = str(item.get("suggestions") or item.get("proposed") or "")
+        serving = str(item.get("serving") or "")
+        # Prefer a short serving cell id when the serving block is multi-line.
+        serving_cell = serving.split(",")[0].split(".")[-1].strip() if serving else ""
+        found[(mode, number)] = {
+            "A": mode,
+            "B": f"Bad spot {number}",
+            "C": str((item.get("changes") or [{}])[0].get("site") or ""),
+            "D": str((item.get("changes") or [{}])[0].get("sector") or ""),
+            "E": serving_cell or serving[:80],
+            "F": "",
+            "G": g,
+            "H": final,
+        }
     return found
 
 
@@ -331,77 +354,117 @@ def _share_bar(slide, left: float, top: float, width: float, height: float, part
 
 
 def _report(prs: Presentation, pages: int) -> None:
-    """First slide: drive-test route, then RSRP, RSRQ and SINR as a table and a chart."""
+    """Executive Summary: Active Mode KPIs, band mix, and RSRP ranges (360° of Excel)."""
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _box(slide, 0, 0, prs.slide_width, prs.slide_height, WHITE)
-    _heading(slide, "Summary report")
+    _heading(slide, "Executive Summary")
     _text(slide, Inches(8.4), Inches(0.12), Inches(4.6), Inches(0.38), f"11–21 May 2026    ·    v{SUMMARY_VERSION}", 14, WHITE, align=PP_ALIGN.RIGHT)
 
-    _text(slide, Inches(0.32), Inches(0.7), Inches(4), Inches(0.26), "DT route", 15, NAVY, True)
+    _text(slide, Inches(0.28), Inches(0.62), Inches(6), Inches(0.22), "DT route", 13, NAVY, True)
     headers = ["Mode", "Source", "Plotted", "What is drawn"]
     values = [
-        ["Idle", "Borga_Idle_V2.0", "60,957", "Scanner, best server. Unchanged."],
         ["Active", "Borga_Active_mode_11Nov26", "288,308", "Robi M-PCell, strongest RSRP per location."],
+        ["Scanner", "Borga_Idle_V2.0", "60,957", "Idle scanner, best server. Comparison only."],
     ]
-    widths = [1.35, 3.5, 1.7, 6.05]
-    top = 1.0
-    x = 0.32
+    widths = [1.25, 3.35, 1.55, 6.45]
+    top = 0.86
+    x = 0.28
     for header, width in zip(headers, widths):
-        _box(slide, Inches(x), Inches(top), Inches(width), Inches(0.32), NAVY)
-        _text(slide, Inches(x + 0.08), Inches(top + 0.02), Inches(width - 0.1), Inches(0.28), header, 12, WHITE, True)
+        _box(slide, Inches(x), Inches(top), Inches(width), Inches(0.26), NAVY)
+        _text(slide, Inches(x + 0.06), Inches(top + 0.01), Inches(width - 0.08), Inches(0.24), header, 11, WHITE, True)
         x += width
     for row_index, row in enumerate(values):
-        y = top + 0.32 + row_index * 0.36
-        x = 0.32
+        y = top + 0.26 + row_index * 0.28
+        x = 0.28
         fill = PAPER if row_index % 2 == 0 else WHITE
         for value, width in zip(row, widths):
-            _box(slide, Inches(x), Inches(y), Inches(width), Inches(0.36), fill, LINE)
-            _text(slide, Inches(x + 0.08), Inches(y + 0.04), Inches(width - 0.1), Inches(0.28), value, 12, INK)
+            _box(slide, Inches(x), Inches(y), Inches(width), Inches(0.28), fill, LINE)
+            _text(slide, Inches(x + 0.06), Inches(y + 0.02), Inches(width - 0.08), Inches(0.24), value, 11, INK)
             x += width
     _text(
-        slide, Inches(0.32), Inches(2.08), Inches(12.6), Inches(0.24),
-        "Drive 11 May 2026 13:01 to 21 May 2026 14:07. A bad spot is a 50 m bin whose median RSRP is below −120 dBm.",
-        12, MUTED,
+        slide, Inches(0.28), Inches(1.72), Inches(12.7), Inches(0.36),
+        "Active Mode first. Scanner coverage does not reflect actual UE coverage — Scanner bad spots and solutions stay in the Scanner section of Bad Spot RSRP_Active. "
+        "A bad spot is a 50 m bin whose median RSRP is below −120 dBm. Excel holds 99 Active + 26 Scanner spots on one sheet.",
+        11, MUTED,
     )
 
-    _text(slide, Inches(0.32), Inches(2.36), Inches(6), Inches(0.26), "Radio KPI", 15, NAVY, True)
+    _text(slide, Inches(0.28), Inches(2.12), Inches(7), Inches(0.22), "Active Mode — Radio KPI", 13, NAVY, True)
     blocks = [
         (
             "RSRP",
-            "Idle median −78.8 dBm. Poor 142 samples, 0.2%.",
             "Active median −98.1 dBm. Poor 1,077 samples, 0.4%.",
-            [("#008000", 90.2), ("#00FF00", 9.0), ("#FFFF00", 0.3), ("#FF6666", 0.2), ("#FF0000", 0.2)],
             [("#008000", 40.6), ("#00FF00", 46.4), ("#FFFF00", 9.3), ("#FF6666", 3.3), ("#FF0000", 0.4)],
             "−95 to 0   ·   −110 to −95   ·   −115 to −110   ·   −120 to −115   ·   below −120",
         ),
         (
             "RSRQ",
-            "Idle median −11.8 dB. At or below −20: 1.7%.",
             "Active median −9.7 dB. At or below −20: 0.2%.",
-            [("#00FF00", 4.0), ("#FFFF00", 92.8), ("#FF0000", 3.2)],
             [("#00FF00", 55.4), ("#FFFF00", 43.2), ("#FF0000", 1.4)],
             "−10 to 0   ·   −17 to −10   ·   −30 to −17",
         ),
         (
             "SINR",
-            "Idle median 9.9 dB. At or below 0: 10.0%.",
-            "Active median 8.1 dB. At or below 0: 13.1%.",
-            [("#0070C0", 27.4), ("#00B050", 22.2), ("#00B0F0", 23.0), ("#FFFF00", 17.5), ("#FF6600", 7.6), ("#FF0000", 2.3)],
+            "Active median 8.1 dB. At or below 0: 12.6%.",
             [("#0070C0", 20.8), ("#00B050", 20.5), ("#00B0F0", 24.2), ("#FFFF00", 21.8), ("#FF6600", 10.9), ("#FF0000", 1.8)],
             "15 and above   ·   10 to 15   ·   5 to 10   ·   0 to 5   ·   −5 to 0   ·   below −5",
         ),
     ]
-    y = 2.68
-    for title, idle_line, active_line, idle_parts, active_parts, legend in blocks:
-        _box(slide, Inches(0.32), Inches(y), Inches(12.7), Inches(1.38), PAPER, LINE)
-        _text(slide, Inches(0.46), Inches(y + 0.08), Inches(1.3), Inches(0.28), title, 14, NAVY, True)
-        _text(slide, Inches(1.8), Inches(y + 0.08), Inches(5.3), Inches(0.48), idle_line + "\n" + active_line, 12, INK)
-        _text(slide, Inches(7.2), Inches(y + 0.06), Inches(0.7), Inches(0.22), "Idle", 11, MUTED, True)
-        _share_bar(slide, 7.95, y + 0.08, 4.8, 0.18, [(part, color) for color, part in idle_parts])
-        _text(slide, Inches(7.2), Inches(y + 0.32), Inches(0.7), Inches(0.22), "Active", 11, MUTED, True)
-        _share_bar(slide, 7.95, y + 0.34, 4.8, 0.18, [(part, color) for color, part in active_parts])
-        _text(slide, Inches(0.46), Inches(y + 0.95), Inches(12.3), Inches(0.32), legend, 11, MUTED)
-        y += 1.46
+    y = 2.36
+    for title, active_line, active_parts, legend in blocks:
+        _box(slide, Inches(0.28), Inches(y), Inches(8.35), Inches(0.92), PAPER, LINE)
+        _text(slide, Inches(0.40), Inches(y + 0.06), Inches(1.1), Inches(0.22), title, 13, NAVY, True)
+        _text(slide, Inches(1.55), Inches(y + 0.06), Inches(6.9), Inches(0.22), active_line, 12, INK)
+        _share_bar(slide, 1.55, y + 0.34, 6.85, 0.20, [(part, color) for color, part in active_parts])
+        _text(slide, Inches(0.40), Inches(y + 0.60), Inches(8.0), Inches(0.24), legend, 10, MUTED)
+        y += 0.98
+
+    # Band mix + RSRP range tables (Active Mode)
+    _text(slide, Inches(8.85), Inches(2.12), Inches(4.2), Inches(0.22), "Active band mix", 13, NAVY, True)
+    band_rows = [
+        ("Band", "Samples", "Share"),
+        ("L1800", "190,026", "65.9%"),
+        ("L2100", "89,020", "30.9%"),
+        ("L2600", "4,898", "1.7%"),
+        ("L900", "4,364", "1.5%"),
+    ]
+    tx, ty = 8.85, 2.38
+    bw = [1.35, 1.35, 1.15]
+    for r_i, row in enumerate(band_rows):
+        x = tx
+        for c_i, (value, width) in enumerate(zip(row, bw)):
+            fill = NAVY if r_i == 0 else (PAPER if r_i % 2 else WHITE)
+            color = WHITE if r_i == 0 else INK
+            _box(slide, Inches(x), Inches(ty), Inches(width), Inches(0.26), fill, LINE)
+            _text(slide, Inches(x + 0.04), Inches(ty + 0.02), Inches(width - 0.06), Inches(0.22), value, 11, color, r_i == 0)
+            x += width
+        ty += 0.26
+
+    _text(slide, Inches(8.85), Inches(3.82), Inches(4.2), Inches(0.22), "Active RSRP range (dBm)", 13, NAVY, True)
+    range_rows = [
+        ("Range", "Samples", "Share"),
+        ("−95 to 0", "116,945", "40.6%"),
+        ("−110 to −95", "133,790", "46.4%"),
+        ("−115 to −110", "26,949", "9.3%"),
+        ("−120 to −115", "9,547", "3.3%"),
+        ("−150 to −120", "1,077", "0.4%"),
+    ]
+    ty = 4.08
+    for r_i, row in enumerate(range_rows):
+        x = tx
+        for c_i, (value, width) in enumerate(zip(row, bw)):
+            fill = NAVY if r_i == 0 else (PAPER if r_i % 2 else WHITE)
+            color = WHITE if r_i == 0 else INK
+            _box(slide, Inches(x), Inches(ty), Inches(width), Inches(0.26), fill, LINE)
+            _text(slide, Inches(x + 0.04), Inches(ty + 0.02), Inches(width - 0.06), Inches(0.22), value, 11, color, r_i == 0)
+            x += width
+        ty += 0.26
+
+    _text(
+        slide, Inches(8.85), Inches(5.78), Inches(4.2), Inches(0.9),
+        "Executive note: prefer Active Mode solutions for network action. "
+        "Use Scanner maps only to see where idle best-server differs from the UE serving cell.",
+        11, INK,
+    )
     _footer(slide, 1, pages)
 
 
@@ -955,7 +1018,7 @@ def _annex_workbook(prs: Presentation, page: int, pages: int, groups: list[dict]
     if partial:
         deck += "Samples: " + ", ".join(partial) + "."
     rows = [
-        ("Excel v1.96", "Active maps circle every red/blank run and attach a solution; proposed azimuth is dotted with a 45° minimum sector gap. Idle-area maps reuse the same active serving lines (yellow) beside idle serving (blue). Built surgically from the openable v1.95 Neon package."),
+        ("Excel v1.97", "One Bad Spot sheet: Active Mode first, Scanner second. Cover is an executive summary. Executive Summary PPT is Active-only KPIs plus band mix / RSRP ranges. Multi-circle when blanks sit off the main oval."),
         ("This deck", deck),
         ("Web v1.89", "Feeder draws the idle feeder swaps. Click a site for the sectors. A three-sector rotation uses red, cyan and violet. A two-sector swap stays red and cyan, with the third arm yellow. Site names stay white with a dark edge."),
         ("RSRQ and SINR", "The coverage maps are in this deck. The workbook no longer has separate RSRQ or SINR bad-spot sheets. Poor RSRQ is at or below −20 dB. Poor SINR is at or below 0 dB."),

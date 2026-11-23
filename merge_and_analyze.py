@@ -4952,7 +4952,6 @@ def _record_circle_pixels(
     save_dpi = float(MAP_DPI)
     circles = []
     for i, (_, spot) in enumerate(spots.iterrows()):
-        n = name_start + i
         use_ax = axes[i] if axes is not None else ax
         cx, cy, w, h, _angle, _style = _spot_outline(spot)
         x0, y_lo = use_ax.transData.transform((cx - w / 2.0, cy - h / 2.0))
@@ -4966,8 +4965,11 @@ def _record_circle_pixels(
 
         left, right = to_saved_x(x0), to_saved_x(x1)
         top, bottom = to_saved_y_top(y_hi), to_saved_y_top(y_lo)
+        # Primary keeps Circle N. Extra satellite ovals use Circle Na, Nb, …
+        # so they do not collide with the next bad-spot number.
+        label = f"Circle {name_start}" if i == 0 else f"Circle {name_start}{chr(ord('a') + i)}"
         circles.append({
-            "name": f"Circle {n}",
+            "name": label,
             "x": float(min(left, right)),
             "y": float(min(top, bottom)),
             "w": float(abs(right - left)),
@@ -6118,6 +6120,84 @@ def with_tight_outline(
     return display
 
 
+def satellite_circle_spots(
+    samples: pd.DataFrame, spot: pd.Series, column: str = "RSRP",
+) -> pd.DataFrame:
+    """Extra movable circles when a blank/red pocket sits off the main oval.
+
+    One oval stays on the main poor run. A blank or red pocket that is not on
+    that line (more than ~1.15 km from the main centre, and outside the main
+    oval) gets its own dotted circle so discrete holes are not left unmarked.
+    """
+    main = with_tight_outline(samples, spot, column)
+    rows = [main]
+    blanks = _blank_segments(samples, spot)
+    lat0 = float(main["outline_lat"])
+    lon0 = float(main["outline_lon"])
+    km_lon = _km_per_deg_lon(lat0)
+    main_box = {
+        "outline_lat": lat0,
+        "outline_lon": lon0,
+        "outline_width_km": float(main["outline_width_km"]),
+        "outline_height_km": float(main["outline_height_km"]),
+    }
+    for gap in blanks:
+        if float(gap.get("length_m") or 0) < 80:
+            continue
+        mid_lat = (float(gap["lat1"]) + float(gap["lat2"])) / 2.0
+        mid_lon = (float(gap["lon1"]) + float(gap["lon2"])) / 2.0
+        dist_km = math.hypot((mid_lat - lat0) * 111.32, (mid_lon - lon0) * km_lon)
+        if dist_km < 1.15:
+            continue
+        if _outline_radius(mid_lat, mid_lon, main_box) <= 1.08:
+            continue
+        extra = main.copy()
+        length_km = max(float(gap["length_m"]) / 1000.0, 0.35)
+        extra["outline_lat"] = mid_lat
+        extra["outline_lon"] = mid_lon
+        extra["outline_width_km"] = float(min(max(length_km * 0.55, 0.45), 2.5))
+        extra["outline_height_km"] = float(min(max(length_km * 0.45, 0.40), 2.2))
+        extra["kind"] = "discrete"
+        rows.append(extra)
+        if len(rows) >= 4:
+            break
+    if len(rows) > 1:
+        return pd.DataFrame(rows)
+
+    # Discrete red clusters far from the main centre (no blank gap recorded).
+    if str(spot.get("kind", "")) != "discrete":
+        return pd.DataFrame(rows)
+    inside = _samples_inside_outline(samples, spot)
+    if inside is None or inside.empty or column not in inside.columns:
+        return pd.DataFrame(rows)
+    values = pd.to_numeric(inside[column], errors="coerce")
+    cut = min(float(BAD_SPOT_RULES[column]["threshold"]), -115.0) if column == "RSRP" else float(BAD_SPOT_RULES[column]["threshold"])
+    red = inside.loc[values < cut].dropna(subset=["Latitude", "Longitude"])
+    if len(red) < 8:
+        return pd.DataFrame(rows)
+    dist = np.hypot(
+        (red["Latitude"].astype(float) - lat0) * 111.32,
+        (red["Longitude"].astype(float) - lon0) * km_lon,
+    )
+    far = red.loc[dist > 1.20]
+    if len(far) < 5:
+        return pd.DataFrame(rows)
+    flat = float(far["Latitude"].median())
+    flon = float(far["Longitude"].median())
+    if _outline_radius(flat, flon, main_box) <= 1.05:
+        return pd.DataFrame(rows)
+    extra = main.copy()
+    height = max((float(far["Latitude"].max()) - float(far["Latitude"].min())) * 111.32 + 0.25, 0.40)
+    width = max((float(far["Longitude"].max()) - float(far["Longitude"].min())) * km_lon + 0.25, 0.40)
+    extra["outline_lat"] = flat
+    extra["outline_lon"] = flon
+    extra["outline_width_km"] = float(min(width, 2.8))
+    extra["outline_height_km"] = float(min(height, 2.8))
+    extra["kind"] = "discrete"
+    rows.append(extra)
+    return pd.DataFrame(rows)
+
+
 def plot_idle_area_map(idle: pd.DataFrame, active: pd.DataFrame, spot: pd.Series, path: Path) -> Path:
     """Idle RSRP on the same window as the active map. The circle hugs the red samples."""
     (west, east, south, north), _plan = _serial_spot_extent(active, spot, "RSRP", "Active")
@@ -6378,7 +6458,7 @@ def plot_bad_spot_serial_maps(
                 zorder=25,
             )
         add_map_scale_bar(ax, boxed=False)
-        one = work.iloc[[i - 1]].reset_index(drop=True)
+        one = satellite_circle_spots(df, work.iloc[i - 1], column)
         _save_map(fig, path, ax=ax, spots=one, name_start=i)
         paths.append(path)
     return paths

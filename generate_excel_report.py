@@ -91,7 +91,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.96"
+REPORT_VERSION = "1.97"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -2986,10 +2986,27 @@ def refresh_idle_area_maps(src: Path, dest: Path, pngs: list[Path], notes: list[
     if len(headers) != 99:
         raise SystemExit(f"found {len(headers)} active bad-spot titles, expected 99")
 
-    # Neon packages already carry Idle-vs-active note rows under each Active map.
-    # Replace those cells in place; do not insert (that would collide with advice).
+    # Refresh Idle-vs-active notes on the existing note rows (column F+, just after
+    # each idle RSRP map within the spot band). Do not insert — that would collide
+    # with advice / the next map.
+    note_headers: dict[int, int] = {}
+    for match in re.finditer(
+        r'<c r="[F-J](\d+)"[^>]*>\s*<is>\s*<t(?: xml:space="preserve")?>Idle vs active</t>',
+        xml,
+    ):
+        row = int(match.group(1))
+        # Map each note to the nearest Active bad-spot title above it.
+        above = [headers[n] for n in headers if headers[n] < row]
+        if not above:
+            continue
+        number = max(
+            (n for n in headers if headers[n] == max(above)),
+            default=None,
+        )
+        if number is not None and number not in note_headers:
+            note_headers[number] = row
     for number, (coverage, serving) in enumerate(notes, start=1):
-        start = headers[number] + 42
+        start = note_headers.get(number, headers[number] + 42)
         body = start + 1
         xml = _replace_inline_text(xml, start, "Idle vs active")
         xml = _replace_inline_text(xml, body, coverage + "\n" + serving)
@@ -4244,6 +4261,16 @@ def publish_report_v196(src: Path, dest: Path) -> Path:
     return path
 
 
+def publish_report_v197(src: Path, dest: Path) -> Path:
+    """One Bad Spot sheet (Active then Scanner), Cover executive summary, multi-circle."""
+    from publish_report_v197 import publish
+
+    path = publish(src, dest)
+    if dest.resolve() != REPORT_XLSX.resolve():
+        shutil.copy2(dest, REPORT_XLSX)
+    return path
+
+
 def publish_report_v191(src: Path, dest: Path) -> Path:
     """Gemini 4 Neon executive restyle across every sheet, preserving maps and circles.
 
@@ -4552,7 +4579,8 @@ def _advice_sheet_rows(header: int, plan: dict) -> tuple[dict[int, str], list[st
     """Four description blocks beside one bad-spot map.
 
     The block stays inside the rows reserved for this spot, so the next map
-    and its movable circle are left where they are.
+    and its movable circle are left where they are. Parameter change uses
+    three colour groups (identity / Existing / New Plan) plus a Solutions column.
     """
     title = header + 2
     sections = plan.get("sections") or {}
@@ -4564,6 +4592,9 @@ def _advice_sheet_rows(header: int, plan: dict) -> tuple[dict[int, str], list[st
     )
     spans = (8, 5, 5, 6)
     changes = plan.get("changes") or []
+    # Style indices from _add_advice_styles: 38 identity, 39 Existing, 40 New Plan, 41 Solutions.
+    style_id, style_exist, style_new, style_sol = 38, 39, 40, 41
+    plan_solution = _SOLUTION_NAME.get(str(plan.get("kind") or ""), str(plan.get("badge") or plan.get("kind") or ""))
 
     def cell(ref: str, style: int, text: str | None = None) -> str:
         if text is None:
@@ -4594,53 +4625,62 @@ def _advice_sheet_rows(header: int, plan: dict) -> tuple[dict[int, str], list[st
     # The next bad-spot title is 41 rows down. The table stays in the gap.
     table_at = header + 32
     rows[table_at] = styled_row(table_at, [
-        cell(f"I{table_at}", 32, "Parameter change"),
-        cell(f"J{table_at}", 32),
-        cell(f"K{table_at}", 32),
-        cell(f"L{table_at}", 32, "Existing"),
-        cell(f"M{table_at}", 32),
-        cell(f"N{table_at}", 32),
-        cell(f"O{table_at}", 32),
-        cell(f"P{table_at}", 32, "New Plan"),
-        cell(f"Q{table_at}", 32),
-        cell(f"R{table_at}", 32),
-        cell(f"S{table_at}", 32),
+        cell(f"I{table_at}", style_id, "Parameter change"),
+        cell(f"J{table_at}", style_id),
+        cell(f"K{table_at}", style_id),
+        cell(f"L{table_at}", style_exist, "Existing"),
+        cell(f"M{table_at}", style_exist),
+        cell(f"N{table_at}", style_exist),
+        cell(f"O{table_at}", style_exist),
+        cell(f"P{table_at}", style_new, "New Plan"),
+        cell(f"Q{table_at}", style_new),
+        cell(f"R{table_at}", style_new),
+        cell(f"S{table_at}", style_new),
+        cell(f"T{table_at}", style_sol, "Solutions"),
     ])
     merges.append(f"I{table_at}:K{table_at}")
     merges.append(f"L{table_at}:O{table_at}")
     merges.append(f"P{table_at}:S{table_at}")
-    labels = ("Site", "Cell", "Sector", "Height", "Azimuth", "ET", "MT", "Height", "Azimuth", "ET", "MT")
+    labels = (
+        ("Site", style_id), ("Cell", style_id), ("Sector", style_id),
+        ("Height", style_exist), ("Azimuth", style_exist), ("ET", style_exist), ("MT", style_exist),
+        ("Height", style_new), ("Azimuth", style_new), ("ET", style_new), ("MT", style_new),
+        ("Solutions", style_sol),
+    )
     head = table_at + 1
     rows[head] = styled_row(head, [
-        cell(f"{get_column_letter(9 + index)}{head}", 36, text)
-        for index, text in enumerate(labels)
+        cell(f"{get_column_letter(9 + index)}{head}", style, text)
+        for index, (text, style) in enumerate(labels)
     ])
     shown = changes[:7]
     if not shown:
         note = head + 1
         rows[note] = styled_row(note, [
             cell(f"I{note}", 37, "No azimuth or tilt change."),
+            cell(f"T{note}", 37, plan_solution),
         ])
         merges.append(f"I{note}:S{note}")
         return rows, merges
     for offset, item in enumerate(shown):
         data = head + 1 + offset
+        solution = str(item.get("action") or plan_solution)
         values = (
-            item.get("site") or "",
-            item.get("cell") or "",
-            item.get("sector") or "",
-            _sheet_number(item.get("height")),
-            _sheet_number(item.get("azimuth")),
-            _sheet_number(item.get("et")),
-            _sheet_number(item.get("mt")),
-            _sheet_number(item.get("p_height")),
-            _sheet_number(item.get("p_azimuth")),
-            _sheet_number(item.get("p_et")),
-            _sheet_number(item.get("p_mt")),
+            (item.get("site") or "", style_id),
+            (item.get("cell") or "", style_id),
+            (item.get("sector") or "", style_id),
+            (_sheet_number(item.get("height")), style_exist),
+            (_sheet_number(item.get("azimuth")), style_exist),
+            (_sheet_number(item.get("et")), style_exist),
+            (_sheet_number(item.get("mt")), style_exist),
+            (_sheet_number(item.get("p_height")), style_new),
+            (_sheet_number(item.get("p_azimuth")), style_new),
+            (_sheet_number(item.get("p_et")), style_new),
+            (_sheet_number(item.get("p_mt")), style_new),
+            (solution, style_sol),
         )
         rows[data] = styled_row(data, [
-            cell(f"{get_column_letter(9 + index)}{data}", 37, text)
-            for index, text in enumerate(values)
+            cell(f"{get_column_letter(9 + index)}{data}", style, text)
+            for index, (text, style) in enumerate(values)
         ])
     return rows, merges
 
@@ -4702,39 +4742,70 @@ def _insert_sheet_rows(xml: str, rows: dict[int, str], merges: list[str]) -> str
 
 
 def _add_advice_styles(styles: str) -> str:
-    if "<cellXfs count=\"38\">" in styles:
+    if "<cellXfs count=\"42\">" in styles:
         return styles
-    if "<cellXfs count=\"35\">" not in styles:
-        if "<fonts count=\"8\">" not in styles or "<cellXfs count=\"32\">" not in styles:
-            raise SystemExit("Workbook styles are not the expected set; refusing to append advice styles")
-        styles = styles.replace("<fonts count=\"8\">", "<fonts count=\"9\">", 1)
+    if "<cellXfs count=\"38\">" not in styles:
+        if "<cellXfs count=\"35\">" not in styles:
+            if "<fonts count=\"8\">" not in styles or "<cellXfs count=\"32\">" not in styles:
+                raise SystemExit("Workbook styles are not the expected set; refusing to append advice styles")
+            styles = styles.replace("<fonts count=\"8\">", "<fonts count=\"9\">", 1)
+            styles = styles.replace(
+                "</fonts>",
+                '<font><name val="Calibri"/><b val="1"/><color rgb="001B4F72"/><sz val="11"/></font></fonts>',
+                1,
+            )
+            styles = styles.replace("<cellXfs count=\"32\">", "<cellXfs count=\"35\">", 1)
+            styles = styles.replace(
+                "</cellXfs>",
+                '<xf numFmtId="0" fontId="8" fillId="5" borderId="0" applyAlignment="1" xfId="0">'
+                '<alignment horizontal="center" vertical="center"/></xf>'
+                '<xf numFmtId="0" fontId="8" fillId="0" borderId="0" applyAlignment="1" xfId="0">'
+                '<alignment horizontal="left" vertical="top" wrapText="1"/></xf>'
+                '<xf numFmtId="0" fontId="6" fillId="0" borderId="0" applyAlignment="1" xfId="0">'
+                '<alignment horizontal="left" vertical="top" wrapText="1"/></xf>'
+                "</cellXfs>",
+                1,
+            )
+        styles = styles.replace("<cellXfs count=\"35\">", "<cellXfs count=\"38\">", 1)
+        added = (
+            '<xf numFmtId="0" fontId="8" fillId="5" borderId="1" applyAlignment="1" xfId="0">'
+            '<alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
+            '<xf numFmtId="0" fontId="8" fillId="0" borderId="1" applyAlignment="1" xfId="0">'
+            '<alignment horizontal="center" vertical="top" wrapText="1"/></xf>'
+            '<xf numFmtId="0" fontId="6" fillId="0" borderId="1" applyAlignment="1" xfId="0">'
+            '<alignment horizontal="left" vertical="top" wrapText="1"/></xf>'
+        )
+        styles = styles.replace("</cellXfs>", added + "</cellXfs>", 1)
+    # Colour groups for Parameter change / Existing / New Plan / Solutions.
+    fill_match = re.search(r'<fills count="(\d+)">', styles)
+    if fill_match is None:
+        raise SystemExit("Workbook fills were not found")
+    fill_count = int(fill_match.group(1))
+    if fill_count < 10:
+        styles = styles.replace(f'<fills count="{fill_count}">', f'<fills count="{fill_count + 4}">', 1)
         styles = styles.replace(
-            "</fonts>",
-            '<font><name val="Calibri"/><b val="1"/><color rgb="001B4F72"/><sz val="11"/></font></fonts>',
+            "</fills>",
+            '<fill><patternFill patternType="solid"><fgColor rgb="FFD6EAF8"/><bgColor indexed="64"/></patternFill></fill>'
+            '<fill><patternFill patternType="solid"><fgColor rgb="FFD5F5E3"/><bgColor indexed="64"/></patternFill></fill>'
+            '<fill><patternFill patternType="solid"><fgColor rgb="FFFDEBD0"/><bgColor indexed="64"/></patternFill></fill>'
+            '<fill><patternFill patternType="solid"><fgColor rgb="FFE8DAEF"/><bgColor indexed="64"/></patternFill></fill>'
+            "</fills>",
             1,
         )
-        styles = styles.replace("<cellXfs count=\"32\">", "<cellXfs count=\"35\">", 1)
-        styles = styles.replace(
-            "</cellXfs>",
-            '<xf numFmtId="0" fontId="8" fillId="5" borderId="0" applyAlignment="1" xfId="0">'
-            '<alignment horizontal="center" vertical="center"/></xf>'
-            '<xf numFmtId="0" fontId="8" fillId="0" borderId="0" applyAlignment="1" xfId="0">'
-            '<alignment horizontal="left" vertical="top" wrapText="1"/></xf>'
-            '<xf numFmtId="0" fontId="6" fillId="0" borderId="0" applyAlignment="1" xfId="0">'
-            '<alignment horizontal="left" vertical="top" wrapText="1"/></xf>'
-            "</cellXfs>",
-            1,
-        )
-    styles = styles.replace("<cellXfs count=\"35\">", "<cellXfs count=\"38\">", 1)
-    added = (
-        '<xf numFmtId="0" fontId="8" fillId="5" borderId="1" applyAlignment="1" xfId="0">'
+        fill_count += 4
+    id_fill, exist_fill, new_fill, sol_fill = fill_count - 4, fill_count - 3, fill_count - 2, fill_count - 1
+    styles = styles.replace("<cellXfs count=\"38\">", "<cellXfs count=\"42\">", 1)
+    colored = (
+        f'<xf numFmtId="0" fontId="8" fillId="{id_fill}" borderId="1" applyFill="1" applyAlignment="1" xfId="0">'
         '<alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
-        '<xf numFmtId="0" fontId="8" fillId="0" borderId="1" applyAlignment="1" xfId="0">'
-        '<alignment horizontal="center" vertical="top" wrapText="1"/></xf>'
-        '<xf numFmtId="0" fontId="6" fillId="0" borderId="1" applyAlignment="1" xfId="0">'
-        '<alignment horizontal="left" vertical="top" wrapText="1"/></xf>'
+        f'<xf numFmtId="0" fontId="8" fillId="{exist_fill}" borderId="1" applyFill="1" applyAlignment="1" xfId="0">'
+        '<alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
+        f'<xf numFmtId="0" fontId="8" fillId="{new_fill}" borderId="1" applyFill="1" applyAlignment="1" xfId="0">'
+        '<alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
+        f'<xf numFmtId="0" fontId="8" fillId="{sol_fill}" borderId="1" applyFill="1" applyAlignment="1" xfId="0">'
+        '<alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
     )
-    return styles.replace("</cellXfs>", added + "</cellXfs>", 1)
+    return styles.replace("</cellXfs>", colored + "</cellXfs>", 1)
 
 
 def _inline_cell(ref: str, style: int, text: str) -> str:
@@ -5023,17 +5094,11 @@ def _drop_cover_summary(xml: str) -> str:
 
 
 def _graft_cover_summary(xml: str, idle_plans: list[dict], active_plans: list[dict]) -> str:
-    """Idle and Active bad-spot counts and the final solution for every spot."""
+    """Executive summary for bad spots — counts and narrative, no per-spot list."""
     xml = _drop_cover_summary(xml)
     rows: list[str] = []
     merges: list[str] = []
     row = _COVER_SUMMARY_ROW
-    bar = [_inline_cell(f"A{row}", 5, "BAD Spot Summary")]
-    for col in range(2, 21):
-        bar.append(f'<c r="{get_column_letter(col)}{row}" s="5" t="n" />')
-    rows.append(f'<row r="{row}" ht="22" customHeight="1">{"".join(bar)}</row>')
-    merges.append(f"A{row}:T{row}")
-    row += 2
 
     def counts_of(plans: list[dict]) -> dict[str, int]:
         counts = {"tune": 0, "fourth": 0, "new": 0, "ep": 0}
@@ -5045,11 +5110,36 @@ def _graft_cover_summary(xml: str, idle_plans: list[dict], active_plans: list[di
 
     idle_counts = counts_of(idle_plans)
     active_counts = counts_of(active_plans)
+    bar = [_inline_cell(f"A{row}", 5, "Executive Summary — Bad Spots")]
+    for col in range(2, 21):
+        bar.append(f'<c r="{get_column_letter(col)}{row}" s="5" t="n" />')
+    rows.append(f'<row r="{row}" ht="22" customHeight="1">{"".join(bar)}</row>')
+    merges.append(f"A{row}:T{row}")
+    row += 2
+
+    exec_text = (
+        f"Active Mode (UE) first: {len(active_plans)} bad spots on the Robi M-PCell track "
+        f"(tilt/azimuth {active_counts['tune']}, 4th sector {active_counts['fourth']}, "
+        f"new site {active_counts['new']}, EP check {active_counts['ep']}). "
+        f"Scanner (Idle) second: {len(idle_plans)} bad spots "
+        f"(tilt/azimuth {idle_counts['tune']}, 4th sector {idle_counts['fourth']}, "
+        f"new site {idle_counts['new']}, EP check {idle_counts['ep']}). "
+        "Scanner coverage does not reflect actual UE coverage; Active Mode solutions are the "
+        "primary action list. Scanner solutions stay in the Scanner Bad Spot section only. "
+        "Each Active spot shows an Idle RSRP comparison map so the difference is visible. "
+        "Detail maps and parameter tables are on Bad Spot RSRP_Active."
+    )
+    rows.append(
+        f'<row r="{row}" ht="72" customHeight="1">'
+        f'{_inline_cell(f"A{row}", 37, exec_text)}</row>'
+    )
+    merges.append(f"A{row}:T{row}")
+    row += 2
     rows.append(
         f'<row r="{row}" ht="18" customHeight="1">'
         f'{_inline_cell(f"A{row}", 7, "Solution")}'
         f'{_inline_cell(f"B{row}", 7, "Active")}'
-        f'{_inline_cell(f"C{row}", 7, "Idle")}</row>'
+        f'{_inline_cell(f"C{row}", 7, "Scanner")}</row>'
     )
     row += 1
     for label, key in (
@@ -5069,39 +5159,6 @@ def _graft_cover_summary(xml: str, idle_plans: list[dict], active_plans: list[di
             f'{_inline_cell(f"C{row}", style, idle_value)}</row>'
         )
         row += 1
-    row += 1
-    rows.append(
-        f'<row r="{row}" ht="18" customHeight="1">'
-        f'{_inline_cell(f"A{row}", 7, "Mode")}'
-        f'{_inline_cell(f"B{row}", 7, "Bad spot")}'
-        f'{_inline_cell(f"C{row}", 7, "Site")}'
-        f'{_inline_cell(f"D{row}", 7, "Sector")}'
-        f'{_inline_cell(f"E{row}", 7, "Serving cell")}'
-        f'{_inline_cell(f"F{row}", 7, "Population")}'
-        f'{_inline_cell(f"G{row}", 7, "Solution")}'
-        f'{_inline_cell(f"H{row}", 7, "Final solution")}</row>'
-    )
-    merges.append(f"H{row}:T{row}")
-    row += 1
-    for mode, plans in (("Active", active_plans), ("Idle", idle_plans)):
-        for index, plan in enumerate(plans, 1):
-            sector, _proposed_cell = _plan_sector_cell(plan)
-            cell = str(plan.get("serving") or "")
-            lines = str(plan.get("final") or "").count("\n") + 1
-            height = max(36, min(16 * lines + 8, 110))
-            rows.append(
-                f'<row r="{row}" ht="{height}" customHeight="1">'
-                f'{_inline_cell(f"A{row}", 20, mode)}'
-                f'{_inline_cell(f"B{row}", 20, f"Bad spot {index}")}'
-                f'{_inline_cell(f"C{row}", 20, str(plan.get("site") or ""))}'
-                f'{_inline_cell(f"D{row}", 37, sector)}'
-                f'{_inline_cell(f"E{row}", 37, cell)}'
-                f'{_inline_cell(f"F{row}", 20, str(plan.get("population") or ""))}'
-                f'{_inline_cell(f"G{row}", 20, _SOLUTION_NAME.get(str(plan.get("kind") or ""), ""))}'
-                f'{_inline_cell(f"H{row}", 37, str(plan.get("final") or ""))}</row>'
-            )
-            merges.append(f"H{row}:T{row}")
-            row += 1
     last = row - 1
     xml = xml.replace("</sheetData>", "".join(rows) + "</sheetData>", 1)
     xml = re.sub(
@@ -5153,12 +5210,12 @@ def _place_cover_summary_beside_route(xml: str, idle_plans: list[dict], active_p
         xml = xml[: match.start()] + match.group(1) + body + match.group(3) + xml[match.end() :]
 
     title = {col: f'<c r="{col}74" s="5" t="n" />' for col in "QRST"}
-    title["P"] = _inline_cell("P74", 5, "Bad Spot Summary across Mode")
+    title["P"] = _inline_cell("P74", 5, "Executive Summary — Bad Spots")
     write(74, title)
     write(76, {
         "P": _inline_cell("P76", 7, "Solution"),
         "Q": _inline_cell("Q76", 7, "Active"),
-        "R": _inline_cell("R76", 7, "Idle"),
+        "R": _inline_cell("R76", 7, "Scanner"),
     })
     data_rows = (
         (77, "Tilt and azimuth", idle_counts["tune"], active_counts["tune"], 20),
