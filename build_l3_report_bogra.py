@@ -322,6 +322,9 @@ SECTION_ORDER = (
     "Others",
 )
 
+# Comparison and Differences list Power before Mobility. Section tabs keep SECTION_ORDER.
+COMPARE_SECTION_ORDER = ("Power",) + tuple(s for s in SECTION_ORDER if s != "Power")
+
 _OTHERS_SECTION = {
     "Connected DRX": "Connected DRX",
     "MAC Main Config": "MAC",
@@ -1854,7 +1857,7 @@ def _comparison_rows(values):
 
     def sort_key(row):
         try:
-            si = SECTION_ORDER.index(row["section"])
+            si = COMPARE_SECTION_ORDER.index(row["section"])
         except ValueError:
             si = 99
         return (si, row["group"], row["param"])
@@ -1949,7 +1952,7 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
     cover.sheet_view.showGridLines = False
     cover["A1"] = "L3 REPORT FOR BOGRA"
     cover["A1"].font = Font(name="Calibri", size=20, bold=True, color="1F4E78")
-    cover["A2"] = "Version 5 — mapped meaning is inside the Robi and GP value cells"
+    cover["A2"] = "Version 6 — Power is the first section on Comparison"
     cover["A2"].font = Font(name="Calibri", size=13, color="595959")
     cover["A4"] = "Version"
     cover["B4"] = "What it contains"
@@ -1962,7 +1965,8 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
         ("v2", "Only settings that are stable on both networks, with the idle-search finding.", "L3_REPORT_FOR_BOGRA_v2.xlsx"),
         ("v3", "Full list, named sections, one sheet per section, and a difference sheet per section.", "L3_REPORT_FOR_BOGRA_v3.xlsx"),
         ("v4", "v3, with subframeAssignment, specialSubframePatterns, cyclic prefix, and TDD ACK/NACK moved to Frame structure.", "L3_REPORT_FOR_BOGRA_v4.xlsx"),
-        ("v5 (this file)", "v4, with the mapped meaning written in the Robi value and GP value cells. The separate meaning columns are gone.", "L3_REPORT_FOR_BOGRA_v5.xlsx"),
+        ("v5", "v4, with the mapped meaning written in the Robi value and GP value cells. The separate meaning columns are gone.", "L3_REPORT_FOR_BOGRA_v5.xlsx"),
+        ("v6 (this file)", "v5, with Power as the first section on Comparison and Differences.", "L3_REPORT_FOR_BOGRA_v6.xlsx"),
     ]
     for i, (ver, what, fname) in enumerate(versions, 5):
         cover.cell(i, 1, ver)
@@ -1972,7 +1976,7 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
             cover.cell(i, col).alignment = Alignment(wrap_text=True, vertical="top")
             cover.cell(i, col).font = Font(name="Calibri", size=11)
         cover.row_dimensions[i].height = 36
-    cover["A11"] = (
+    cover["A12"] = (
         f"Source: Layer 3_Active Mode_Data_Robi_v1.7z. "
         f"Robi {sum(msg_counts['Robi'].values()):,} messages, "
         f"Grameenphone {sum(msg_counts['Grameenphone'].values()):,}. "
@@ -1982,8 +1986,8 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
         "ul-CyclicPrefixLength, and tdd-AckNackFeedbackMode, including the copies broadcast in SIB, "
         "sent at handover, and configured on an SCell."
     )
-    cover["A11"].alignment = Alignment(wrap_text=True, vertical="top")
-    cover.merge_cells("A11:C13")
+    cover["A12"].alignment = Alignment(wrap_text=True, vertical="top")
+    cover.merge_cells("A12:C14")
     cover.column_dimensions["A"].width = 18
     cover.column_dimensions["B"].width = 88
     cover.column_dimensions["C"].width = 36
@@ -2019,10 +2023,10 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
     wb.save(out_path)
 
     lines = [
-        "# L3 REPORT FOR BOGRA — v5",
+        "# L3 REPORT FOR BOGRA — v6",
         "",
         "Robi vs Grameenphone. Every decoded Layer-3 parameter is on the Comparison sheet.",
-        "v5 writes the mapped meaning in the Robi value and GP value cells. A converted field reads as the raw IE, then the unit, then the sample share, for example `24 → -116 dBm  [254, 32%]`. Fields with no mapping keep the raw setting and the share.",
+        "v6 lists Power first on Comparison and Differences. Mobility follows, then Idle mode, Frame structure, and the remaining sections. The Robi value and GP value cells still include the mapped unit and the sample share.",
         "",
         "## Versions",
         "",
@@ -2032,16 +2036,17 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
         "| v2 | `output/L3_REPORT_FOR_BOGRA_v2.xlsx` | Stable settings only, with the idle-search finding. |",
         "| v3 | `output/L3_REPORT_FOR_BOGRA_v3.xlsx` | Full list, named sections, one sheet per section, difference sheets. |",
         "| v4 | `output/L3_REPORT_FOR_BOGRA_v4.xlsx` | Frame structure section for the TDD subframe parameters. |",
-        "| v5 | `output/L3_REPORT_FOR_BOGRA_v5.xlsx` | v4, with mapped meaning inside the Robi and GP value cells. Current. |",
+        "| v5 | `output/L3_REPORT_FOR_BOGRA_v5.xlsx` | Mapped meaning inside the Robi and GP value cells. |",
+        "| v6 | `output/L3_REPORT_FOR_BOGRA_v6.xlsx` | v5, with Power first on Comparison and Differences. Current. |",
         "",
-        f"Parameters in v5: {len(rows)}. Rows that differ: {len(diff_rows)}.",
+        f"Parameters in v6: {len(rows)}. Rows that differ: {len(diff_rows)}.",
         "",
         "## Sections",
         "",
         "| Section | Parameters | Different | Robi only | GP only | Same |",
         "| --- | ---: | ---: | ---: | ---: | ---: |",
     ]
-    for section in SECTION_ORDER:
+    for section in COMPARE_SECTION_ORDER:
         part = [r for r in rows if r["section"] == section]
         if not part:
             continue
@@ -2068,7 +2073,7 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--l3-dir", type=Path, default=DEFAULT_L3_DIR)
-    ap.add_argument("--out", type=Path, default=ROOT / "output" / "L3_REPORT_FOR_BOGRA_v5.xlsx")
+    ap.add_argument("--out", type=Path, default=ROOT / "output" / "L3_REPORT_FOR_BOGRA_v6.xlsx")
     args = ap.parse_args()
     print(f"Scanning {args.l3_dir} ...")
     values, msg_counts, _events = scan(args.l3_dir)

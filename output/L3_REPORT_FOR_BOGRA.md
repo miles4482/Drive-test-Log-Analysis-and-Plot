@@ -1,7 +1,7 @@
-# L3 REPORT FOR BOGRA — v5
+# L3 REPORT FOR BOGRA — v6
 
 Robi vs Grameenphone. Every decoded Layer-3 parameter is on the Comparison sheet.
-v5 writes the mapped meaning in the Robi value and GP value cells. A converted field reads as the raw IE, then the unit, then the sample share, for example `24 → -116 dBm  [254, 32%]`. Fields with no mapping keep the raw setting and the share.
+v6 lists Power first on Comparison and Differences. Mobility follows, then Idle mode, Frame structure, and the remaining sections. The Robi value and GP value cells still include the mapped unit and the sample share.
 
 ## Versions
 
@@ -11,16 +11,17 @@ v5 writes the mapped meaning in the Robi value and GP value cells. A converted f
 | v2 | `output/L3_REPORT_FOR_BOGRA_v2.xlsx` | Stable settings only, with the idle-search finding. |
 | v3 | `output/L3_REPORT_FOR_BOGRA_v3.xlsx` | Full list, named sections, one sheet per section, difference sheets. |
 | v4 | `output/L3_REPORT_FOR_BOGRA_v4.xlsx` | Frame structure section for the TDD subframe parameters. |
-| v5 | `output/L3_REPORT_FOR_BOGRA_v5.xlsx` | v4, with mapped meaning inside the Robi and GP value cells. Current. |
+| v5 | `output/L3_REPORT_FOR_BOGRA_v5.xlsx` | Mapped meaning inside the Robi and GP value cells. |
+| v6 | `output/L3_REPORT_FOR_BOGRA_v6.xlsx` | v5, with Power first on Comparison and Differences. Current. |
 
-Parameters in v5: 247. Rows that differ: 63.
+Parameters in v6: 247. Rows that differ: 63.
 
 ## Sections
 
 | Section | Parameters | Different | Robi only | GP only | Same |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Mobility | 76 | 14 | 5 | 2 | 55 |
 | Power | 28 | 0 | 0 | 0 | 28 |
+| Mobility | 76 | 14 | 5 | 2 | 55 |
 | Idle mode | 70 | 17 | 9 | 1 | 43 |
 | Frame structure | 9 | 2 | 0 | 0 | 7 |
 | Connected DRX | 6 | 2 | 0 | 0 | 4 |

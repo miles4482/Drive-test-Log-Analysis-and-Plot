@@ -26,7 +26,7 @@ Borga_Active_mode_11Nov26.7z  -->  1.csv … 15.csv  -->  output/Bogura_active_m
 
 ## L3 REPORT FOR BOGRA (Robi vs GP)
 
-Current file is **v5**. Each publish is a new version. Previous workbooks stay in the repo.
+Current file is **v6**. Each publish is a new version. Previous workbooks stay in the repo.
 
 | Version | File | Contents |
 | --- | --- | --- |
@@ -35,8 +35,9 @@ Current file is **v5**. Each publish is a new version. Previous workbooks stay i
 | v3 | `output/L3_REPORT_FOR_BOGRA_v3.xlsx` | Full list, named sections, one sheet per section, and a difference sheet per section. |
 | v4 | `output/L3_REPORT_FOR_BOGRA_v4.xlsx` | v3, with TDD frame-structure parameters in their own section. |
 | v5 | `output/L3_REPORT_FOR_BOGRA_v5.xlsx` | v4, with the mapped meaning inside the Robi value and GP value cells. |
+| v6 | `output/L3_REPORT_FOR_BOGRA_v6.xlsx` | v5, with Power first on the Comparison sheet. |
 
-`output/L3_REPORT_FOR_BOGRA.xlsx` is a copy of v5.
+`output/L3_REPORT_FOR_BOGRA.xlsx` is a copy of v6.
 
 ```bash
 python3 -c "import py7zr; py7zr.SevenZipFile('Layer 3_Active Mode_Data_Robi_v1.7z').extractall('extracted/l3')"
