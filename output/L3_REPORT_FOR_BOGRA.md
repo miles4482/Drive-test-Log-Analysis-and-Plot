@@ -1,9 +1,7 @@
-# L3 REPORT FOR BOGRA — v4
+# L3 REPORT FOR BOGRA — v5
 
 Robi vs Grameenphone. Every decoded Layer-3 parameter is on the Comparison sheet.
-v4 adds a Frame structure section. subframeAssignment, specialSubframePatterns, tdd-SpecialSubframe-r11, ul-CyclicPrefixLength, and tdd-AckNackFeedbackMode sit there, whether they were read from SIB2, a handover, or an SCell.
-
-Meaning columns convert the mapped 3GPP value (RSRP index to dBm, offset and hysteresis to dB, q-RxLevMin to dBm). A note is filled where the two dominant values change UE behaviour.
+v5 writes the mapped meaning in the Robi value and GP value cells. A converted field reads as the raw IE, then the unit, then the sample share, for example `24 → -116 dBm  [254, 32%]`. Fields with no mapping keep the raw setting and the share.
 
 ## Versions
 
@@ -12,9 +10,10 @@ Meaning columns convert the mapped 3GPP value (RSRP index to dBm, offset and hys
 | v1 | `output/L3_REPORT_FOR_BOGRA_v1.xlsx` | Full list. Sections: Mobility, Power, Idle mode, Others. |
 | v2 | `output/L3_REPORT_FOR_BOGRA_v2.xlsx` | Stable settings only, with the idle-search finding. |
 | v3 | `output/L3_REPORT_FOR_BOGRA_v3.xlsx` | Full list, named sections, one sheet per section, difference sheets. |
-| v4 | `output/L3_REPORT_FOR_BOGRA_v4.xlsx` | v3 plus a Frame structure section for the TDD subframe parameters. Current. |
+| v4 | `output/L3_REPORT_FOR_BOGRA_v4.xlsx` | Frame structure section for the TDD subframe parameters. |
+| v5 | `output/L3_REPORT_FOR_BOGRA_v5.xlsx` | v4, with mapped meaning inside the Robi and GP value cells. Current. |
 
-Parameters in v4: 247. Rows that differ: 63.
+Parameters in v5: 247. Rows that differ: 63.
 
 ## Sections
 

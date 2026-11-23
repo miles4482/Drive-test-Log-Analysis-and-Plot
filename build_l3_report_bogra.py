@@ -990,6 +990,13 @@ def top_interpreted(param: str, counter: Counter, n: int = 5) -> str:
     return "\n".join(parts)
 
 
+def top_merged(param: str, counter: Counter, n: int = 5) -> str:
+    """Raw IE and mapped unit in one line, with the sample share."""
+    if not counter:
+        return "— (not seen)"
+    return top_interpreted(param, counter, n)
+
+
 def dominant(counter: Counter) -> str:
     if not counter:
         return ""
@@ -1836,11 +1843,9 @@ def _comparison_rows(values):
                 "section": published,
                 "group": group,
                 "param": param,
-                "robi": top_values(robi),
-                "gp": top_values(gp),
+                "robi": top_merged(param, robi),
+                "gp": top_merged(param, gp),
                 "status": status,
-                "robi_meaning": top_interpreted(param, robi),
-                "gp_meaning": top_interpreted(param, gp),
                 "nr": sum(robi.values()),
                 "ng": sum(gp.values()),
                 "note": note,
@@ -1865,8 +1870,6 @@ _COMPARE_HEADERS = [
     "Robi value",
     "GP value",
     "Status",
-    "Robi meaning",
-    "GP meaning",
     "Robi samples",
     "GP samples",
     "Note",
@@ -1921,14 +1924,12 @@ def _write_compare_sheet(ws, rows):
         ws.cell(i, 4, row["robi"])
         ws.cell(i, 5, row["gp"])
         ws.cell(i, 6, row["status"])
-        ws.cell(i, 7, row["robi_meaning"])
-        ws.cell(i, 8, row["gp_meaning"])
-        ws.cell(i, 9, row["nr"])
-        ws.cell(i, 10, row["ng"])
-        ws.cell(i, 11, row["note"])
+        ws.cell(i, 7, row["nr"])
+        ws.cell(i, 8, row["ng"])
+        ws.cell(i, 9, row["note"])
     if rows:
         _paint_compare_body(ws, 2, 1 + len(rows))
-    widths = [22, 36, 28, 36, 36, 16, 32, 32, 12, 12, 55]
+    widths = [22, 36, 28, 42, 42, 16, 14, 14, 55]
     for i, width in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = width
 
@@ -1948,7 +1949,7 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
     cover.sheet_view.showGridLines = False
     cover["A1"] = "L3 REPORT FOR BOGRA"
     cover["A1"].font = Font(name="Calibri", size=20, bold=True, color="1F4E78")
-    cover["A2"] = "Version 4 — Frame structure section for TDD subframe parameters"
+    cover["A2"] = "Version 5 — mapped meaning is inside the Robi and GP value cells"
     cover["A2"].font = Font(name="Calibri", size=13, color="595959")
     cover["A4"] = "Version"
     cover["B4"] = "What it contains"
@@ -1960,7 +1961,8 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
         ("v1", "Every decoded parameter. Sections: Mobility, Power, Idle mode, Others.", "L3_REPORT_FOR_BOGRA_v1.xlsx"),
         ("v2", "Only settings that are stable on both networks, with the idle-search finding.", "L3_REPORT_FOR_BOGRA_v2.xlsx"),
         ("v3", "Full list, named sections, one sheet per section, and a difference sheet per section.", "L3_REPORT_FOR_BOGRA_v3.xlsx"),
-        ("v4 (this file)", "v3, with subframeAssignment, specialSubframePatterns, cyclic prefix, and TDD ACK/NACK moved to Frame structure.", "L3_REPORT_FOR_BOGRA_v4.xlsx"),
+        ("v4", "v3, with subframeAssignment, specialSubframePatterns, cyclic prefix, and TDD ACK/NACK moved to Frame structure.", "L3_REPORT_FOR_BOGRA_v4.xlsx"),
+        ("v5 (this file)", "v4, with the mapped meaning written in the Robi value and GP value cells. The separate meaning columns are gone.", "L3_REPORT_FOR_BOGRA_v5.xlsx"),
     ]
     for i, (ver, what, fname) in enumerate(versions, 5):
         cover.cell(i, 1, ver)
@@ -1970,18 +1972,18 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
             cover.cell(i, col).alignment = Alignment(wrap_text=True, vertical="top")
             cover.cell(i, col).font = Font(name="Calibri", size=11)
         cover.row_dimensions[i].height = 36
-    cover["A10"] = (
+    cover["A11"] = (
         f"Source: Layer 3_Active Mode_Data_Robi_v1.7z. "
         f"Robi {sum(msg_counts['Robi'].values()):,} messages, "
         f"Grameenphone {sum(msg_counts['Grameenphone'].values()):,}. "
+        "Each Robi value and GP value line is the setting and its mapped unit when one exists "
+        "(RSRP index to dBm, a3-Offset and hysteresis to dB, q-RxLevMin to dBm), then the sample count and share. "
         "Frame structure holds subframeAssignment, specialSubframePatterns, tdd-SpecialSubframe-r11, "
-        "ul-CyclicPrefixLength, and tdd-AckNackFeedbackMode, including the copies broadcast in SIB2, "
-        "sent at handover, and configured on an SCell. "
-        "Robi value and GP value are the most common settings, with sample share. "
-        "Meaning converts mapped fields (RSRP index to dBm, a3-Offset and hysteresis to dB, q-RxLevMin to dBm)."
+        "ul-CyclicPrefixLength, and tdd-AckNackFeedbackMode, including the copies broadcast in SIB, "
+        "sent at handover, and configured on an SCell."
     )
-    cover["A10"].alignment = Alignment(wrap_text=True, vertical="top")
-    cover.merge_cells("A10:C12")
+    cover["A11"].alignment = Alignment(wrap_text=True, vertical="top")
+    cover.merge_cells("A11:C13")
     cover.column_dimensions["A"].width = 18
     cover.column_dimensions["B"].width = 88
     cover.column_dimensions["C"].width = 36
@@ -2017,12 +2019,10 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
     wb.save(out_path)
 
     lines = [
-        "# L3 REPORT FOR BOGRA — v4",
+        "# L3 REPORT FOR BOGRA — v5",
         "",
         "Robi vs Grameenphone. Every decoded Layer-3 parameter is on the Comparison sheet.",
-        "v4 adds a Frame structure section. subframeAssignment, specialSubframePatterns, tdd-SpecialSubframe-r11, ul-CyclicPrefixLength, and tdd-AckNackFeedbackMode sit there, whether they were read from SIB2, a handover, or an SCell.",
-        "",
-        "Meaning columns convert the mapped 3GPP value (RSRP index to dBm, offset and hysteresis to dB, q-RxLevMin to dBm). A note is filled where the two dominant values change UE behaviour.",
+        "v5 writes the mapped meaning in the Robi value and GP value cells. A converted field reads as the raw IE, then the unit, then the sample share, for example `24 → -116 dBm  [254, 32%]`. Fields with no mapping keep the raw setting and the share.",
         "",
         "## Versions",
         "",
@@ -2031,9 +2031,10 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
         "| v1 | `output/L3_REPORT_FOR_BOGRA_v1.xlsx` | Full list. Sections: Mobility, Power, Idle mode, Others. |",
         "| v2 | `output/L3_REPORT_FOR_BOGRA_v2.xlsx` | Stable settings only, with the idle-search finding. |",
         "| v3 | `output/L3_REPORT_FOR_BOGRA_v3.xlsx` | Full list, named sections, one sheet per section, difference sheets. |",
-        "| v4 | `output/L3_REPORT_FOR_BOGRA_v4.xlsx` | v3 plus a Frame structure section for the TDD subframe parameters. Current. |",
+        "| v4 | `output/L3_REPORT_FOR_BOGRA_v4.xlsx` | Frame structure section for the TDD subframe parameters. |",
+        "| v5 | `output/L3_REPORT_FOR_BOGRA_v5.xlsx` | v4, with mapped meaning inside the Robi and GP value cells. Current. |",
         "",
-        f"Parameters in v4: {len(rows)}. Rows that differ: {len(diff_rows)}.",
+        f"Parameters in v5: {len(rows)}. Rows that differ: {len(diff_rows)}.",
         "",
         "## Sections",
         "",
@@ -2067,7 +2068,7 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--l3-dir", type=Path, default=DEFAULT_L3_DIR)
-    ap.add_argument("--out", type=Path, default=ROOT / "output" / "L3_REPORT_FOR_BOGRA_v4.xlsx")
+    ap.add_argument("--out", type=Path, default=ROOT / "output" / "L3_REPORT_FOR_BOGRA_v5.xlsx")
     args = ap.parse_args()
     print(f"Scanning {args.l3_dir} ...")
     values, msg_counts, _events = scan(args.l3_dir)
