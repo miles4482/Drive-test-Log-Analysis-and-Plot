@@ -26,11 +26,11 @@ from pptx.util import Emu, Inches, Pt
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
-REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.95.xlsx"
+REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.96.xlsx"
 IDLE_NOTES = OUTPUT / "idle_vs_active_notes.json"
 PLOTS = OUTPUT / "plots"
 DESCRIPTIONS = OUTPUT / "bad_spot_descriptions.json"
-SUMMARY_VERSION = "1.95"
+SUMMARY_VERSION = "1.96"
 DEST = OUTPUT / f"Bogura_DriveTest_Summary_v{SUMMARY_VERSION}.pptx"
 CIRCLES = PLOTS / "bad_spot_circles.json"
 
@@ -296,7 +296,7 @@ def _text(slide, left, top, width, height, text: str, size: int, color: RGBColor
 def _footer(slide, page: int, pages: int) -> None:
     _text(
         slide, Inches(0.4), Inches(7.18), Inches(10), Inches(0.24),
-        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.95  ·  Web v1.89",
+        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v1.96  ·  Web v1.89",
         11, MUTED,
     )
     _text(
@@ -955,7 +955,7 @@ def _annex_workbook(prs: Presentation, page: int, pages: int, groups: list[dict]
     if partial:
         deck += "Samples: " + ", ".join(partial) + "."
     rows = [
-        ("Excel v1.95", "RSRP histogram bars use one legend colour each (the -116 dBm yellow+red stack is gone). Built surgically from the openable v1.94 Neon package; charts and drawings stay unchanged. Feeder includes BOSDR02. On Bad Spot RSRP_Active a 0.40 inch gap sits under each active map, and both circles are dashed orange."),
+        ("Excel v1.96", "Active maps circle every red/blank run and attach a solution; proposed azimuth is dotted with a 45° minimum sector gap. Idle-area maps reuse the same active serving lines (yellow) beside idle serving (blue). Built surgically from the openable v1.95 Neon package."),
         ("This deck", deck),
         ("Web v1.89", "Feeder draws the idle feeder swaps. Click a site for the sectors. A three-sector rotation uses red, cyan and violet. A two-sector swap stays red and cyan, with the third arm yellow. Site names stay white with a dark edge."),
         ("RSRQ and SINR", "The coverage maps are in this deck. The workbook no longer has separate RSRQ or SINR bad-spot sheets. Poor RSRQ is at or below −20 dB. Poor SINR is at or below 0 dB."),

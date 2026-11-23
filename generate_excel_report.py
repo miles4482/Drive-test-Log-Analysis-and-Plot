@@ -91,7 +91,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.95"
+REPORT_VERSION = "1.96"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -2670,6 +2670,10 @@ def refresh_bad_spot_pies(src: Path | None = None) -> Path:
         ):
             print(f"Drawing {kpi} bad spots ({tag or 'idle'})", flush=True)
             spots = find_bad_spots(frame, kpi)
+            sheet_preview = f"Bad Spot {kpi}" + ("_Active" if tag else "")
+            locked = LOGIC_LOCK["counts"].get(sheet_preview)
+            if locked:
+                spots = spots.head(int(locked[0])).copy()
             mode_name = "Active" if tag == "active" else "Idle"
             paths = plot_bad_spot_serial_maps(
                 frame, spots, PLOTS_DIR, f"excel_bad_spots_{kpi.lower()}_spot{suffix}",
@@ -2707,12 +2711,18 @@ def refresh_bad_spot_pies(src: Path | None = None) -> Path:
         for block in re.findall(r"<oneCellAnchor>.*?</oneCellAnchor>", drawing, flags=re.S):
             if "<pic>" not in block:
                 continue
+            # Idle-area maps sit under each Active serial map; do not treat them
+            # as Active serial pictures when swapping in a fresh Active redraw.
+            if re.search(r'name="Idle area \d+"', block):
+                continue
             row = int(re.search(r"<row>(\d+)</row>", block).group(1))
             pictures.append((row, block))
         pictures.sort()
         serial = pictures[1:]
         if len(paths) < len(serial):
             raise SystemExit(f"{sheet}: {len(serial)} pictures, {len(paths)} new maps")
+        # Drop movable circles that sit on Active serial maps only. Leave Idle
+        # area pictures untouched; their anchors have no ellipse shapes.
         drawing = re.sub(
             r'<oneCellAnchor>(?:(?!</oneCellAnchor>).)*prst="ellipse".*?</oneCellAnchor>',
             "",
@@ -2972,31 +2982,18 @@ def refresh_idle_area_maps(src: Path, dest: Path, pngs: list[Path], notes: list[
 
     sheet_path = _sheet_part_path(parts, "Bad Spot RSRP_Active")
     xml = parts[sheet_path].decode("utf-8")
-    headers: dict[int, int] = {}
-    for match in re.finditer(r'<t(?: xml:space="preserve")?>Bad Spot (\d+)</t>', xml):
-        start = xml.rfind('<row r="', 0, match.start())
-        row = int(re.match(r'<row r="(\d+)"', xml[start:]).group(1))
-        # The title row is the yellow bar. A mention inside the description is not.
-        if 's="5"' in xml[start:match.start()]:
-            headers[int(match.group(1))] = row
+    headers = _title_rows(xml)
     if len(headers) != 99:
         raise SystemExit(f"found {len(headers)} active bad-spot titles, expected 99")
 
-    rows: dict[int, str] = {}
-    merges: list[str] = []
+    # Neon packages already carry Idle-vs-active note rows under each Active map.
+    # Replace those cells in place; do not insert (that would collide with advice).
     for number, (coverage, serving) in enumerate(notes, start=1):
         start = headers[number] + 42
-        rows[start] = (
-            f'<row r="{start}" ht="20" customHeight="1">'
-            f'{_inline_cell(f"I{start}", 33, "Idle vs active")}</row>'
-        )
         body = start + 1
-        rows[body] = f'<row r="{body}">{_inline_cell(f"I{body}", 34, coverage + "\n" + serving)}</row>'
-        for extra in range(body + 1, body + 6):
-            rows[extra] = f'<row r="{extra}"/>'
-        merges.append(f"I{start}:S{start}")
-        merges.append(f"I{body}:S{body + 5}")
-    parts[sheet_path] = _insert_sheet_rows(xml, rows, merges).encode("utf-8")
+        xml = _replace_inline_text(xml, start, "Idle vs active")
+        xml = _replace_inline_text(xml, body, coverage + "\n" + serving)
+    parts[sheet_path] = xml.encode("utf-8")
 
     tmp = dest.with_suffix(".xlsx.tmp")
     with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -4237,6 +4234,16 @@ def publish_report_v195(src: Path, dest: Path) -> Path:
     return path
 
 
+def publish_report_v196(src: Path, dest: Path) -> Path:
+    """Serving lines on idle maps, missed-pocket solutions, dotted proposed azimuth."""
+    from publish_report_v196 import publish
+
+    path = publish(src, dest)
+    if dest.resolve() != REPORT_XLSX.resolve():
+        shutil.copy2(dest, REPORT_XLSX)
+    return path
+
+
 def publish_report_v191(src: Path, dest: Path) -> Path:
     """Gemini 4 Neon executive restyle across every sheet, preserving maps and circles.
 
@@ -5468,12 +5475,20 @@ def _write_bad_spot_descriptions(advice_for: dict[str, list[dict]]) -> Path:
     return dest
 
 
-def write_bad_spot_advice(src: Path | None = None) -> Path:
-    """Graft the findings table onto the six bad-spot sheets without rewriting the file.
+def write_bad_spot_advice(
+    src: Path | None = None,
+    *,
+    sheets: tuple[str, ...] | None = None,
+) -> Path:
+    """Graft the findings table onto the bad-spot sheets without rewriting the file.
 
     openpyxl save drops the movable circles, so the cells are inserted into the
     worksheet XML. Row heights stay at the default, and the drawings are copied
     through unchanged.
+
+    sheets: when set, only those sheets are rewritten (e.g. Active only). Idle
+    sheet gaps are 38–40 rows in the Neon package, too tight for a fresh 41-row
+    parameter block, so Active-only refreshes leave Idle text as-is.
     """
     from merge_and_analyze import ACTIVE_MERGED, MERGED_CSV, load_active_merged, load_merged_csv
 
@@ -5494,12 +5509,18 @@ def write_bad_spot_advice(src: Path | None = None) -> Path:
         "Bad Spot RSRP": (idle_track, "RSRP"),
         "Bad Spot RSRP_Active": (active_track, "RSRP"),
     }
+    write_sheets = set(sheets) if sheets is not None else set(tracks)
+    unknown = write_sheets - set(tracks)
+    if unknown:
+        raise SystemExit(f"Unknown advice sheets: {sorted(unknown)}")
     advice_for: dict[str, list[dict]] = {}
     for sheet, (frame, kpi) in tracks.items():
         print(f"Advice for {sheet}", flush=True)
         spots = find_bad_spots(frame, kpi)
-        if len(spots) > BAD_SPOT_TABLE_MAX:
-            spots = spots.head(BAD_SPOT_TABLE_MAX)
+        locked = LOGIC_LOCK["counts"].get(sheet)
+        cap = int(locked[0]) if locked else BAD_SPOT_TABLE_MAX
+        if len(spots) > cap:
+            spots = spots.head(cap)
         mode_name = "Active" if "Active" in sheet else "Idle"
         advice_for[sheet] = [
             bad_spot_advice(frame, kpi, spots.iloc[i], mode=mode_name) for i in range(len(spots))
@@ -5518,6 +5539,9 @@ def write_bad_spot_advice(src: Path | None = None) -> Path:
     }
     sheet_xml = _worksheet_xml(parts)
     for sheet, pairs in advice_for.items():
+        if sheet not in write_sheets:
+            print(f"  skip rewriting {sheet} (leave existing advice text)", flush=True)
+            continue
         xml = sheet_xml[sheet].decode("utf-8")
         headers = [
             (int(row), int(number))

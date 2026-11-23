@@ -729,7 +729,7 @@ def _not_required(reason: str) -> str:
 # A sector this close to the bearing is already facing the red road.
 FACE_ON_ROAD_DEG = 12.0
 # New-site sectors stay at least this far apart. One sector aims at the bad spot.
-NEW_SITE_MIN_GAP_DEG = 40.0
+NEW_SITE_MIN_GAP_DEG = 45.0
 _SEEN_SECTORS: dict[str, set[str]] = {}
 
 
@@ -945,7 +945,7 @@ def _azimuth_gap(left: float, right: float) -> float:
 
 
 def _new_site_azimuths(site_lat: float, site_lon: float, face: float) -> list[tuple[float, float]]:
-    """One sector on the bad spot, two toward the higher population, gaps at least 40°.
+    """One sector on the bad spot, two toward the higher population, gaps at least 45°.
 
     Returns (azimuth, people per km²) with the bad-spot sector first. Equal spacing
     is used only when the population grid has no people to choose between.
@@ -1931,12 +1931,26 @@ def _proposed_beams(choice: dict, sites: list[dict]) -> list[tuple[float, float,
     return beams
 
 
+def _beam_serves_point(
+    lat0: float, lon0: float, azimuth: float, plat: float, plon: float,
+) -> bool:
+    """True when a planned beam is close enough in angle and distance to serve this point."""
+    off = abs(_signed_deg(azimuth, _bearing_deg(lat0, lon0, plat, plon)))
+    dist = float(_equirect_km(lat0, lon0, plat, plon))
+    if off <= 30.0 and dist <= 1.2:
+        return True
+    if off <= 35.0 and dist <= 3.2:
+        return True
+    return False
+
+
 def _offbeam_pockets(samples: pd.DataFrame, column: str, spot: pd.Series, beams: list[tuple[float, float, float]]) -> list[dict]:
     """Red samples and a blank inside the circle that sit well off every planned beam.
 
     Active Bad Spot 11 is the pattern: the 4th sector covers one red bin and the
     blank beside it, while another red bin and a long blank sit about 45° away
-    and have no solution.
+    and have no solution. A beam that is only on-azimuth but more than ~3.2 km
+    away is treated as not covering the pocket (Active Bad Spot 1 north blank).
     """
     if not beams:
         return []
@@ -1959,12 +1973,17 @@ def _offbeam_pockets(samples: pd.DataFrame, column: str, spot: pd.Series, beams:
         })
     uncovered = []
     for point in points:
+        served = any(
+            _beam_serves_point(lat, lon, azimuth, point["lat"], point["lon"])
+            for lat, lon, azimuth in beams
+        )
+        if served:
+            continue
         offset = min(
             abs(_signed_deg(azimuth, _bearing_deg(lat, lon, point["lat"], point["lon"])))
             for lat, lon, azimuth in beams
         )
-        if offset > 35.0:
-            uncovered.append({**point, "off": offset})
+        uncovered.append({**point, "off": offset})
     groups: list[dict] = []
     for point in uncovered:
         placed = False
@@ -1981,7 +2000,12 @@ def _offbeam_pockets(samples: pd.DataFrame, column: str, spot: pd.Series, beams:
                 break
         if not placed:
             groups.append({**point, "n": 1})
-    kept = [group for group in groups if group["red"] >= 50.0 and group["blank"] >= 150.0]
+    kept = [
+        group for group in groups
+        if (group["red"] >= 50.0 and group["blank"] >= 150.0)
+        or (group["blank"] >= 250.0 and group["red"] >= 40.0)
+        or group["blank"] >= 300.0
+    ]
     kept.sort(key=lambda group: group["red"] + group["blank"], reverse=True)
     return kept[:2]
 
@@ -2104,7 +2128,7 @@ def _aim_short_run(choice: dict, run_lat: float, run_lon: float, length_m: float
         signed = _signed_deg(float(rec["azimuth"]), site["bearing"])
         turn = math.copysign(min(off, 25.0), signed) if off > 12.0 else 0.0
         new_az = (float(rec["azimuth"]) + turn) % 360.0
-        if any(_azimuth_gap(new_az, azimuth) < 40.0 for azimuth in planned_on.get(site["name"], [])):
+        if any(_azimuth_gap(new_az, azimuth) < NEW_SITE_MIN_GAP_DEG for azimuth in planned_on.get(site["name"], [])):
             continue
         up = _tilt_to_reach(rec, site["dist"])
         if abs(turn) < 8.0 and abs(up) < 0.8:
@@ -2148,7 +2172,7 @@ def _aim_short_run(choice: dict, run_lat: float, run_lon: float, length_m: float
             float(action["p_azimuth"]) for action in choice.get("actions") or []
             if action.get("p_azimuth") is not None and str(action.get("site") or "") == site["name"]
         ]
-        if any(_azimuth_gap(bearing, azimuth) < 40.0 for azimuth in existing + taken):
+        if any(_azimuth_gap(bearing, azimuth) < NEW_SITE_MIN_GAP_DEG for azimuth in existing + taken):
             continue
         tilt = int(round(min(10.0, max(0.0, _ground_tilt_deg(site.get("height"), site["dist"])))))
         action = _fourth_action(site)
@@ -2210,7 +2234,11 @@ def _cover_short_runs(
         choice["draw"] = dict(choice["draw"])
         choice["draw"]["more"] = list(choice["draw"].get("more") or [])
     sentences = []
-    for length, lat, lon in pending[:1]:
+    # Try each uncovered run until two fixes land. Skipping a failed long run
+    # used to leave a shorter northern pocket without a solution (Active Bad Spot 1).
+    for length, lat, lon in pending:
+        if len(sentences) >= 2:
+            break
         fix = _aim_short_run(choice, lat, lon, length)
         if fix:
             sentences.append(fix)
@@ -2246,11 +2274,11 @@ def _cover_offbeam_pocket(
     sentences = []
     for pocket in pockets:
         beams = _proposed_beams(choice, sites)
-        still = min(
-            abs(_signed_deg(azimuth, _bearing_deg(lat, lon, pocket["lat"], pocket["lon"])))
+        still_served = any(
+            _beam_serves_point(lat, lon, azimuth, pocket["lat"], pocket["lon"])
             for lat, lon, azimuth in beams
-        ) if beams else 999.0
-        if still <= 35.0:
+        ) if beams else False
+        if still_served:
             continue
         fix = _pocket_beam(choice, pocket, spot_pop)
         if fix is None:
@@ -2384,7 +2412,7 @@ def _pocket_beam(choice: dict, pocket: dict, spot_pop: float) -> str | None:
         bearing = float(site["bearing"])
         existing = [float(rec["azimuth"]) for rec in site["recs"] if rec.get("azimuth") is not None]
         blocked = existing + taken.get(site["name"], [])
-        if any(_azimuth_gap(bearing, azimuth) < 40.0 for azimuth in blocked):
+        if any(_azimuth_gap(bearing, azimuth) < NEW_SITE_MIN_GAP_DEG for azimuth in blocked):
             continue
         tilt = int(round(min(10.0, max(0.0, _ground_tilt_deg(site.get("height"), site["dist"])))))
         action = _fourth_action(site)
@@ -3228,17 +3256,18 @@ def draw_bad_spot_sector_pies(
             if proposed is not None:
                 prad = np.radians(proposed)
                 # Longer than the cyan arm, so the planned turn is not lost on the yellow serving line.
+                # Dotted (not solid) so proposed azimuth changes read clearly on every bad-spot map.
                 reach = r_deg * 2.35
                 x1 = lon + reach * np.sin(prad)
                 y1 = lat + reach * np.cos(prad)
                 ax.plot(
                     [lon, x1], [lat, y1],
-                    color="white", linewidth=4.2, linestyle=(0, (8, 4.5)),
+                    color="white", linewidth=4.4, linestyle=(0, (1.6, 2.6)),
                     solid_capstyle="butt", zorder=28, clip_on=True,
                 )
                 ax.plot(
                     [lon, x1], [lat, y1],
-                    color="#3D7EFF", linewidth=2.3, linestyle=(0, (8, 4.5)),
+                    color="#3D7EFF", linewidth=2.4, linestyle=(0, (1.6, 2.6)),
                     solid_capstyle="butt", zorder=29, clip_on=True,
                 )
                 delta = _signed_deg(current, proposed)
@@ -5498,7 +5527,10 @@ def tight_bad_spot_outline(
     use = inside
     if inside is not None and not inside.empty and column in inside.columns:
         values = pd.to_numeric(inside[column], errors="coerce")
-        red = inside.loc[values < threshold]
+        # Drawn circle also takes light-red RSRP (down to -115) so pink road next
+        # to the hole is not left outside the oval while the legend still paints it.
+        cut = min(float(threshold), -115.0) if column == "RSRP" else float(threshold)
+        red = inside.loc[values < cut]
         if len(red) >= 3:
             use = red
     if use is None or use.empty:
@@ -6123,10 +6155,13 @@ def plot_idle_area_map(idle: pd.DataFrame, active: pd.DataFrame, spot: pd.Series
         )
     else:
         ax.text(0.5, 0.5, "No idle drive in this area", transform=ax.transAxes, ha="center", va="center", fontsize=11, color="#14202B")
-    # Same sites and the same yellow serving lines as the active map.
-    # The circle and the lines use the tight outline, so green road outside the
-    # red samples is not treated as the bad spot.
-    draw_bad_spot_sector_pies(ax, lines, samples=active_local, column="RSRP", serving=True)
+    # Sector pies on every site in view. Yellow dashes are the same active
+    # serving lines as the active map (drawn explicitly so they never drop).
+    # Blue dashes are idle serving cells that differ.
+    draw_bad_spot_sector_pies(ax, lines, samples=None, column=None, serving=False)
+    spider_src = active_local if active_local is not None and not active_local.empty else active
+    if spider_src is not None and not spider_src.empty:
+        _draw_serving_spider(ax, spider_src, "RSRP", lines)
     active_names = {cell["name"] for cell in _area_serving_cells(active, lines)} if active is not None else set()
     _draw_area_serving_lines(ax, idle, lines, color="#2E86C1", skip=active_names)
     _add_spot_outline(ax, display)

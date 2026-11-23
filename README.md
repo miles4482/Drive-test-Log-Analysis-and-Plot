@@ -138,15 +138,27 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
+## Download Excel report (v1.96)
+
+**v1.96 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.96.xlsx
+
+Active bad-spot maps: every red/blank run inside the area gets a circle and a solution; proposed azimuth arms are dotted with a minimum 45° sector gap. Idle-area maps under each Active spot draw the same yellow active serving lines (plus blue idle serving) so gaps are easy to compare. Built surgically from the openable v1.95 package. The web map stays v1.89.
+
+## Download summary presentation (v1.96)
+
+**v1.96 summary (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.96.pptx
+
+Footer reads Excel v1.96 and Web v1.89. The web map stays v1.89.
+
 ## Download Excel report (v1.95)
 
-**v1.95 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.95.xlsx
+**v1.95:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.95.xlsx
 
 Fixes the Cover / Active RSRP histogram bars that showed two legend colours in one column (for example −116 dBm was yellow and light-red together). Each bar is one colour. Built surgically from the openable v1.94 package; charts and drawings stay unchanged. The web map stays v1.89.
 
 ## Download summary presentation (v1.95)
 
-**v1.95 summary (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.95.pptx
+**v1.95 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.95.pptx
 
 Footer reads Excel v1.95 and Web v1.89. The web map stays v1.89.
 
