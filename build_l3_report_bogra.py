@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import glob
 import re
+import statistics
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -1937,12 +1938,281 @@ def _write_compare_sheet(ws, rows):
         ws.column_dimensions[get_column_letter(i)].width = width
 
 
+def _ms_of_day(stamp: str) -> float:
+    hour, minute, second = stamp.split(":")
+    return (int(hour) * 3600 + int(minute) * 60 + float(second)) * 1000
+
+
+def _percentile(values: list[float], pct: float) -> float:
+    ordered = sorted(values)
+    index = min(len(ordered) - 1, max(0, int(round((pct / 100) * (len(ordered) - 1)))))
+    return ordered[index]
+
+
+def volte_calls(l3_dir: Path) -> list[dict]:
+    """On-net mobile-originated VoLTE calls. CST is INVITE to 180 Ringing."""
+    sip = defaultdict(list)
+    radio = defaultdict(list)
+    for path in sorted(l3_dir.glob("*.txt")):
+        for line in path.open(errors="replace"):
+            match = HDR.match(line)
+            if not match:
+                continue
+            stamp, direction, layer, name, _tech, side, sid, operator = match.groups()
+            when = _ms_of_day(stamp)
+            if layer == "SIP":
+                sip[(path.name, operator, sid)].append((when, direction, side, name.strip()))
+            elif layer in {"LTE-RRC", "LTE-NAS"}:
+                radio[(path.name, operator, side)].append((when, name.strip()))
+
+    def first(events, pred):
+        for event in events:
+            if pred(event):
+                return event
+        return None
+
+    def first_radio(file_name, operator, side, start, text, low, high):
+        hits = [
+            when - start
+            for when, message in radio[(file_name, operator, side)]
+            if text in message and low <= when - start <= high
+        ]
+        return min(hits) if hits else None
+
+    calls = []
+    for (file_name, operator, _sid), events in sip.items():
+        events = sorted(events)
+        invite = first(events, lambda event: event[1] == "U" and event[2] == "A" and "INVITE: Request" in event[3])
+        if invite is None:
+            continue
+        start = invite[0]
+
+        def after(pred):
+            event = first(events, pred)
+            return None if event is None else event[0] - start
+
+        ringing = after(lambda event: event[1] == "D" and event[2] == "A" and "INVITE: Ringing" in event[3])
+        progress = after(lambda event: event[1] == "D" and event[2] == "A" and "Session Progress" in event[3])
+        trying = after(lambda event: event[1] == "D" and event[2] == "A" and "INVITE: Trying" in event[3])
+        answered = after(lambda event: event[1] == "D" and event[2] == "A" and "INVITE: OK" in event[3])
+        if ringing is not None:
+            outcome = "Alerted"
+        elif answered is not None:
+            outcome = "Answered without 180"
+        else:
+            outcome = "No alert"
+        paging = None
+        rrc = first_radio(file_name, operator, "B", start, "RRCConnectionSetup", 0, 8000)
+        if rrc is not None:
+            pages = [
+                when - start
+                for when, message in radio[(file_name, operator, "B")]
+                if "Paging" in message and rrc - 3000 <= when - start <= rrc
+            ]
+            paging = max(pages) if pages else None
+        calls.append(
+            {
+                "operator": operator,
+                "file": file_name,
+                "outcome": outcome,
+                "cst": ringing,
+                "progress": progress,
+                "trying": trying,
+                "answered": answered,
+                "mo_qci": first_radio(file_name, operator, "A", start, "dedicated EPS bearer context request", -200, 8000),
+                "mt_qci": first_radio(file_name, operator, "B", start, "dedicated EPS bearer context request", -200, 8000),
+                "mt_page": paging,
+                "mt_rrc": rrc,
+            }
+        )
+    calls.sort(key=lambda row: ({"Robi": 0, "Grameenphone": 1, "Banglalink": 2}.get(row["operator"], 9), row["file"], row["cst"] or 99999))
+    return calls
+
+
+def _cst_stat(calls: list[dict], operator: str, field: str) -> dict | None:
+    values = [row[field] for row in calls if row["operator"] == operator and row[field] is not None and row["outcome"] == "Alerted"]
+    if not values:
+        return None
+    return {
+        "n": len(values),
+        "median": statistics.median(values),
+        "mean": sum(values) / len(values),
+        "p90": _percentile(values, 90),
+    }
+
+
+def _fmt_ms(stat: dict | None) -> str:
+    if not stat:
+        return "—"
+    return f"{stat['median']:.0f} ms   (mean {stat['mean']:.0f}, p90 {stat['p90']:.0f}, n={stat['n']})"
+
+
+def _add_volte_sheets(wb, calls: list[dict]) -> None:
+    operators = ("Robi", "Grameenphone", "Banglalink")
+    labels = {"Robi": "Robi", "Grameenphone": "Grameenphone", "Banglalink": "Banglalink"}
+    metrics = [
+        ("cst", "Call setup time: INVITE → 180 Ringing"),
+        ("progress", "INVITE → 183 Session Progress"),
+        ("trying", "INVITE → 100 Trying"),
+        ("answered", "INVITE → 200 OK"),
+        ("mo_qci", "Caller dedicated bearer (QCI 1)"),
+        ("mt_qci", "Called-UE dedicated bearer (QCI 1)"),
+        ("mt_page", "INVITE → paging of the called UE"),
+        ("mt_rrc", "INVITE → called UE RRC setup"),
+    ]
+    summary = wb.create_sheet("VoLTE CST", 3)
+    headers = ["Step", "Robi", "Grameenphone", "Banglalink"]
+    _paint_header(summary, headers)
+    for index, (field, label) in enumerate(metrics, 2):
+        summary.cell(index, 1, label)
+        for column, operator in enumerate(operators, 2):
+            summary.cell(index, column, _fmt_ms(_cst_stat(calls, operator, field)))
+    note_row = 2 + len(metrics) + 1
+    summary.cell(
+        note_row,
+        1,
+        "On-net calls only: each UE calls its own network. "
+        "CST is the time from the caller's SIP INVITE to 180 Ringing. "
+        "Times are the median, with the mean, 90th percentile, and number of alerted calls. "
+        "A call that never rang is left out of the median.",
+    )
+    summary.merge_cells(start_row=note_row, start_column=1, end_row=note_row + 1, end_column=4)
+    summary.cell(note_row, 1).alignment = Alignment(wrap_text=True, vertical="top")
+    summary.row_dimensions[note_row].height = 36
+    for column, width in enumerate((52, 42, 42, 42), 1):
+        summary.column_dimensions[get_column_letter(column)].width = width
+    if len(metrics):
+        thin = Border(
+            left=Side(style="thin", color="D9D9D9"),
+            right=Side(style="thin", color="D9D9D9"),
+            top=Side(style="thin", color="D9D9D9"),
+            bottom=Side(style="thin", color="D9D9D9"),
+        )
+        for row in range(2, 2 + len(metrics)):
+            for column in range(1, 5):
+                cell = summary.cell(row, column)
+                cell.font = Font(name="Calibri", size=10, bold=(column == 1 or row == 2))
+                cell.alignment = Alignment(wrap_text=True, vertical="center")
+                cell.border = thin
+            if row == 2:
+                for column in range(1, 5):
+                    summary.cell(row, column).fill = PatternFill("solid", fgColor="FCE4D6")
+
+    attempts = Counter(row["operator"] for row in calls)
+    alerted = Counter(row["operator"] for row in calls if row["outcome"] == "Alerted")
+    detail = wb.create_sheet("VoLTE calls", 4)
+    detail_headers = [
+        "Operator",
+        "File",
+        "Outcome",
+        "CST ms",
+        "INVITE to 183 ms",
+        "INVITE to 100 ms",
+        "INVITE to 200 ms",
+        "Caller QCI 1 ms",
+        "Called QCI 1 ms",
+        "Called paging ms",
+        "Called RRC ms",
+    ]
+    _paint_header(detail, detail_headers)
+    for index, row in enumerate(calls, 2):
+        values = [
+            labels[row["operator"]],
+            row["file"],
+            row["outcome"],
+            None if row["cst"] is None else round(row["cst"]),
+            None if row["progress"] is None else round(row["progress"]),
+            None if row["trying"] is None else round(row["trying"]),
+            None if row["answered"] is None else round(row["answered"]),
+            None if row["mo_qci"] is None else round(row["mo_qci"]),
+            None if row["mt_qci"] is None else round(row["mt_qci"]),
+            None if row["mt_page"] is None else round(row["mt_page"]),
+            None if row["mt_rrc"] is None else round(row["mt_rrc"]),
+        ]
+        for column, value in enumerate(values, 1):
+            detail.cell(index, column, value)
+    if calls:
+        thin = Border(
+            left=Side(style="thin", color="D9D9D9"),
+            right=Side(style="thin", color="D9D9D9"),
+            top=Side(style="thin", color="D9D9D9"),
+            bottom=Side(style="thin", color="D9D9D9"),
+        )
+        for row in range(2, 2 + len(calls)):
+            for column in range(1, len(detail_headers) + 1):
+                cell = detail.cell(row, column)
+                cell.font = Font(name="Calibri", size=10)
+                cell.alignment = Alignment(vertical="center")
+                cell.border = thin
+    for column, width in enumerate((16, 12, 24, 12, 18, 18, 18, 18, 18, 18, 16), 1):
+        detail.column_dimensions[get_column_letter(column)].width = width
+
+    actions = wb.create_sheet("VoLTE actions", 5)
+    _paint_header(actions, ["Priority", "What the log shows", "Action for Robi"])
+    action_rows = [
+        (
+            "1. Caller voice bearer",
+            f"Robi median call setup is {_fmt_ms(_cst_stat(calls, 'Robi', 'cst'))}. "
+            f"Grameenphone is {_fmt_ms(_cst_stat(calls, 'Grameenphone', 'cst'))}. "
+            f"Banglalink is {_fmt_ms(_cst_stat(calls, 'Banglalink', 'cst'))}. "
+            "The caller is already RRC-connected before the INVITE. "
+            f"Robi's QCI 1 bearer on that UE then takes {_fmt_ms(_cst_stat(calls, 'Robi', 'mo_qci'))}. "
+            f"Grameenphone does the same step in {_fmt_ms(_cst_stat(calls, 'Grameenphone', 'mo_qci'))} "
+            f"and Banglalink in {_fmt_ms(_cst_stat(calls, 'Banglalink', 'mo_qci'))}. "
+            "183 follows the Robi caller bearer by about 160 ms, so setup waits on this bearer.",
+            "Bring the originating dedicated bearer under 200 ms. "
+            "The wait is after the UE is connected, so look at the originating Rx/Gx path: "
+            "P-CSCF to PCRF, PCRF to the packet gateway, and the create-bearer toward the calling UE.",
+        ),
+        (
+            "2. Paging of the called UE",
+            "The called Robi UE has been RRC-released about 19 s earlier, so it is idle. "
+            f"Paging is seen {_fmt_ms(_cst_stat(calls, 'Robi', 'mt_page'))} after INVITE. "
+            "From that page, RRC setup is about 80 ms and QCI 1 about 360 ms later. "
+            "Grameenphone has the same shape. "
+            f"Banglalink's called UE is still RRC-connected, and its called bearer is {_fmt_ms(_cst_stat(calls, 'Banglalink', 'mt_qci'))}.",
+            "Shorten the time from INVITE to the paging message for an idle called UE. "
+            "The air interface after the page is already fast. "
+            "Fixing only the caller bearer leaves this terminating wait, and setup would then look like Grameenphone rather than Banglalink.",
+        ),
+        (
+            "Leave these",
+            "183 to 180 Ringing is about 300 ms on all three networks. "
+            "180 Ringing to 200 OK is about 1.8 s on all three, which is the answer delay. "
+            f"Robi alerted {alerted['Robi']} of {attempts['Robi']} calls. "
+            f"Grameenphone alerted {alerted['Grameenphone']} of {attempts['Grameenphone']}. "
+            f"Banglalink alerted {alerted['Banglalink']} of {attempts['Banglalink']}, and the remaining Banglalink call was answered without a 180.",
+            "Do not tune ringing or the answer delay for this CST gap. Setup success is already high.",
+        ),
+    ]
+    for index, (priority, evidence, action) in enumerate(action_rows, 2):
+        actions.cell(index, 1, priority)
+        actions.cell(index, 2, evidence)
+        actions.cell(index, 3, action)
+        actions.row_dimensions[index].height = 90
+    thin = Border(
+        left=Side(style="thin", color="D9D9D9"),
+        right=Side(style="thin", color="D9D9D9"),
+        top=Side(style="thin", color="D9D9D9"),
+        bottom=Side(style="thin", color="D9D9D9"),
+    )
+    for row in range(2, 5):
+        for column in range(1, 4):
+            cell = actions.cell(row, column)
+            cell.font = Font(name="Calibri", size=10, bold=(column == 1))
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+            cell.border = thin
+        actions.cell(row, 1).fill = PatternFill("solid", fgColor="FCE4D6" if row < 4 else "E2EFDA")
+    for column, width in enumerate((28, 88, 78), 1):
+        actions.column_dimensions[get_column_letter(column)].width = width
+
+
 def _sheet_name(prefix: str, section: str) -> str:
     name = f"{prefix}{section}" if prefix else section
     return name[:31]
 
 
-def build_v3_workbook(values, msg_counts, out_path: Path):
+def build_v3_workbook(values, msg_counts, out_path: Path, calls: list[dict] | None = None):
     """v3: full parameter list (v1) plus engineering meaning (v2), named sections."""
     rows = _comparison_rows(values)
     wb = Workbook()
@@ -1952,7 +2222,7 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
     cover.sheet_view.showGridLines = False
     cover["A1"] = "L3 REPORT FOR BOGRA"
     cover["A1"].font = Font(name="Calibri", size=20, bold=True, color="1F4E78")
-    cover["A2"] = "Version 6 — Power is the first section on Comparison"
+    cover["A2"] = "Version 7 — VoLTE call setup time for Robi, Grameenphone, and Banglalink"
     cover["A2"].font = Font(name="Calibri", size=13, color="595959")
     cover["A4"] = "Version"
     cover["B4"] = "What it contains"
@@ -1966,7 +2236,8 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
         ("v3", "Full list, named sections, one sheet per section, and a difference sheet per section.", "L3_REPORT_FOR_BOGRA_v3.xlsx"),
         ("v4", "v3, with subframeAssignment, specialSubframePatterns, cyclic prefix, and TDD ACK/NACK moved to Frame structure.", "L3_REPORT_FOR_BOGRA_v4.xlsx"),
         ("v5", "v4, with the mapped meaning written in the Robi value and GP value cells. The separate meaning columns are gone.", "L3_REPORT_FOR_BOGRA_v5.xlsx"),
-        ("v6 (this file)", "v5, with Power as the first section on Comparison and Differences.", "L3_REPORT_FOR_BOGRA_v6.xlsx"),
+        ("v6", "v5, with Power as the first section on Comparison and Differences.", "L3_REPORT_FOR_BOGRA_v6.xlsx"),
+        ("v7 (this file)", "v6, plus on-net VoLTE call setup time for Robi, Grameenphone, and Banglalink, and the two bearer actions for Robi.", "L3_REPORT_FOR_BOGRA_v7.xlsx"),
     ]
     for i, (ver, what, fname) in enumerate(versions, 5):
         cover.cell(i, 1, ver)
@@ -1976,7 +2247,7 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
             cover.cell(i, col).alignment = Alignment(wrap_text=True, vertical="top")
             cover.cell(i, col).font = Font(name="Calibri", size=11)
         cover.row_dimensions[i].height = 36
-    cover["A12"] = (
+    cover["A13"] = (
         f"Source: Layer 3_Active Mode_Data_Robi_v1.7z. "
         f"Robi {sum(msg_counts['Robi'].values()):,} messages, "
         f"Grameenphone {sum(msg_counts['Grameenphone'].values()):,}. "
@@ -1986,8 +2257,8 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
         "ul-CyclicPrefixLength, and tdd-AckNackFeedbackMode, including the copies broadcast in SIB, "
         "sent at handover, and configured on an SCell."
     )
-    cover["A12"].alignment = Alignment(wrap_text=True, vertical="top")
-    cover.merge_cells("A12:C14")
+    cover["A13"].alignment = Alignment(wrap_text=True, vertical="top")
+    cover.merge_cells("A13:C15")
     cover.column_dimensions["A"].width = 18
     cover.column_dimensions["B"].width = 88
     cover.column_dimensions["C"].width = 36
@@ -1998,6 +2269,8 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
     diff_rows = [r for r in rows if r["status"] in {"Different", "Robi only", "GP only"}]
     differences = wb.create_sheet("Differences", 2)
     _write_compare_sheet(differences, diff_rows)
+    if calls:
+        _add_volte_sheets(wb, calls)
 
     used = {"Versions", "Comparison", "Differences"}
     for section in SECTION_ORDER:
@@ -2023,10 +2296,10 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
     wb.save(out_path)
 
     lines = [
-        "# L3 REPORT FOR BOGRA — v6",
+        "# L3 REPORT FOR BOGRA — v7",
         "",
-        "Robi vs Grameenphone. Every decoded Layer-3 parameter is on the Comparison sheet.",
-        "v6 lists Power first on Comparison and Differences. Mobility follows, then Idle mode, Frame structure, and the remaining sections. The Robi value and GP value cells still include the mapped unit and the sample share.",
+        "Robi vs Grameenphone parameter comparison, plus on-net VoLTE call setup time for Robi, Grameenphone, and Banglalink.",
+        "Call setup time is the caller's SIP INVITE to 180 Ringing. Power stays first on the Comparison sheet.",
         "",
         "## Versions",
         "",
@@ -2037,9 +2310,10 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
         "| v3 | `output/L3_REPORT_FOR_BOGRA_v3.xlsx` | Full list, named sections, one sheet per section, difference sheets. |",
         "| v4 | `output/L3_REPORT_FOR_BOGRA_v4.xlsx` | Frame structure section for the TDD subframe parameters. |",
         "| v5 | `output/L3_REPORT_FOR_BOGRA_v5.xlsx` | Mapped meaning inside the Robi and GP value cells. |",
-        "| v6 | `output/L3_REPORT_FOR_BOGRA_v6.xlsx` | v5, with Power first on Comparison and Differences. Current. |",
+        "| v6 | `output/L3_REPORT_FOR_BOGRA_v6.xlsx` | Power first on Comparison and Differences. |",
+        "| v7 | `output/L3_REPORT_FOR_BOGRA_v7.xlsx` | v6 plus VoLTE call setup time and the Robi actions. Current. |",
         "",
-        f"Parameters in v6: {len(rows)}. Rows that differ: {len(diff_rows)}.",
+        f"Parameters in v7: {len(rows)}. Rows that differ: {len(diff_rows)}.",
         "",
         "## Sections",
         "",
@@ -2062,7 +2336,7 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
         )
     lines += [
         "",
-        "Open Comparison for the full list. Open Differences for every row that is not the same dominant value. Each section also has its own sheet and, when anything differs, a `Diff <section>` sheet.",
+        "Open Comparison for the full list. Open VoLTE CST for setup time and VoLTE actions for what to change on Robi. Open Differences for every row that is not the same dominant value.",
         "",
     ]
     md_path = out_path.with_suffix(".md")
@@ -2073,11 +2347,12 @@ def build_v3_workbook(values, msg_counts, out_path: Path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--l3-dir", type=Path, default=DEFAULT_L3_DIR)
-    ap.add_argument("--out", type=Path, default=ROOT / "output" / "L3_REPORT_FOR_BOGRA_v6.xlsx")
+    ap.add_argument("--out", type=Path, default=ROOT / "output" / "L3_REPORT_FOR_BOGRA_v7.xlsx")
     args = ap.parse_args()
     print(f"Scanning {args.l3_dir} ...")
     values, msg_counts, _events = scan(args.l3_dir)
-    out, n_rows, n_diff, sheets = build_v3_workbook(values, msg_counts, args.out)
+    calls = volte_calls(args.l3_dir)
+    out, n_rows, n_diff, sheets = build_v3_workbook(values, msg_counts, args.out, calls)
     latest = ROOT / "output" / "L3_REPORT_FOR_BOGRA.xlsx"
     latest.write_bytes(out.read_bytes())
     latest_md = ROOT / "output" / "L3_REPORT_FOR_BOGRA.md"

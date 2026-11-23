@@ -1,7 +1,7 @@
-# L3 REPORT FOR BOGRA — v6
+# L3 REPORT FOR BOGRA — v7
 
-Robi vs Grameenphone. Every decoded Layer-3 parameter is on the Comparison sheet.
-v6 lists Power first on Comparison and Differences. Mobility follows, then Idle mode, Frame structure, and the remaining sections. The Robi value and GP value cells still include the mapped unit and the sample share.
+Robi vs Grameenphone parameter comparison, plus on-net VoLTE call setup time for Robi, Grameenphone, and Banglalink.
+Call setup time is the caller's SIP INVITE to 180 Ringing. Power stays first on the Comparison sheet.
 
 ## Versions
 
@@ -12,9 +12,10 @@ v6 lists Power first on Comparison and Differences. Mobility follows, then Idle 
 | v3 | `output/L3_REPORT_FOR_BOGRA_v3.xlsx` | Full list, named sections, one sheet per section, difference sheets. |
 | v4 | `output/L3_REPORT_FOR_BOGRA_v4.xlsx` | Frame structure section for the TDD subframe parameters. |
 | v5 | `output/L3_REPORT_FOR_BOGRA_v5.xlsx` | Mapped meaning inside the Robi and GP value cells. |
-| v6 | `output/L3_REPORT_FOR_BOGRA_v6.xlsx` | v5, with Power first on Comparison and Differences. Current. |
+| v6 | `output/L3_REPORT_FOR_BOGRA_v6.xlsx` | Power first on Comparison and Differences. |
+| v7 | `output/L3_REPORT_FOR_BOGRA_v7.xlsx` | v6 plus VoLTE call setup time and the Robi actions. Current. |
 
-Parameters in v6: 247. Rows that differ: 63.
+Parameters in v7: 247. Rows that differ: 63.
 
 ## Sections
 
@@ -37,4 +38,4 @@ Parameters in v6: 247. Rows that differ: 63.
 | RRC release | 3 | 0 | 0 | 0 | 3 |
 | Others | 2 | 0 | 0 | 0 | 2 |
 
-Open Comparison for the full list. Open Differences for every row that is not the same dominant value. Each section also has its own sheet and, when anything differs, a `Diff <section>` sheet.
+Open Comparison for the full list. Open VoLTE CST for setup time and VoLTE actions for what to change on Robi. Open Differences for every row that is not the same dominant value.
