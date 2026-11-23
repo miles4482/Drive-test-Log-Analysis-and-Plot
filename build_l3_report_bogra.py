@@ -74,11 +74,17 @@ PARAM_WHITELIST = {
     "gapOffset",
     "gp0",
     "gp1",
+    "measGapConfig",
     "handoverType",
     "keyChangeIndicator",
     "nextHopChainingCount",
     "bandIndicator",
     "triggerType",
+    "b2_Threshold1",
+    "b2_Threshold2",
+    "b1_Threshold",
+    "threshold_UTRA_RSCP",
+    "threshold_GERAN",
     # Power
     "p0_NominalPUSCH",
     "p0_NominalPUCCH",
@@ -236,6 +242,27 @@ PARAM_WHITELIST = {
     "ackNackSRS_SimultaneousTransmission",
     "srs_MaxUpPts",
     "tdd_AckNackFeedbackMode",
+    "phich_Resource",
+    "rootSequenceIndex",
+    "prach_ConfigIndex",
+    "prach_FreqOffset",
+    "sn_FieldLength",
+    "headerCompression",
+    "tpc_PDCCH_ConfigPUCCH",
+    "tpc_PDCCH_ConfigPUSCH",
+    "soundingRS_UL_ConfigDedicated",
+    "soundingRS_UL_ConfigCommon",
+    "srs_Bandwidth",
+    "srs_HoppingBandwidth",
+    "freqDomainPosition",
+    "duration",
+    "transmissionComb",
+    "semiPersistSchedIntervalDL",
+    "semiPersistSchedIntervalUL",
+    "numberOfConfSPS_Processes",
+    "implicitReleaseAfter",
+    "sCellDeactivationTimer_r10",
+    "sr_ProhibitTimer_r9",
 }
 
 # Skip UE-specific / identity / opaque resource indexes.
@@ -470,13 +497,32 @@ def _classify(param: str, path: str) -> tuple[str, str]:
             "cellBarred",
         }:
             return "Idle mode", "Intra-freq / Serving Reselection (SIB1/SIB3)"
-        if "sib2" in pl or p in {
-            "numberOfRA_Preambles",
-            "maxHARQ_Msg3Tx",
-            "pusch_HoppingOffset",
+        if p in {
+            "rootSequenceIndex",
+            "prach_ConfigIndex",
+            "prach_FreqOffset",
+            "highSpeedFlag",
             "zeroCorrelationZoneConfig",
+            "numberOfRA_Preambles",
+            "sizeOfRA_PreamblesGroupA",
+            "messageSizeGroupA",
+            "preambleTransMax",
+            "ra_ResponseWindowSize",
+            "mac_ContentionResolutionTimer",
+            "maxHARQ_Msg3Tx",
+        } or "prach_config" in pl or "rach_config" in pl:
+            return "Idle mode", "PRACH / RACH Common (SIB2)"
+        if "sib2" in pl or p in {
+            "pusch_HoppingOffset",
             "ul_Bandwidth",
             "timeAlignmentTimerCommon",
+            "soundingRS_UL_ConfigCommon",
+            "srs_BandwidthConfig",
+            "srs_SubframeConfig",
+            "ackNackSRS_SimultaneousTransmission",
+            "srs_MaxUpPts",
+            "phich_Resource",
+            "phich_Duration",
         }:
             return "Idle mode", "SIB2 Common Config"
         return "Idle mode", "Idle / SIB Common"
@@ -529,9 +575,13 @@ def _classify(param: str, path: str) -> tuple[str, str]:
             return "Mobility", "Event A5"
         if "eventa6" in pl or p in {"a6_Offset_r10", "a6_ReportOnLeave_r10"}:
             return "Mobility", "Event A6 (SCell)"
+        if "eventb1" in pl or p in {"b1_Threshold", "threshold_UTRA_RSCP", "threshold_GERAN"}:
+            return "Mobility", "Event B1 (IRAT)"
+        if "eventb2" in pl or p in {"b2_Threshold1", "b2_Threshold2"}:
+            return "Mobility", "Event B2 (IRAT)"
         if p == "cellIndividualOffset":
             return "Mobility", "Cell Individual Offset"
-        if p in {"gapOffset", "gp0", "gp1"} or "measgap" in pl:
+        if p in {"gapOffset", "gp0", "gp1", "measGapConfig"} or "measgap" in pl:
             return "Mobility", "Meas Gap"
         if p in {"handoverType", "keyChangeIndicator", "nextHopChainingCount", "t304"} or "mobilitycontrol" in pl:
             return "Mobility", "HO Control (mobilityControlInfo)"
@@ -577,10 +627,34 @@ def _classify(param: str, path: str) -> tuple[str, str]:
         return "Others", "RACH Common"
     if "security" in pl or p in {"cipheringAlgorithm", "integrityProtAlgorithm"}:
         return "Others", "Security"
-    if "release" in pl or p in {"releaseCause", "redirectedCarrierInfo", "extendedWaitTime_r10"}:
+    if "release" in pl or p in {"releaseCause", "redirectedCarrierInfo", "extendedWaitTime_r10", "t320"}:
         return "Others", "RRC Release"
-    if "scell" in pl:
+    if "scell" in pl or p == "sCellDeactivationTimer_r10":
         return "Others", "Carrier Aggregation (SCell)"
+    if p in {"tpc_PDCCH_ConfigPUCCH", "tpc_PDCCH_ConfigPUSCH"} or "tpc_pdcch" in pl:
+        return "Others", "TPC (group)"
+    if "soundingrs" in pl or p in {
+        "soundingRS_UL_ConfigDedicated",
+        "srs_Bandwidth",
+        "srs_HoppingBandwidth",
+        "freqDomainPosition",
+        "duration",
+        "transmissionComb",
+    }:
+        return "Others", "SRS"
+    if "sps" in pl or p in {
+        "semiPersistSchedIntervalDL",
+        "semiPersistSchedIntervalUL",
+        "numberOfConfSPS_Processes",
+        "implicitReleaseAfter",
+    }:
+        return "Others", "SPS"
+    if p in {"sn_FieldLength", "headerCompression", "discardTimer", "pdcp_SN_Size", "statusReportRequired"}:
+        return "Others", "PDCP / RLC UM"
+    if p == "sr_ProhibitTimer_r9":
+        return "Others", "Scheduling Request"
+    if p in {"phich_Resource", "phich_Duration", "dl_Bandwidth_r10", "antennaPortsCount"}:
+        return "Others", "PHICH / Antenna Common"
     return "Others", "Other RRC"
 
 
