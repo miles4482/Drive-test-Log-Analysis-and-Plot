@@ -10,6 +10,7 @@ LTE **IDLE Mode scanner** and **Active Mode UE** logs from **Bogura** (Robi). Id
 | `Borga_Active_mode_11Nov26.7z` | Active Mode UE export, 15 CSVs (Robi and Grameenphone) | `output/Bogura_active_merged.csv.gz` |
 | `System DUMP.xlsb` | Cell-level site dump. Several EUtranCellId values share one Sector name | Sector name on every arm, plus the distance line, on the individual bad-spot maps only |
 | `Physical_Site_Database_V2.0.xlsx` | Earlier physical site database | Not used on the current maps |
+| `Layer 3_Active Mode_Data_Robi_v1.7z` | Decoded Active Mode L3 (LTE-RRC) for Robi / GP / Banglalink | `output/L3_REPORT_FOR_BOGRA.xlsx` |
 
 Idle scanner columns include `Time`, `Longitude`, `Latitude`, `Cell Id`, `DL EARFCN`, `NB RSRP`, `NB RSRQ`, `NB RS SINR` (mapped to RSRP / RSRQ / SINR). Campaign is **Scanner**. Files 1–15 cover 11–21 May 2026.
 
@@ -21,6 +22,23 @@ Active auto mode keeps **one band at each latitude and longitude**: the stronges
 Borga_Idle_V2.0.7z     -->  1.csv … 15.csv               -->  output/Bogura_merged.csv.gz
 Borga_Active_mode_11Nov26.7z  -->  1.csv … 15.csv  -->  output/Bogura_active_merged.csv.gz
 ```
+
+
+## L3 REPORT FOR BOGRA (Robi vs GP)
+
+Compares every network-configured Layer-3 parameter seen in the Active Mode L3 dump between **Robi** and **Grameenphone**.
+
+```bash
+# extract once (needs py7zr or 7z)
+python3 -c "import py7zr; py7zr.SevenZipFile('Layer 3_Active Mode_Data_Robi_v1.7z').extractall('extracted/l3')"
+python3 build_l3_report_bogra.py
+```
+
+- Excel: [`output/L3_REPORT_FOR_BOGRA.xlsx`](output/L3_REPORT_FOR_BOGRA.xlsx)
+- Summary: [`output/L3_REPORT_FOR_BOGRA.md`](output/L3_REPORT_FOR_BOGRA.md)
+
+Sheet order follows **Mobility → Power → Idle mode → Others**, plus Cover, Summary, Event Profiles, and Diff only.
+
 
 ## How to rebuild the final file and plots
 
