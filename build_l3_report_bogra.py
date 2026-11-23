@@ -299,7 +299,54 @@ PARAM_BLACKLIST_PREFIX = (
     "spare",
 )
 
-SECTION_ORDER = ("Mobility", "Power", "Idle mode", "Others")
+# v1 used four buckets. From v3, rows that used to sit in Others keep a real section
+# name when the IE belongs to one. Mobility, Power, and Idle mode stay first.
+SECTION_ORDER = (
+    "Mobility",
+    "Power",
+    "Idle mode",
+    "Connected DRX",
+    "MAC",
+    "Scheduling request",
+    "Logical channel",
+    "RLC and PDCP",
+    "CQI and MIMO",
+    "Carrier Aggregation",
+    "RACH and PRACH",
+    "SRS",
+    "SPS",
+    "Security",
+    "RRC release",
+    "Others",
+)
+
+_OTHERS_SECTION = {
+    "Connected DRX": "Connected DRX",
+    "MAC Main Config": "MAC",
+    "Scheduling Request": "Scheduling request",
+    "Logical Channel": "Logical channel",
+    "RLC": "RLC and PDCP",
+    "PDCP / RLC UM": "RLC and PDCP",
+    "Antenna / TM": "CQI and MIMO",
+    "CQI / PUSCH Dedicated": "CQI and MIMO",
+    "PHICH / Antenna Common": "CQI and MIMO",
+    "Carrier Aggregation (SCell)": "Carrier Aggregation",
+    "RACH Common": "RACH and PRACH",
+    "SRS": "SRS",
+    "SPS": "SPS",
+    "Security": "Security",
+    "RRC Release": "RRC release",
+    "TPC (group)": "Power",
+}
+
+
+def publish_section(section: str, group: str) -> str:
+    """Keep Mobility / Power / Idle. Name the old Others groups."""
+    if group == "TPC (group)":
+        return "Power"
+    if section == "Others":
+        return _OTHERS_SECTION.get(group, "Others")
+    return section
 
 SECTION_OF = {}
 
@@ -1751,20 +1798,260 @@ def build_analyst_workbook(values, msg_counts, event_profiles, out_path: Path):
     return out_path, len(differ), len(shared), len(mixed)
 
 
+def _comparison_rows(values):
+    rows = []
+    for (section, group, param), by_op in values.items():
+        robi, gp = by_op["Robi"], by_op["Grameenphone"]
+        if not robi and not gp:
+            continue
+        published = publish_section(section, group)
+        status = compare_status_param(param, robi, gp)
+        note = _WHY.get(param, "") if status == "Different" else ""
+        rows.append(
+            {
+                "section": published,
+                "group": group,
+                "param": param,
+                "robi": top_values(robi),
+                "gp": top_values(gp),
+                "status": status,
+                "robi_meaning": top_interpreted(param, robi),
+                "gp_meaning": top_interpreted(param, gp),
+                "nr": sum(robi.values()),
+                "ng": sum(gp.values()),
+                "note": note,
+            }
+        )
+
+    def sort_key(row):
+        try:
+            si = SECTION_ORDER.index(row["section"])
+        except ValueError:
+            si = 99
+        return (si, row["group"], row["param"])
+
+    rows.sort(key=sort_key)
+    return rows
+
+
+_COMPARE_HEADERS = [
+    "Section",
+    "Group",
+    "Parameter",
+    "Robi value",
+    "GP value",
+    "Status",
+    "Robi meaning",
+    "GP meaning",
+    "Robi samples",
+    "GP samples",
+    "Note",
+]
+
+
+def _paint_header(ws, headers):
+    fill = PatternFill("solid", fgColor="1F4E78")
+    font = Font(color="FFFFFF", bold=True, name="Calibri", size=11)
+    for c, header in enumerate(headers, 1):
+        cell = ws.cell(1, c, header)
+        cell.fill = fill
+        cell.font = font
+        cell.alignment = Alignment(wrap_text=True, vertical="center", horizontal="center")
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}1"
+    ws.row_dimensions[1].height = 30
+    ws.sheet_view.showGridLines = False
+
+
+def _paint_compare_body(ws, start_row, end_row):
+    thin = Border(
+        left=Side(style="thin", color="D9D9D9"),
+        right=Side(style="thin", color="D9D9D9"),
+        top=Side(style="thin", color="D9D9D9"),
+        bottom=Side(style="thin", color="D9D9D9"),
+    )
+    status_fill = {
+        "Different": PatternFill("solid", fgColor="FCE4D6"),
+        "Same (dominant)": PatternFill("solid", fgColor="E2EFDA"),
+        "Robi only": PatternFill("solid", fgColor="DDEBF7"),
+        "GP only": PatternFill("solid", fgColor="FFF2CC"),
+    }
+    for r in range(start_row, end_row + 1):
+        status = ws.cell(r, 6).value
+        for c in range(1, len(_COMPARE_HEADERS) + 1):
+            cell = ws.cell(r, c)
+            cell.font = Font(name="Calibri", size=10)
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+            cell.border = thin
+        if status in status_fill:
+            ws.cell(r, 6).fill = status_fill[status]
+            ws.cell(r, 6).font = Font(name="Calibri", size=10, bold=True)
+
+
+def _write_compare_sheet(ws, rows):
+    _paint_header(ws, _COMPARE_HEADERS)
+    for i, row in enumerate(rows, 2):
+        ws.cell(i, 1, row["section"])
+        ws.cell(i, 2, row["group"])
+        ws.cell(i, 3, row["param"])
+        ws.cell(i, 4, row["robi"])
+        ws.cell(i, 5, row["gp"])
+        ws.cell(i, 6, row["status"])
+        ws.cell(i, 7, row["robi_meaning"])
+        ws.cell(i, 8, row["gp_meaning"])
+        ws.cell(i, 9, row["nr"])
+        ws.cell(i, 10, row["ng"])
+        ws.cell(i, 11, row["note"])
+    if rows:
+        _paint_compare_body(ws, 2, 1 + len(rows))
+    widths = [22, 36, 28, 36, 36, 16, 32, 32, 12, 12, 55]
+    for i, width in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = width
+
+
+def _sheet_name(prefix: str, section: str) -> str:
+    name = f"{prefix}{section}" if prefix else section
+    return name[:31]
+
+
+def build_v3_workbook(values, msg_counts, out_path: Path):
+    """v3: full parameter list (v1) plus engineering meaning (v2), named sections."""
+    rows = _comparison_rows(values)
+    wb = Workbook()
+
+    cover = wb.active
+    cover.title = "Versions"
+    cover.sheet_view.showGridLines = False
+    cover["A1"] = "L3 REPORT FOR BOGRA"
+    cover["A1"].font = Font(name="Calibri", size=20, bold=True, color="1F4E78")
+    cover["A2"] = "Version 3 — full comparison, one sheet per section, difference sheets"
+    cover["A2"].font = Font(name="Calibri", size=13, color="595959")
+    cover["A4"] = "Version"
+    cover["B4"] = "What it contains"
+    cover["C4"] = "File"
+    for col in range(1, 4):
+        cover.cell(4, col).font = Font(name="Calibri", bold=True, color="FFFFFF")
+        cover.cell(4, col).fill = PatternFill("solid", fgColor="1F4E78")
+    versions = [
+        ("v1", "Every decoded parameter. Sections: Mobility, Power, Idle mode, Others.", "L3_REPORT_FOR_BOGRA_v1.xlsx"),
+        ("v2", "Only settings that are stable on both networks, with the idle-search finding.", "L3_REPORT_FOR_BOGRA_v2.xlsx"),
+        ("v3 (this file)", "v1 list, v2 meaning column, and a named section for each former Others group. Comparison, one sheet per section, and a difference sheet per section.", "L3_REPORT_FOR_BOGRA_v3.xlsx"),
+    ]
+    for i, (ver, what, fname) in enumerate(versions, 5):
+        cover.cell(i, 1, ver)
+        cover.cell(i, 2, what)
+        cover.cell(i, 3, fname)
+        for col in range(1, 4):
+            cover.cell(i, col).alignment = Alignment(wrap_text=True, vertical="top")
+            cover.cell(i, col).font = Font(name="Calibri", size=11)
+        cover.row_dimensions[i].height = 36
+    cover["A9"] = (
+        f"Source: Layer 3_Active Mode_Data_Robi_v1.7z. "
+        f"Robi {sum(msg_counts['Robi'].values()):,} messages, "
+        f"Grameenphone {sum(msg_counts['Grameenphone'].values()):,}. "
+        "Robi value and GP value are the most common settings, with sample share. "
+        "Meaning converts mapped fields (RSRP index to dBm, a3-Offset and hysteresis to dB, q-RxLevMin to dBm)."
+    )
+    cover["A9"].alignment = Alignment(wrap_text=True, vertical="top")
+    cover.merge_cells("A9:C11")
+    cover.column_dimensions["A"].width = 18
+    cover.column_dimensions["B"].width = 88
+    cover.column_dimensions["C"].width = 36
+
+    comparison = wb.create_sheet("Comparison", 1)
+    _write_compare_sheet(comparison, rows)
+
+    diff_rows = [r for r in rows if r["status"] in {"Different", "Robi only", "GP only"}]
+    differences = wb.create_sheet("Differences", 2)
+    _write_compare_sheet(differences, diff_rows)
+
+    used = {"Versions", "Comparison", "Differences"}
+    for section in SECTION_ORDER:
+        section_rows = [r for r in rows if r["section"] == section]
+        if not section_rows:
+            continue
+        name = _sheet_name("", section)
+        if name in used:
+            name = name[:28] + " 2"
+        used.add(name)
+        _write_compare_sheet(wb.create_sheet(name), section_rows)
+
+        section_diff = [r for r in section_rows if r["status"] in {"Different", "Robi only", "GP only"}]
+        if not section_diff:
+            continue
+        dname = _sheet_name("Diff ", section)
+        if dname in used:
+            dname = ("D " + section)[:31]
+        used.add(dname)
+        _write_compare_sheet(wb.create_sheet(dname), section_diff)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(out_path)
+
+    lines = [
+        "# L3 REPORT FOR BOGRA — v3",
+        "",
+        "Robi vs Grameenphone. Every decoded Layer-3 parameter is on the Comparison sheet.",
+        "Mobility, Power, and Idle mode stay first. Parameters that were grouped as Others now have their own section when the IE has a known home (Connected DRX, MAC, RLC and PDCP, CQI and MIMO, Carrier Aggregation, Security, and the rest).",
+        "",
+        "Meaning columns convert the mapped 3GPP value (RSRP index to dBm, offset and hysteresis to dB, q-RxLevMin to dBm). A note is filled where the two dominant values change UE behaviour.",
+        "",
+        "## Versions",
+        "",
+        "| Version | File | Contents |",
+        "| --- | --- | --- |",
+        "| v1 | `output/L3_REPORT_FOR_BOGRA_v1.xlsx` | Full list. Sections: Mobility, Power, Idle mode, Others. |",
+        "| v2 | `output/L3_REPORT_FOR_BOGRA_v2.xlsx` | Stable settings only, with the idle-search finding. |",
+        "| v3 | `output/L3_REPORT_FOR_BOGRA_v3.xlsx` | Full list, named sections, one sheet per section, difference sheets. Current. |",
+        "",
+        f"Parameters in v3: {len(rows)}. Rows that differ: {len(diff_rows)}.",
+        "",
+        "## Sections",
+        "",
+        "| Section | Parameters | Different | Robi only | GP only | Same |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for section in SECTION_ORDER:
+        part = [r for r in rows if r["section"] == section]
+        if not part:
+            continue
+        lines.append(
+            "| {sec} | {n} | {d} | {ro} | {go} | {s} |".format(
+                sec=section,
+                n=len(part),
+                d=sum(r["status"] == "Different" for r in part),
+                ro=sum(r["status"] == "Robi only" for r in part),
+                go=sum(r["status"] == "GP only" for r in part),
+                s=sum(r["status"] == "Same (dominant)" for r in part),
+            )
+        )
+    lines += [
+        "",
+        "Open Comparison for the full list. Open Differences for every row that is not the same dominant value. Each section also has its own sheet and, when anything differs, a `Diff <section>` sheet.",
+        "",
+    ]
+    md_path = out_path.with_suffix(".md")
+    md_path.write_text("\n".join(lines))
+    return out_path, len(rows), len(diff_rows), wb.sheetnames
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--l3-dir", type=Path, default=DEFAULT_L3_DIR)
-    ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    ap.add_argument("--out", type=Path, default=ROOT / "output" / "L3_REPORT_FOR_BOGRA_v3.xlsx")
     args = ap.parse_args()
     print(f"Scanning {args.l3_dir} ...")
-    values, msg_counts, event_profiles = scan(args.l3_dir)
-    out, n_diff, n_same, n_mixed = build_analyst_workbook(
-        values, msg_counts, event_profiles, args.out
-    )
+    values, msg_counts, _events = scan(args.l3_dir)
+    out, n_rows, n_diff, sheets = build_v3_workbook(values, msg_counts, args.out)
+    latest = ROOT / "output" / "L3_REPORT_FOR_BOGRA.xlsx"
+    latest.write_bytes(out.read_bytes())
+    latest_md = ROOT / "output" / "L3_REPORT_FOR_BOGRA.md"
+    latest_md.write_text(out.with_suffix(".md").read_text())
     print(f"Wrote {out}")
-    print(f"  different settings: {n_diff}")
-    print(f"  shared settings: {n_same}")
-    print(f"  varies by cell: {n_mixed}")
+    print(f"Copied current report to {latest}")
+    print(f"  parameters: {n_rows}")
+    print(f"  differences: {n_diff}")
+    print(f"  sheets: {', '.join(sheets)}")
 
 
 if __name__ == "__main__":
