@@ -41,6 +41,19 @@ Current file is **v8**. Each publish is a new version. Previous workbooks stay i
 
 `output/L3_REPORT_FOR_BOGRA.xlsx` is a copy of v8.
 
+## VoLTE call flow chart
+
+Current file is **v6**. Each publish is a new HTML file. Previous charts stay in the repo. `output/L3_VOLTE_CALL_FLOW.html` is a copy of the current version.
+
+| Version | File | Contents |
+| --- | --- | --- |
+| v1 | `output/L3_VOLTE_CALL_FLOW_v1.html` | First downloadable chart. |
+| v2 | `output/L3_VOLTE_CALL_FLOW_v2.html` | Robi, Grameenphone, and Banglalink side by side. |
+| v3 | `output/L3_VOLTE_CALL_FLOW_v3.html` | Colored-box call flow, three operators. |
+| v4 | `output/L3_VOLTE_CALL_FLOW_v4.html` | Three colored-box ladders, one per operator. |
+| v5 | `output/L3_VOLTE_CALL_FLOW_v5.html` | Full ladder, UE-A to UE-B. Good-RSRP sample (about −75 to −85 dBm). |
+| v6 | `output/L3_VOLTE_CALL_FLOW_v6.html` | Same ladder. Strongest call of each operator. Nothing in the drive is above −50 dBm. |
+
 ```bash
 python3 -c "import py7zr; py7zr.SevenZipFile('Layer 3_Active Mode_Data_Robi_v1.7z').extractall('extracted/l3')"
 python3 build_l3_report_bogra.py

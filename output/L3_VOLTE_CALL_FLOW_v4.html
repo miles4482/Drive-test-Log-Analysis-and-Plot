@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>4G/LTE Call flow steps</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: #fff; color: #1a1a1a; }
+    body { font-family: Arial, Helvetica, sans-serif; padding: 12px 8px 28px; }
+    h1 { margin: 4px 0 2px; text-align: center; font-size: 30px; font-weight: 800; letter-spacing: -0.3px; }
+    .note { margin: 0 0 8px; text-align: center; font-size: 13px; color: #333; }
+    .wrap { display: flex; justify-content: center; align-items: flex-start; gap: 8px; flex-wrap: nowrap; }
+    figure { margin: 0; }
+    figcaption { text-align: center; font-weight: 800; font-size: 18px; margin: 0 0 2px; }
+    figcaption span { display: block; font-size: 12px; font-weight: 600; color: #333; }
+    svg { display: block; width: 500px; height: auto; }
+  </style>
+</head>
+<body>
+  <h1>4G/LTE Call flow steps</h1>
+  <p class="note">VoLTE setup on a good-RSRP sample call. Time is seconds after SIP INVITE.</p>
+  <div class="wrap" id="wrap"></div>
+  <script>
+    const ops = [
+      {
+        name: "Robi",
+        sub: "RSRP −76 dBm · rings at 3.27 s",
+        hue: "#9a3412",
+        rows: [
+          ["UE", "IMS Core", "SIP INVITE · 0.00 s", 1],
+          ["", "", "100 Trying · 0.08 s", -1],
+          ["eNodeB", "", "B-party RRC · 2.09 s", 1, 1],
+          ["MME", "", "Paging · 2.01 s", 1, 1],
+          ["PCRF", "", "Caller voice bearer · 2.75 s", 1, 1],
+          ["", "", "INVITE to B-party · 2.02 s", 1, 1],
+          ["PGW/SGW", "", "183 Session Progress · 2.07 s", -1],
+          ["", "", "Called voice bearer · 2.39 s", 1, 1],
+          ["", "", "180 Ringing · 3.27 s", "voice"],
+          ["IMS", "IMS Core\nP/I/S-CSCF", "Call setup · 3.27 s", 1, 1]
+        ]
+      },
+      {
+        name: "Grameenphone",
+        sub: "RSRP −85 dBm · rings at 2.20 s",
+        hue: "#1a5276",
+        rows: [
+          ["UE", "IMS Core", "SIP INVITE · 0.00 s", 1],
+          ["", "", "100 Trying · 0.16 s", -1],
+          ["eNodeB", "", "B-party RRC · 1.21 s", 1],
+          ["MME", "", "Paging · 1.13 s", 1],
+          ["PCRF", "", "Caller voice bearer · 0.24 s", 1],
+          ["", "", "INVITE to B-party · 1.33 s", 1],
+          ["PGW/SGW", "", "183 Session Progress · 1.37 s", -1],
+          ["", "", "Called voice bearer · 1.52 s", 1],
+          ["", "", "180 Ringing · 2.20 s", "voice"],
+          ["IMS", "IMS Core\nP/I/S-CSCF", "Call setup · 2.20 s", 1]
+        ]
+      },
+      {
+        name: "Banglalink",
+        sub: "RSRP −77 dBm · rings at 0.75 s",
+        hue: "#0e6655",
+        rows: [
+          ["UE", "IMS Core", "SIP INVITE · 0.00 s", 1],
+          ["", "", "100 Trying · 0.04 s", -1],
+          ["eNodeB", "", "Already connected", 1],
+          ["MME", "", "No paging", 1],
+          ["PCRF", "", "Caller voice bearer · 0.08 s", 1],
+          ["", "", "INVITE to B-party · 0.33 s", 1],
+          ["PGW/SGW", "", "183 Session Progress · 0.37 s", -1],
+          ["", "", "Called voice bearer · 0.46 s", 1],
+          ["", "", "180 Ringing · 0.75 s", "voice"],
+          ["IMS", "IMS Core\nP/I/S-CSCF", "Call setup · 0.75 s", 1]
+        ]
+      }
+    ];
+
+    const fill = {
+      "UE": ["#d6eaf8", "#2e86c1"],
+      "eNodeB": ["#d5f5e3", "#1e8449"],
+      "MME": ["#fdebd0", "#ca6f1e"],
+      "PCRF": ["#e5e8e8", "#7f8c8d"],
+      "PGW/SGW": ["#f5cba7", "#b9770e"],
+      "IMS": ["#d7bde2", "#6c3483"],
+      "IMS Core": ["#d7bde2", "#6c3483"],
+      "IMS Core\nP/I/S-CSCF": ["#d7bde2", "#6c3483"]
+    };
+
+    function esc(s) {
+      return s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    }
+
+    function box(x, y, w, h, label) {
+      const [bg, stroke] = fill[label];
+      const lines = label.split("\n");
+      const start = y + h / 2 - (lines.length - 1) * 8 + 5;
+      const text = lines.map((line, i) =>
+        `<tspan x="${x + w / 2}" y="${start + i * 16}">${esc(line)}</tspan>`
+      ).join("");
+      return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="7" fill="${bg}" stroke="${stroke}" stroke-width="1.7"/>
+        <text text-anchor="middle" font-family="Arial" font-size="14" font-weight="700" fill="#1a1a1a">${text}</text>`;
+    }
+
+    function arrow(y, dir, label, slow, gid) {
+      const x1 = 168, x2 = 372;
+      const color = slow ? "#9a3412" : "#222";
+      const head = dir === "voice" || dir === 1
+        ? `<polygon points="${x2},${y} ${x2 - 11},${y - 5} ${x2 - 11},${y + 5}" fill="${dir === "voice" ? "#e67e22" : color}"/>`
+        : `<polygon points="${x1},${y} ${x1 + 11},${y - 5} ${x1 + 11},${y + 5}" fill="${color}"/>`;
+      const lineColor = dir === "voice" ? "#e67e22" : color;
+      const xStart = dir === -1 ? x2 : x1;
+      const xEnd = dir === -1 ? x1 + 12 : x2 - 12;
+      let extra = "";
+      if (dir === "voice") {
+        extra = `<rect x="232" y="${y - 10}" width="76" height="20" rx="3" fill="#fdebd0"/>
+          <text x="270" y="${y + 4}" text-anchor="middle" font-family="Arial" font-size="12" font-weight="800" fill="#d35400">VOICE</text>
+          <text x="270" y="${y - 16}" text-anchor="middle" font-family="Arial" font-size="12" font-weight="700" fill="${color}">${esc(label)}</text>`;
+      } else {
+        extra = `<text x="270" y="${y - 7}" text-anchor="middle" font-family="Arial" font-size="12.5" font-weight="700" fill="${color}">${esc(label)}</text>`;
+      }
+      return `<line x1="${xStart}" y1="${y}" x2="${xEnd}" y2="${y}" stroke="${lineColor}" stroke-width="${slow || dir === "voice" ? 2.2 : 1.5}"/>${head}${extra}`;
+    }
+
+    function chart(op) {
+      const lx = 168;
+      const parts = [];
+      parts.push(`<line x1="${lx}" y1="62" x2="${lx}" y2="668" stroke="#222" stroke-width="1.7"/>`);
+      parts.push(`<line x1="372" y1="62" x2="372" y2="668" stroke="#222" stroke-width="1.7"/>`);
+      const yAt = [8, 78, 118, 196, 274, 352, 412, 478, 548, 668];
+      const hAt = [52, 0, 46, 46, 46, 0, 52, 0, 0, 56];
+      op.rows.forEach((row, i) => {
+        const [left, right, label, dir, slow] = row;
+        const y = yAt[i];
+        if (left) parts.push(box(lx - 132, y, 132, hAt[i], left));
+        if (right) parts.push(box(372, y, 148, hAt[i], right));
+        const ay = left ? y + hAt[i] / 2 : y;
+        if (label) parts.push(arrow(ay, dir, label, slow, op.name));
+      });
+      return `<figure>
+        <figcaption style="color:${op.hue}">${esc(op.name)}<span>${esc(op.sub)}</span></figcaption>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 740" width="500" height="685">
+          <rect width="540" height="740" fill="#fff"/>
+          ${parts.join("")}
+        </svg>
+      </figure>`;
+    }
+
+    document.getElementById("wrap").innerHTML = ops.map(chart).join("");
+  </script>
+</body>
+</html>

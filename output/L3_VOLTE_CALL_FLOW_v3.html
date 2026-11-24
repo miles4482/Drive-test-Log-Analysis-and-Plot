@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>4G/LTE VoLTE call flow</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 28px 16px 48px;
+      background: #fff;
+      color: #1a1a1a;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+    h1 {
+      margin: 0 0 18px;
+      text-align: center;
+      font-size: 28px;
+      font-weight: 800;
+    }
+    .ops {
+      display: flex;
+      gap: 28px;
+      justify-content: center;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+    .op { width: 460px; }
+    .op h2 {
+      margin: 0 0 8px;
+      text-align: center;
+      font-size: 22px;
+    }
+    .op h2 span { display: block; font-size: 14px; font-weight: 600; color: #444; }
+    .robi h2 { color: #9a3412; }
+    .gp h2 { color: #1f4e78; }
+    .bl h2 { color: #0f6b3c; }
+    .chart { position: relative; padding: 8px 0 8px 8px; }
+    .rail {
+      position: absolute;
+      top: 28px;
+      bottom: 36px;
+      right: 78px;
+      width: 2px;
+      background: #222;
+    }
+    .core {
+      position: absolute;
+      right: 8px;
+      top: 0;
+      width: 140px;
+      min-height: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      background: #d7bde2;
+      border: 2px solid #6c3483;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 14px;
+      line-height: 1.25;
+      z-index: 2;
+    }
+    .core.bottom { top: auto; bottom: 0; }
+    .row {
+      display: grid;
+      grid-template-columns: 128px 1fr;
+      align-items: center;
+      min-height: 62px;
+      margin-right: 148px;
+      position: relative;
+    }
+    .box {
+      min-height: 46px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      border-radius: 8px;
+      border: 2px solid #566573;
+      font-weight: 700;
+      font-size: 14px;
+      padding: 6px 8px;
+      line-height: 1.2;
+      z-index: 2;
+      background: #fff;
+    }
+    .ue { background: #d6eaf8; border-color: #2e86c1; }
+    .enb { background: #d5f5e3; border-color: #1e8449; }
+    .mme { background: #fdebd0; border-color: #ca6f1e; }
+    .pgw { background: #f5cba7; border-color: #b9770e; }
+    .ims { background: #d7bde2; border-color: #6c3483; }
+    .bue { background: #d4e6f1; border-color: #1a5276; }
+    .msg {
+      position: relative;
+      height: 28px;
+      margin-left: 8px;
+      margin-right: 6px;
+    }
+    .msg i {
+      position: absolute;
+      left: 0;
+      right: 10px;
+      top: 13px;
+      height: 0;
+      border-top: 1.5px solid #222;
+    }
+    .msg.back i { border-top-style: solid; }
+    .msg b {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: -2px;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 700;
+      background: #fff;
+      padding: 0 4px;
+      line-height: 1.1;
+    }
+    .msg em {
+      position: absolute;
+      right: -2px;
+      top: 8px;
+      width: 0;
+      height: 0;
+      border-top: 6px solid transparent;
+      border-bottom: 6px solid transparent;
+      border-left: 9px solid #222;
+    }
+    .msg.back em {
+      right: auto;
+      left: -2px;
+      border-left: 0;
+      border-right: 9px solid #222;
+    }
+    .slow b { color: #9a3412; }
+    .slow i { border-top-color: #9a3412; border-top-width: 2.5px; }
+    .slow em { border-left-color: #9a3412; }
+    .slow.back em { border-left-color: transparent; border-right-color: #9a3412; }
+    .fast b { color: #0f6b3c; }
+  </style>
+</head>
+<body>
+  <h1>4G/LTE VoLTE call flow</h1>
+  <div class="ops">
+
+    <section class="op robi">
+      <h2>Robi <span>rings at 3.27 s · RSRP −76 dBm</span></h2>
+      <div class="chart">
+        <div class="rail"></div>
+        <div class="core">IMS Core<br>P/I/S-CSCF</div>
+        <div class="row"><div class="box ue">A-party<br>UE</div><div class="msg slow"><b>SIP INVITE · 0.00 s</b><i></i><em></em></div></div>
+        <div class="row"><div class="box ue">A-party<br>UE</div><div class="msg back"><b>100 Trying · 0.08 s</b><i></i><em></em></div></div>
+        <div class="row"><div class="box pgw">PGW / SGW</div><div class="msg back slow"><b>Caller voice bearer · 2.75 s</b><i></i><em></em></div></div>
+        <div class="row"><div class="box mme">MME</div><div class="msg slow"><b>Paging B-party · 2.01 s</b><i></i><em></em></div></div>
+        <div class="row"><div class="box enb">eNodeB</div><div class="msg back"><b>B-party RRC · 2.09 s</b><i></i><em></em></div></div>
+        <div class="row"><div class="box bue">B-party<br>UE</div><div class="msg slow"><b>SIP INVITE · 2.02 s</b><i></i><em></em></div></div>
+        <div class="row"><div class="box bue">B-party<br>UE</div><div class="msg back"><b>183 Session Progress · 2.07 s</b><i></i><em></em></div></div>
+        <div class="row"><div class="box pgw">PGW / SGW</div><div class="msg"><b>Called voice bearer · 2.39 s</b><i></i><em></em></div></div>
+        <div class="row"><div class="box ims">IMS</div><div class="msg back slow"><b>180 Ringing · 3.27 s</b><i></i><em></em></div></div>
+      </div>
+    </section>
+
+    <section class="op gp">
+      <h2>Grameenphone <span>rings at 2.20 s · RSRP −85 dBm</span></h2>
+      <div class="chart">
+        <div class="rail"></div>
+        <div class="core">IMS Core<br>P/I/S-CSCF</div>
+        <div class="row"><div class="box ue">A-party<br>UE</div><div class="msg"><b>SIP INVITE · 0.00 s</b><i></i><em></em></div></div>
+        <div class="row"><div class="box ue">A-party<br>UE</div><div class="msg back"><b>100 Trying · 0.16 s</b><i></i><em></em></div></div>
+        <div class="row"><div class="box pgw">PGW / SGW</div><div class="msg back fast"><b>Caller voice bearer · 0.24 s</b><i></i><em></em></div></div>
+        <div class="row"><div class="box mme">MME</div><div class="msg slow"><b>Paging B-party · 1.13 s</b><i></i><em></em></div></div>
+        <div class="row"><div class="box enb">eNodeB</div><div class="msg back"><b>B-party RRC · 1.21 s</b><i></i><em></em></div></div>
+        <div class="row"><div class="box bue">B-party<br>UE</div><div class="msg slow"><b>SIP INVITE · 1.33 s</b><i></i><em></em></div></div>
+        <div class="row"><div class="box bue">B-party<br>UE</div><div class="msg back"><b>183 Session Progress · 1.37 s</b><i></i><em></em></div></div>
+        <div class="row"><div class="box pgw">PGW / SGW</div><div class="msg"><b>Called voice bearer · 1.52 s</b><i></i><em></em></div></div>
+        <div class="row"><div class="box ims">IMS</div><div class="msg back"><b>180 Ringing · 2.20 s</b><i></i><em></em></div></div>
+      </div>
+    </section>
+
+    <section class="op bl">
+      <h2>Banglalink <span>rings at 0.75 s · RSRP −77 dBm</span></h2>
+      <div class="chart">
+        <div class="rail"></div>
+        <div class="core">IMS Core<br>P/I/S-CSCF</div>
+        <div class="row"><div class="box ue">A-party<br>UE</div><div class="msg"><b>SIP INVITE · 0.00 s</b><i></i><em></em></div></div>
+        <div class="row"><div class="box ue">A-party<br>UE</div><div class="msg back"><b>100 Trying · 0.04 s</b><i></i><em></em></div></div>
+        <div class="row"><div class="box pgw">PGW / SGW</div><div class="msg back fast"><b>Caller voice bearer · 0.08 s</b><i></i><em></em></div></div>
+        <div class="row"><div class="box mme">MME</div><div class="msg fast"><b>No paging · already connected</b><i></i><em></em></div></div>
+        <div class="row"><div class="box enb">eNodeB</div><div class="msg back fast"><b>No new RRC setup</b><i></i><em></em></div></div>
+        <div class="row"><div class="box bue">B-party<br>UE</div><div class="msg fast"><b>SIP INVITE · 0.33 s</b><i></i><em></em></div></div>
+        <div class="row"><div class="box bue">B-party<br>UE</div><div class="msg back"><b>183 Session Progress · 0.37 s</b><i></i><em></em></div></div>
+        <div class="row"><div class="box pgw">PGW / SGW</div><div class="msg fast"><b>Called voice bearer · 0.46 s</b><i></i><em></em></div></div>
+        <div class="row"><div class="box ims">IMS</div><div class="msg back fast"><b>180 Ringing · 0.75 s</b><i></i><em></em></div></div>
+      </div>
+    </section>
+
+  </div>
+</body>
+</html>
