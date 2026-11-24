@@ -140,15 +140,17 @@ GitHub shows `index.html` as a file, not as a running map. Download the `web` fo
 
 ## Download Excel report (v1.96)
 
-**v2.04 (current — Excel / PPT / Web same version):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.04.xlsx
+**v2.05 (current — Excel / PPT / Web same version):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.05.xlsx
 
-Summary PPT **v2.04:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.04.pptx
+Summary PPT **v2.05:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.05.pptx
 
-Web **v2.04:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.04.zip
+Web **v2.05:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.05.zip
 
-PPT Executive Summary shows band serving under Active Mode: L1800 66%, L2100 31%, L2600/L900 ~1.6% each. Excel / PPT / Web share version **v2.04**.
+Excel v2.05 restores openable Cover Active charts (v2.03/v2.04 PNG embeds were corrupt). PPT still shows band serving and legend-coloured hists. Excel / PPT / Web share version **v2.05**.
 
-**v2.03:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.03.xlsx
+**v2.04 (corrupt Excel — do not use):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.04.xlsx
+
+**v2.03 (corrupt Excel — do not use):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.03.xlsx
 
 **v1.98:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.98.xlsx
 
@@ -230,7 +232,9 @@ The Feeder swap sheet adds BOSDR02. Its three sectors are a rotation: A is heard
 
 **v1.89 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.89.pptx
 
-**v2.04 web (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.04.zip
+**v2.05 web (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.05.zip
+
+**v2.04 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.04.zip
 
 **v2.03 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.03.zip
 

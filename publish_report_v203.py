@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Publish Bogura Drive-Test Report v2.03 from v1.98 (Cover sheet only).
+"""DO NOT RUN — Excel rejects the PNG Cover hist embeds as corrupt.
 
-Replace Cover Active Mode RSRP / RSRQ / SINR native charts with the same
-legend-coloured histogram PNGs used on PPT Executive Summary. Idle charts,
-route picture, and every other sheet stay byte-identical.
+Superseded by publish_report_v205.py, which restores native Cover charts from
+the last openable v1.98 drawing. Kept only for history.
+
+Original intent: replace Cover Active Mode RSRP / RSRQ / SINR native charts
+with PPT legend-coloured histogram PNGs. That package fails to open in Excel.
 """
 from __future__ import annotations
 
