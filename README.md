@@ -134,7 +134,7 @@ CellID and CellName come from the drive log and `System DUMP.xlsb`:
 - Idle: CellID is the Sector Id column. CellName is the dump column EUtranCellId on the row whose eNBId and cellId match the idle eNB-Id and Sector Id. If several dump rows share that pair, the row with the same DL EARFCN is used.
 - Active: CellID is Cell Id mod 256. The eNB id is Cell Id divided by 256, rounded down. CellName is the dump EUtranCellId for that eNBId and cellId, again preferring the matching EARFCN.
 
-Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110, and −150 to −120. RSRQ is −10 to 0, −17 to −10, and −30 to −17. A spot is one 50 m bin, coloured by the median. Rebuild the page data with `python3 build_web_map.py` after the merged logs or the system dump change.
+Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110, and −150 to −120. RSRQ is −10 to 0, −17 to −10, and −30 to −17. A spot is one 50 m bin, coloured by the median. Rebuild the page data with `python3 build_web_map.py` after the merged logs or the system dump change. When only the Active Mode log changes, use `python3 build_web_map.py --active-only` so Idle maps stay as published, then bump the version in `web/index.html`.
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
@@ -217,6 +217,8 @@ On Bad Spot RSRP_Active the idle map sits 0.40 inch under the active map, the sa
 The Feeder swap sheet adds BOSDR02. Its three sectors are a rotation: A is heard on C, C on B, and B on A. All three arms are coloured. The five two-sector swaps stay red and cyan, with the third arm yellow. The other sheets are unchanged.
 
 **v1.89 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.89.pptx
+
+**v1.90 web (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.90.zip
 
 **v1.89 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.89.zip
 

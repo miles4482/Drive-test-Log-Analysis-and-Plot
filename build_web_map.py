@@ -175,6 +175,78 @@ def _records(frame: pd.DataFrame, names: dict[str, int]) -> dict:
     }
 
 
+def _load_coverage_payload() -> dict:
+    if not DATA_JS.exists():
+        raise SystemExit(f"Missing {DATA_JS.name}; run a full web build first")
+    text = DATA_JS.read_text().strip()
+    if not text.startswith("const COVERAGE = ") or not text.endswith(";"):
+        raise SystemExit(f"{DATA_JS.name} is not a coverage page")
+    return json.loads(text[len("const COVERAGE = "):-1])
+
+
+def _names_dict_from_payload(payload: dict) -> dict[str, int]:
+    """Keep existing Idle name indices stable when only Active is rebuilt."""
+    names: dict[str, int] = {"": 0}
+    for index, value in enumerate(payload.get("names") or [""]):
+        if index == 0:
+            continue
+        if value and value not in names:
+            names[value] = index
+    return names
+
+
+def _write_coverage_payload(payload: dict) -> None:
+    WEB_DIR.mkdir(parents=True, exist_ok=True)
+    text = "const COVERAGE = " + json.dumps(payload, separators=(",", ":")) + ";\n"
+    DATA_JS.write_text(text)
+    print(f"Wrote {DATA_JS} ({DATA_JS.stat().st_size / 1e6:.1f} MB)", flush=True)
+
+
+def build_active_only() -> None:
+    """Refresh Active coverage sets only. Idle maps, feeder, and site pies stay as published.
+
+    Standing rule: when Active Mode logs change, bump the web version and call this
+    path so Idle layers are not regenerated.
+    """
+    if not ACTIVE_MERGED.exists():
+        raise SystemExit("Merged Active drive log is missing.")
+    if not SITE_DB_PATH.exists():
+        raise SystemExit(f"Missing {SITE_DB_PATH.name}")
+    payload = _load_coverage_payload()
+    idle_keys = [key for key in payload.get("sets", {}) if key.startswith("idle|")]
+    if not idle_keys:
+        raise SystemExit("Existing coverage has no Idle sets to preserve")
+    print("Loading system dump", flush=True)
+    exact, pair = load_cell_directory()
+    print(f"  names by EARFCN {len(exact):,}  unique pairs {len(pair):,}", flush=True)
+    print("Loading Active drive log only", flush=True)
+    active = select_active_report(load_active_merged())
+    active_all = strongest_location(active)
+    print(f"Active plotted {len(active_all):,} (Idle sets left unchanged)", flush=True)
+
+    tracks: dict[str, pd.DataFrame] = {"active|all": active_all}
+    for layer in REPORT_LAYERS:
+        tracks[f"active|{layer}"] = filter_by_layer(active_all, layer)
+
+    names = _names_dict_from_payload(payload)
+    for key, frame in tracks.items():
+        print(f"Binning {key} ({len(frame):,} rows)", flush=True)
+        identified = attach_identity(frame, "active", exact, pair)
+        binned = bin_track(identified)
+        named = int((binned["cell_name"].astype(str).str.len() > 0).sum()) if not binned.empty else 0
+        print(f"  {len(binned):,} spots, {named:,} with a Cell Name", flush=True)
+        payload["sets"][key] = _records(binned, names)
+
+    ordered = [""] * len(names)
+    for value, index in names.items():
+        ordered[index] = value
+    payload["names"] = ordered
+    _write_coverage_payload(payload)
+    # Cell RF params must cover any new Active names; site pies stay dump-based.
+    add_cell_params()
+    package_web()
+
+
 def build() -> None:
     if not MERGED_CSV.exists() or not ACTIVE_MERGED.exists():
         raise SystemExit("Merged drive logs are missing.")
@@ -215,10 +287,7 @@ def build() -> None:
     for value, index in names.items():
         ordered[index] = value
     payload = {"names": ordered, "sets": sets}
-    WEB_DIR.mkdir(parents=True, exist_ok=True)
-    text = "const COVERAGE = " + json.dumps(payload, separators=(",", ":")) + ";\n"
-    DATA_JS.write_text(text)
-    print(f"Wrote {DATA_JS} ({DATA_JS.stat().st_size / 1e6:.1f} MB)", flush=True)
+    _write_coverage_payload(payload)
     add_cell_params()
     add_site_pies()
     package_web()
@@ -465,5 +534,7 @@ if __name__ == "__main__":
         add_cell_params()
         add_site_pies()
         package_web()
+    elif "--active-only" in sys.argv:
+        build_active_only()
     else:
         build()
