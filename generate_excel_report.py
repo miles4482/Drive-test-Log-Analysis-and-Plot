@@ -92,7 +92,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "2.06"
+REPORT_VERSION = "2.07"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -2714,12 +2714,13 @@ def _append_missing_bad_spot_maps(
     return drawing, rels
 
 
-def refresh_bad_spot_pies(src: Path | None = None) -> Path:
+def refresh_bad_spot_pies(src: Path | None = None, *, active_only: bool = False) -> Path:
     """Redraw the serial bad-spot maps and swap them into the current workbook.
 
     Combined views, KPI sheets, and the circle count stay as they are. Each serial
-    map keeps one movable circle, placed again from the new picture. Spots that
-    were not drawn before get a new map below the last one.
+    map gets every pocket circle as a movable shape. Spots that were not drawn
+    before get a new map below the last one. active_only skips Idle when the
+    workbook has no Bad Spot RSRP sheet (Session-ID Active package).
     """
     import io
     from PIL import Image
@@ -2750,7 +2751,8 @@ def refresh_bad_spot_pies(src: Path | None = None) -> Path:
     MAP_CIRCLE_PIXELS.clear()
     zoom_for_sheet: dict[str, list[Path]] = {}
     plans_for_sheet: dict[str, list[dict]] = {}
-    for tag, frame in (("", idle_track), ("active", active_track)):
+    frames = (("active", active_track),) if active_only else (("", idle_track), ("active", active_track))
+    for tag, frame in frames:
         suffix = f"_{tag}" if tag else ""
         for kpi, classify, labels, colors in (
             ("RSRP", rsrp_map_class, MAP_RSRP_LABELS, MAP_RSRP_COLORS),
@@ -2783,7 +2785,11 @@ def refresh_bad_spot_pies(src: Path | None = None) -> Path:
         parts = {name: zf.read(name) for name in names}
     drawings = _sheet_drawings(parts)
     sheet_xml = _worksheet_xml(parts)
-    for sheet, paths in zoom_for_sheet.items():
+    for sheet, paths in list(zoom_for_sheet.items()):
+        if sheet not in drawings:
+            print(f"  skip {sheet}: sheet not in workbook", flush=True)
+            zoom_for_sheet.pop(sheet, None)
+            continue
         drawing_name = drawings[sheet]
         rels_name = drawing_name.replace("drawings/", "drawings/_rels/") + ".rels"
         rels = parts[rels_name].decode("utf-8")
@@ -2798,15 +2804,17 @@ def refresh_bad_spot_pies(src: Path | None = None) -> Path:
         for block in re.findall(r"<oneCellAnchor>.*?</oneCellAnchor>", drawing, flags=re.S):
             if "<pic>" not in block:
                 continue
-            # Idle-area maps sit under each Active serial map; do not treat them
-            # as Active serial pictures when swapping in a fresh Active redraw.
+            # Idle-area and Scanner maps sit on the same drawing; only the Active
+            # (or Idle) serial Image N pictures are replaced here.
             if re.search(r'name="Idle area \d+"', block):
+                continue
+            if re.search(r'name="Scanner Image \d+"', block):
                 continue
             row = int(re.search(r"<row>(\d+)</row>", block).group(1))
             pictures.append((row, block))
         pictures.sort()
         serial = pictures[1:]
-        if len(paths) < len(serial):
+        if len(paths) != len(serial):
             raise SystemExit(f"{sheet}: {len(serial)} pictures, {len(paths)} new maps")
         # Drop movable circles that sit on Active serial maps only. Leave Idle
         # area pictures untouched; their anchors have no ellipse shapes.
@@ -2888,7 +2896,7 @@ def refresh_bad_spot_pies(src: Path | None = None) -> Path:
 
 
 def _write_circle_index() -> None:
-    """Pixel box of each bad-spot circle, so the summary deck can draw the same oval."""
+    """Pixel boxes of every bad-spot circle, so the summary deck paints the same ovals."""
     import json
 
     payload = {}
@@ -2896,20 +2904,26 @@ def _write_circle_index() -> None:
         circles = geom.get("circles") or []
         if not circles:
             continue
-        circle = circles[0]
         payload[Path(png).name] = {
             "width": geom["size"][0],
             "height": geom["size"][1],
-            "x": circle["x"],
-            "y": circle["y"],
-            "w": circle["w"],
-            "h": circle["h"],
-            "dotted": bool(circle.get("dotted")),
+            "circles": [
+                {
+                    "x": circle["x"],
+                    "y": circle["y"],
+                    "w": circle["w"],
+                    "h": circle["h"],
+                    "dotted": bool(circle.get("dotted")),
+                    "name": circle.get("name") or "",
+                }
+                for circle in circles
+            ],
         }
     dest = PLOTS_DIR / "bad_spot_circles.json"
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(payload))
-    print(f"Wrote {dest} ({len(payload)} circles)", flush=True)
+    n_circles = sum(len(item["circles"]) for item in payload.values())
+    print(f"Wrote {dest} ({len(payload)} maps, {n_circles} circles)", flush=True)
 
 
 def place_active_idle_area_maps(src: Path, dest: Path, pngs: list[Path], clean_from: Path) -> Path:
@@ -4786,10 +4800,68 @@ def _sheet_number(value) -> str:
     return f"{number:.1f}"
 
 
+def _drop_stray_parameter_tables(xml: str, headers: list[tuple[int, int]]) -> str:
+    """Keep one Parameter change table per Active spot; drop leftover copies.
+
+    Older grafts left a second table at header+33. On a tight gap that leftover
+    lands on the next spot's header+1 and survives the normal strip window.
+    Match the I-column title cell only (not body text that mentions the words).
+    Within each Active spot range keep the last title and drop earlier copies
+    plus their label/data rows. Scanner tables below the Circle index stay.
+    """
+    circle = re.search(
+        r'<c r="A(\d+)"[^>]*>\s*<is><t(?:\s[^>]*)?>Circle 1</t>',
+        xml,
+    )
+    limit = int(circle.group(1)) if circle else 10**9
+    pc_rows = sorted(
+        int(match.group(1))
+        for match in re.finditer(
+            r'<c r="I(\d+)"[^>]*>\s*<is><t(?:\s[^>]*)?>Parameter change</t>',
+            xml,
+        )
+        if int(match.group(1)) < limit
+    )
+    drop: set[int] = set()
+    for index, (header, _number) in enumerate(headers):
+        next_header = headers[index + 1][0] if index + 1 < len(headers) else limit
+        # Skip the Bad Spot title row itself; only look at description/table rows.
+        here = [row for row in pc_rows if header < row < next_header]
+        if len(here) <= 1:
+            continue
+        for row in here[:-1]:
+            drop.add(row)
+            drop.update(range(row + 1, min(row + 8, next_header, limit)))
+
+    if not drop:
+        return xml
+
+    def keep_row(match: re.Match) -> str:
+        number = int(re.search(r'\br="(\d+)"', match.group(0)).group(1))
+        return "" if number in drop else match.group(0)
+
+    xml = re.sub(r"<row\b.*?</row>", keep_row, xml, flags=re.S)
+
+    def keep_merge(match: re.Match) -> str:
+        rows = [int(value) for value in re.findall(r"\d+", match.group(0))]
+        return "" if any(row in drop for row in rows) else match.group(0)
+
+    xml = re.sub(r"<mergeCell\b[^>]*/>", keep_merge, xml)
+    count = len(re.findall(r"<mergeCell\b", xml))
+    xml = re.sub(r'<mergeCells count="\d+"', f'<mergeCells count="{count}"', xml, count=1)
+    return xml
+
+
 def _strip_advice_rows(xml: str, headers: list[tuple[int, int]]) -> str:
     """Remove a previous suggestion block so the new table can take its rows."""
-    # Through the compact parameter table, and short of the next bad-spot title.
-    drop = {row for header, _number in headers for row in range(header + 2, header + 31)}
+    # Clear every row from the description title through the row before the next
+    # Bad Spot header. That removes both the coloured Parameter change table and
+    # the leftover second copy older grafts left at header+33. Cap the last spot
+    # at +40 so the Circle index table below the maps is left alone.
+    drop: set[int] = set()
+    for index, (header, _number) in enumerate(headers):
+        next_header = headers[index + 1][0] if index + 1 < len(headers) else header + 40
+        drop.update(range(header + 2, next_header))
 
     def keep_row(match: re.Match) -> str:
         number = int(re.search(r'\br="(\d+)"', match.group(0)).group(1))
@@ -5714,6 +5786,7 @@ def write_bad_spot_advice(
             rows.update(added_rows)
             merges.extend(added_merges)
         xml = _insert_sheet_rows(xml, rows, merges)
+        xml = _drop_stray_parameter_tables(xml, headers)
         xml = _add_solution_columns(xml, pairs)
         xml = _drop_on_sheet_summary(xml)
         for old, new in zip(_ADVICE_NOTE_OLD, _ADVICE_NOTE_NEW):
@@ -5721,7 +5794,9 @@ def write_bad_spot_advice(
                 xml = xml.replace(old, new)
             # Fresh builds may omit the legacy note; per-spot advice rows are enough.
         written = xml.count(">Serving Cells details<")
-        if written != len(headers):
+        # Scanner section on the same sheet keeps its own Serving Cells blocks, so
+        # the sheet total can exceed the Active header count.
+        if written < len(headers):
             raise SystemExit(
                 f"{sheet}: wrote Serving Cells details {written} times for {len(headers)} bad spots"
             )

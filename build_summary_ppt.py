@@ -26,13 +26,13 @@ from pptx.util import Emu, Inches, Pt
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
-REPORT = OUTPUT / "Bogura_DriveTest_Report_v2.06.xlsx"
+REPORT = OUTPUT / "Bogura_DriveTest_Report_v2.07.xlsx"
 IDLE_NOTES = OUTPUT / "idle_vs_active_notes.json"
 PLOTS = OUTPUT / "plots"
 DESCRIPTIONS = OUTPUT / "bad_spot_descriptions.json"
-SUMMARY_VERSION = "2.06"
+SUMMARY_VERSION = "2.07"
 DEST = OUTPUT / f"Bogura_DriveTest_Summary_v{SUMMARY_VERSION}.pptx"
-EXCEL_VERSION = "2.06"
+EXCEL_VERSION = "2.07"
 EXEC_HIST_DIR = PLOTS / "ppt_exec_v198"
 EXEC_HIST = {
     "RSRP": EXEC_HIST_DIR / "active_rsrp_hist.png",
@@ -202,21 +202,36 @@ def _idle_note(number: int) -> dict | None:
     return _idle_note.rows.get(number)
 
 
-def _circle_box(path: Path) -> dict | None:
+def _circle_boxes(path: Path) -> list[dict]:
+    """Every orange oval recorded for this map (one or many pockets)."""
     if not CIRCLES.exists():
-        return None
+        return []
     boxes = json.loads(CIRCLES.read_text())
-    return boxes.get(path.name)
+    entry = boxes.get(path.name)
+    if not entry:
+        return []
+    # Legacy single-oval records keep x/y/w/h on the root.
+    if "circles" in entry:
+        width = float(entry.get("width") or 0) or None
+        height = float(entry.get("height") or 0) or None
+        out = []
+        for circle in entry["circles"]:
+            item = dict(circle)
+            item["width"] = width
+            item["height"] = height
+            out.append(item)
+        return out
+    return [entry]
 
 
 def _paint_circle(image: Image.Image, box: dict) -> Image.Image:
-    """The orange bad-spot oval the workbook keeps as a movable shape."""
+    """One orange bad-spot oval; the workbook keeps the same shape movable."""
     import math
 
     from PIL import ImageDraw
 
-    recorded_w = float(box["width"]) or image.width
-    recorded_h = float(box["height"]) or image.height
+    recorded_w = float(box.get("width") or 0) or image.width
+    recorded_h = float(box.get("height") or 0) or image.height
     sx = image.width / recorded_w
     sy = image.height / recorded_h
     left = float(box["x"]) * sx
@@ -257,8 +272,7 @@ def _paint_circle(image: Image.Image, box: dict) -> Image.Image:
 
 def _jpeg(path: Path, width: int = 1400) -> BytesIO:
     image = Image.open(path).convert("RGB")
-    box = _circle_box(path)
-    if box:
+    for box in _circle_boxes(path):
         image = _paint_circle(image, box)
     if image.width > width:
         height = round(image.height * width / image.width)

@@ -138,15 +138,21 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
-## Download Excel report (v2.06)
+## Download Excel report (v2.07)
 
-**v2.06 (current — Excel / PPT / Web same version):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.06.xlsx
+**v2.07 (current — Excel / PPT / Web same version):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.07.xlsx
+
+Summary PPT **v2.07:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.07.pptx
+
+Web **v2.07:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.07.zip
+
+Excel / PPT / Web share version **v2.07**. Multi-circle bad-spot maps: when one oval cannot cover every poor sample and blank, the map gets two/three/four+ circles (no hard cap). Duplicate Parameter change tables under each Active spot are removed (one coloured table only). Numbered Serving / Bad Spot / RCA / Suggestions blocks stay aligned on Excel and PPT. Built from openable v2.06. Check with `python3 validate_xlsx_package.py output/Bogura_DriveTest_Report_v2.07.xlsx`.
+
+**v2.06:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.06.xlsx
 
 Summary PPT **v2.06:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.06.pptx
 
 Web **v2.06:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.06.zip
-
-Excel v2.06 opens in Excel. v1.98 through v2.05 were not well-formed: `xl/workbook.xml` used `r:id` on the EP Details sheet with no `xmlns:r` in scope, and the Bad Spot RSRP_Active drawing used `a:` on its 122 circles with no `xmlns:a` in scope. `publish_report_v206.py` keeps the v1.94 package rules (namespaces declared once on the workbook and drawing roots, v1.94 `_rels/.rels`, `docProps/app.xml` and theme) and carries the v2.05 Active Session-ID content unchanged: Cover Active first with native legend-coloured histograms, Bad Spot RSRP_Active with 97 Active and 26 Scanner bad spots, EP Details. The Cover Active Mode block now lists the Active dataset and KPIs; v1.98–v2.05 had the Idle numbers there. Check any build with `python3 validate_xlsx_package.py output/Bogura_DriveTest_Report_v2.06.xlsx`. Excel / PPT / Web share version **v2.06**.
 
 **v2.05 (corrupt Excel — do not use):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.05.xlsx
 

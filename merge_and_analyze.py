@@ -1796,8 +1796,9 @@ def _number_actions(text: str) -> str:
             points[-1] = points[-1].rstrip(".") + ". " + sentence
         else:
             points.append(sentence)
-    if len(points) < 2:
+    if not points:
         return text.strip()
+    # Always number suggestion lines so Excel and PPT match the same list style.
     lines = [f"{number}. {sentence}" for number, sentence in enumerate(points, start=1)]
     lines.extend(tail)
     return "\n".join(lines)
@@ -6141,81 +6142,158 @@ def with_tight_outline(
     return display
 
 
+# One pocket circle stays under this diameter. Wider poor+blank road is split
+# into as many circles as needed so every red sample and blank is covered.
+POCKET_CIRCLE_MAX_KM = 3.2
+POCKET_CIRCLE_PAD_KM = 0.28
+POCKET_CIRCLE_MIN_KM = 0.45
+
+
+def _cover_points_for_circles(
+    samples: pd.DataFrame, spot: pd.Series, column: str,
+) -> list[tuple[float, float]]:
+    """Lat/lon points that must sit inside a bad-spot circle: red road + blanks."""
+    points: list[tuple[float, float]] = []
+    inside = _samples_inside_outline(samples, spot)
+    if inside is not None and not inside.empty and column in inside.columns:
+        values = pd.to_numeric(inside[column], errors="coerce")
+        cut = (
+            min(float(BAD_SPOT_RULES[column]["threshold"]), -115.0)
+            if column == "RSRP"
+            else float(BAD_SPOT_RULES[column]["threshold"])
+        )
+        red = inside.loc[values < cut].dropna(subset=["Latitude", "Longitude"])
+        for lat, lon in zip(
+            red["Latitude"].astype(float).to_numpy(),
+            red["Longitude"].astype(float).to_numpy(),
+        ):
+            points.append((float(lat), float(lon)))
+    for gap in _blank_segments(samples, spot):
+        if float(gap.get("length_m") or 0) < 80:
+            continue
+        points.append((float(gap["lat1"]), float(gap["lon1"])))
+        points.append((float(gap["lat2"]), float(gap["lon2"])))
+        points.append((float(gap["lat"]), float(gap["lon"])))
+    if points:
+        return points
+    return [(float(spot["lat"]), float(spot["lon"]))]
+
+
+def _cluster_cover_points(
+    points: list[tuple[float, float]], max_diam_km: float = POCKET_CIRCLE_MAX_KM,
+) -> list[list[tuple[float, float]]]:
+    """Greedy pockets along the long axis of the cover points. No cluster count cap.
+
+    Points are projected onto the principal direction of the stretch, sorted, and
+    packed into runs whose bounding diagonal stays under max_diam_km. That keeps
+    every red sample and blank covered without one oversized oval.
+    """
+    if not points:
+        return []
+    if len(points) == 1:
+        return [points]
+    # Thin dense red clouds so clustering stays fast; blank ends stay.
+    if len(points) > 80:
+        step = max(1, len(points) // 60)
+        points = points[::step] + [points[-1]]
+    lat0 = float(np.mean([p[0] for p in points]))
+    lon0 = float(np.mean([p[1] for p in points]))
+    km_lon = _km_per_deg_lon(lat0)
+    xy = np.array(
+        [((lon - lon0) * km_lon, (lat - lat0) * 111.32) for lat, lon in points],
+        dtype=float,
+    )
+    # Principal axis from covariance; fall back to x when the stretch is tiny.
+    if len(xy) >= 2:
+        cov = np.cov(xy.T)
+        vals, vecs = np.linalg.eigh(cov)
+        axis = vecs[:, int(np.argmax(vals))]
+    else:
+        axis = np.array([1.0, 0.0])
+    order = np.argsort(xy @ axis)
+    clusters: list[list[tuple[float, float]]] = []
+    current: list[int] = []
+
+    def bbox_diag(members: list[int]) -> float:
+        part = xy[members]
+        dx = float(part[:, 0].max() - part[:, 0].min())
+        dy = float(part[:, 1].max() - part[:, 1].min())
+        return math.hypot(dx, dy)
+
+    for index in order.tolist():
+        trial = current + [index]
+        if current and bbox_diag(trial) > max_diam_km:
+            clusters.append([points[i] for i in current])
+            current = [index]
+        else:
+            current = trial
+    if current:
+        clusters.append([points[i] for i in current])
+    return clusters
+
+
+def _outline_from_points(
+    template: pd.Series, points: list[tuple[float, float]], *, dotted: bool,
+) -> pd.Series:
+    """Tight oval around a pocket of cover points."""
+    lats = [p[0] for p in points]
+    lons = [p[1] for p in points]
+    lat0 = float((min(lats) + max(lats)) / 2.0)
+    lon0 = float((min(lons) + max(lons)) / 2.0)
+    pad = POCKET_CIRCLE_PAD_KM
+    height = max((max(lats) - min(lats)) * 111.32 + 2.0 * pad, POCKET_CIRCLE_MIN_KM)
+    width = max(
+        (max(lons) - min(lons)) * _km_per_deg_lon(lat0) + 2.0 * pad,
+        POCKET_CIRCLE_MIN_KM,
+    )
+    # Cap at the stored spot outline so a pocket never outgrows the map frame.
+    height = min(height, float(template.get("outline_height_km") or height), POCKET_CIRCLE_MAX_KM + 0.4)
+    width = min(width, float(template.get("outline_width_km") or width), POCKET_CIRCLE_MAX_KM + 0.4)
+    row = template.copy()
+    row["outline_lat"] = lat0
+    row["outline_lon"] = lon0
+    row["outline_width_km"] = float(width)
+    row["outline_height_km"] = float(height)
+    row["kind"] = "discrete" if dotted else str(template.get("kind") or "consecutive")
+    return row
+
+
 def satellite_circle_spots(
     samples: pd.DataFrame, spot: pd.Series, column: str = "RSRP",
 ) -> pd.DataFrame:
-    """Extra movable circles when a blank/red pocket sits off the main oval.
+    """One or more movable circles that together cover every poor sample and blank.
 
-    One oval stays on the main poor run. A blank or red pocket that is not on
-    that line (more than ~1.15 km from the main centre, and outside the main
-    oval) gets its own dotted circle so discrete holes are not left unmarked.
+    When red road and blanks sit in one compact pocket, a single oval is enough.
+    When they stretch farther than POCKET_CIRCLE_MAX_KM, the map gets two, three,
+    four, or more circles — no hard cap — so every bad and blank stretch is marked.
     """
-    main = with_tight_outline(samples, spot, column)
-    rows = [main]
-    blanks = _blank_segments(samples, spot)
-    lat0 = float(main["outline_lat"])
-    lon0 = float(main["outline_lon"])
-    km_lon = _km_per_deg_lon(lat0)
-    main_box = {
-        "outline_lat": lat0,
-        "outline_lon": lon0,
-        "outline_width_km": float(main["outline_width_km"]),
-        "outline_height_km": float(main["outline_height_km"]),
-    }
-    for gap in blanks:
-        if float(gap.get("length_m") or 0) < 80:
-            continue
-        mid_lat = (float(gap["lat1"]) + float(gap["lat2"])) / 2.0
-        mid_lon = (float(gap["lon1"]) + float(gap["lon2"])) / 2.0
-        dist_km = math.hypot((mid_lat - lat0) * 111.32, (mid_lon - lon0) * km_lon)
-        if dist_km < 1.15:
-            continue
-        if _outline_radius(mid_lat, mid_lon, main_box) <= 1.08:
-            continue
-        extra = main.copy()
-        length_km = max(float(gap["length_m"]) / 1000.0, 0.35)
-        extra["outline_lat"] = mid_lat
-        extra["outline_lon"] = mid_lon
-        extra["outline_width_km"] = float(min(max(length_km * 0.55, 0.45), 2.5))
-        extra["outline_height_km"] = float(min(max(length_km * 0.45, 0.40), 2.2))
-        extra["kind"] = "discrete"
-        rows.append(extra)
-        if len(rows) >= 4:
-            break
-    if len(rows) > 1:
-        return pd.DataFrame(rows)
+    template = with_tight_outline(samples, spot, column, cover_blanks=False)
+    points = _cover_points_for_circles(samples, spot, column)
+    if len(points) == 1:
+        return pd.DataFrame([with_tight_outline(samples, spot, column)])
 
-    # Discrete red clusters far from the main centre (no blank gap recorded).
-    if str(spot.get("kind", "")) != "discrete":
-        return pd.DataFrame(rows)
-    inside = _samples_inside_outline(samples, spot)
-    if inside is None or inside.empty or column not in inside.columns:
-        return pd.DataFrame(rows)
-    values = pd.to_numeric(inside[column], errors="coerce")
-    cut = min(float(BAD_SPOT_RULES[column]["threshold"]), -115.0) if column == "RSRP" else float(BAD_SPOT_RULES[column]["threshold"])
-    red = inside.loc[values < cut].dropna(subset=["Latitude", "Longitude"])
-    if len(red) < 8:
-        return pd.DataFrame(rows)
-    dist = np.hypot(
-        (red["Latitude"].astype(float) - lat0) * 111.32,
-        (red["Longitude"].astype(float) - lon0) * km_lon,
+    lat0 = float(np.mean([p[0] for p in points]))
+    lon0 = float(np.mean([p[1] for p in points]))
+    km_lon = _km_per_deg_lon(lat0)
+    span = max(
+        math.hypot((lat - lat0) * 111.32, (lon - lon0) * km_lon) * 2.0
+        for lat, lon in points
     )
-    far = red.loc[dist > 1.20]
-    if len(far) < 5:
-        return pd.DataFrame(rows)
-    flat = float(far["Latitude"].median())
-    flon = float(far["Longitude"].median())
-    if _outline_radius(flat, flon, main_box) <= 1.05:
-        return pd.DataFrame(rows)
-    extra = main.copy()
-    height = max((float(far["Latitude"].max()) - float(far["Latitude"].min())) * 111.32 + 0.25, 0.40)
-    width = max((float(far["Longitude"].max()) - float(far["Longitude"].min())) * km_lon + 0.25, 0.40)
-    extra["outline_lat"] = flat
-    extra["outline_lon"] = flon
-    extra["outline_width_km"] = float(min(width, 2.8))
-    extra["outline_height_km"] = float(min(height, 2.8))
-    extra["kind"] = "discrete"
-    rows.append(extra)
+    # Compact pocket: keep one oval that also pulls in adjacent blanks.
+    if span <= POCKET_CIRCLE_MAX_KM:
+        return pd.DataFrame([with_tight_outline(samples, spot, column)])
+
+    clusters = _cluster_cover_points(points, POCKET_CIRCLE_MAX_KM)
+    if len(clusters) <= 1:
+        return pd.DataFrame([with_tight_outline(samples, spot, column)])
+
+    # Largest pocket (by point count) keeps the solid style; extras are dotted
+    # so discrete holes read as separate shapes on the same map.
+    clusters = sorted(clusters, key=len, reverse=True)
+    rows = [
+        _outline_from_points(template, cluster, dotted=(index > 0))
+        for index, cluster in enumerate(clusters)
+    ]
     return pd.DataFrame(rows)
 
 
