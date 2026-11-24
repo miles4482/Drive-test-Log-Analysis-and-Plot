@@ -30,7 +30,7 @@ REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.97.xlsx"
 IDLE_NOTES = OUTPUT / "idle_vs_active_notes.json"
 PLOTS = OUTPUT / "plots"
 DESCRIPTIONS = OUTPUT / "bad_spot_descriptions.json"
-SUMMARY_VERSION = "1.99"
+SUMMARY_VERSION = "2.00"
 DEST = OUTPUT / f"Bogura_DriveTest_Summary_v{SUMMARY_VERSION}.pptx"
 EXCEL_VERSION = "1.97"
 EXEC_HIST = {
@@ -384,12 +384,12 @@ def _report(prs: Presentation, pages: int) -> None:
         (
             "RSRQ",
             EXEC_HIST["RSRQ"],
-            "Median −9.7 dB. ≤ −20 only 0.2%. Quality is mostly fine; coverage holes (RSRP) are the main risk.",
+            "Median −9.7 dB. ≤ −20 only 0.2%. 55.4% in −10 to 0; 43.2% in −17 to −10.",
         ),
         (
             "SINR",
             EXEC_HIST["SINR"],
-            "Median 8.1 dB. ≤ 0: 12.6%. About 41% ≥ 10 dB. Interference is secondary to RSRP holes on this drive.",
+            "Median 8.1 dB. ≤ 0: 12.6%. About 41% ≥ 10 dB.",
         ),
     ]
     chart_w = 4.10
@@ -453,17 +453,14 @@ def _report(prs: Presentation, pages: int) -> None:
             x += width
         ty += 0.22
 
-    _text(slide, Inches(8.55), Inches(table_top), Inches(4.5), Inches(0.20), "Bad spots & solutions (Active)", 12, NAVY, True)
+    _text(slide, Inches(8.55), Inches(table_top), Inches(4.5), Inches(0.20), "Active Mode Bad Spot summary", 12, NAVY, True)
     _text(
         slide, Inches(8.55), Inches(table_top + 0.24), Inches(4.5), Inches(2.20),
-        "99 Active bad spots on Bad Spot RSRP_Active — act on these first.\n"
+        "99 Active bad spots.\n"
         "• 42 tilt / azimuth tune (existing sectors face the hole).\n"
         "• 45 new 4th L900 sector on a host within ~3 km.\n"
-        "• 12 new 3-sector L900 sites where no host can cover.\n"
-        "Each spot has map + serving cells + Existing / New Plan table.\n"
-        "Scanner section (26 spots) is for comparison only — keep its solutions there; do not mix into Active actions.\n"
-        "Start with longest Active runs and new-site / 4th-sector spots; then batch the tilt/azimuth tunes.",
-        11, INK,
+        "• 12 new 3-sector L900 sites where no host can cover.",
+        12, INK,
     )
     _footer(slide, 1, pages)
 
@@ -1018,7 +1015,7 @@ def _annex_workbook(prs: Presentation, page: int, pages: int, groups: list[dict]
     if partial:
         deck += "Samples: " + ", ".join(partial) + "."
     rows = [
-        ("Excel v1.97 / PPT v1.99", "One Bad Spot sheet: Active Mode first, Scanner second. PPT Executive Summary: Active histograms + band/RSRP tables + bad-spot solution counts. No DT-route table on that slide."),
+        ("Excel v1.97 / PPT v2.00", "One Bad Spot sheet: Active Mode first, Scanner second. PPT Executive Summary: Active histograms + band/RSRP tables + Active bad-spot count and solution notes only."),
         ("This deck", deck),
         ("Web v1.89", "Feeder draws the idle feeder swaps. Click a site for the sectors. A three-sector rotation uses red, cyan and violet. A two-sector swap stays red and cyan, with the third arm yellow. Site names stay white with a dark edge."),
         ("RSRQ and SINR", "The coverage maps are in this deck. The workbook no longer has separate RSRQ or SINR bad-spot sheets. Poor RSRQ is at or below −20 dB. Poor SINR is at or below 0 dB."),
