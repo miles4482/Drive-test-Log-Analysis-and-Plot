@@ -43,7 +43,7 @@ Current file is **v8**. Each publish is a new version. Previous workbooks stay i
 
 ## VoLTE call flow chart
 
-Current file is **v9**. Each publish is a new HTML file. Previous charts stay in the repo. `output/L3_VOLTE_CALL_FLOW.html` is a copy of the current version.
+Current file is **v10**. Each publish is a new HTML file. Previous charts stay in the repo. `output/L3_VOLTE_CALL_FLOW.html` is a copy of the current version.
 
 | Version | File | Contents |
 | --- | --- | --- |
@@ -56,6 +56,7 @@ Current file is **v9**. Each publish is a new HTML file. Previous charts stay in
 | v7 | `output/L3_VOLTE_CALL_FLOW_v7.html` | v6, with a brace on the IMS core and the time that block takes. |
 | v8 | `output/L3_VOLTE_CALL_FLOW_v8.html` | v7, with a brace on every step and the direction of that step. |
 | v9 | `output/L3_VOLTE_CALL_FLOW_v9.html` | Idle calls compared with idle calls, and connected calls with connected calls. |
+| v10 | `output/L3_VOLTE_CALL_FLOW_v10.html` | v9, with a ladder for UE-B idle and a ladder for UE-B connected. |
 
 ```bash
 python3 -c "import py7zr; py7zr.SevenZipFile('Layer 3_Active Mode_Data_Robi_v1.7z').extractall('extracted/l3')"
