@@ -42,8 +42,8 @@
 </head>
 <body>
 <header>
-  <h1>VoLTE call flow v6 — Robi vs Banglalink vs Grameenphone</h1>
-  <p class="sub">Version v6. Strongest alerted on-net call per operator. No serving-cell measurement in this drive is above −50 dBm: the best is −60 dBm (GP), −66 dBm (Robi), −67 dBm (BL). Times are seconds after UE-A sends SIP INVITE. Older charts stay as v1–v5.</p>
+  <h1>VoLTE call flow v7 — Robi vs Banglalink vs Grameenphone</h1>
+  <p class="sub">Version v7. The brace on the left is the IMS core, which the UE log does not see hop by hop. The time on the brace is the whole block. Strongest alerted call per operator. Nothing in this drive is above −50 dBm.</p>
 </header>
 
 <section class="gap">
@@ -89,8 +89,8 @@
 
 <script>
 const LANES = ["UE-A", "orig SBC\nwith P-CSCF", "orig S-CSCF", "O - TAS", "term I-CSCF", "term S-CSCF", "T-TAS", "term SBC\nwith P-CSCF", "UE-B"];
-const X = i => 56 + i * 86;
-const W = 800;
+const X = i => 128 + i * 82;
+const W = 128 + 8 * 82 + 48;
 const C = { line: "#222", core: "#9aa3ad", bad: "#c0392b", warn: "#b9770e", good: "#1e8449", bearer: "#d35400", lane: "#8f99a6" };
 
 const CORE = [
@@ -113,6 +113,7 @@ const CORE = [
 const OPS = [
   {
     id: "robi", name: "Robi", color: "#c0392b", cst: 2486,
+    brace: { time: "1.24 s", range: "0.05 s → 1.29 s" },
     meta: "Log 6.txt · strongest Robi call · RSRP UE-A −78 to −71 dBm, UE-B −75 to −70 dBm · CST 2.49 s",
     steps: [
       { k: "msg", f: 0, to: 1, l: "SIP INVITE (SDP O1)", tm: "0.00 s", t: 0 },
@@ -139,6 +140,7 @@ const OPS = [
   },
   {
     id: "bl", name: "Banglalink", color: "#1e8449", cst: 761,
+    brace: { time: "0.26 s", range: "0.08 s → 0.34 s" },
     meta: "Log 9.txt · strongest BL call · RSRP UE-A −81 dBm (3.9 s before), UE-B −81 dBm · CST 0.76 s",
     steps: [
       { k: "msg", f: 0, to: 1, l: "SIP INVITE (SDP O1)", tm: "0.00 s", t: 0 },
@@ -166,6 +168,7 @@ const OPS = [
   },
   {
     id: "gp", name: "Grameenphone", color: "#1f4e9a", cst: 2732,
+    brace: { time: "1.32 s", range: "0.35 s → 1.67 s" },
     meta: "Log 8.txt · strongest call in the drive · RSRP UE-A −63 to −60 dBm, UE-B −69 to −63 dBm · CST 2.73 s",
     steps: [
       { k: "msg", f: 0, to: 1, l: "SIP INVITE (SDP O1)", tm: "0.00 s", t: 0 },
@@ -219,6 +222,12 @@ function render(op) {
   const id = op.id;
   let y = 64;
   let lastT = null;
+  let braceTop = null;
+  let braceBot = null;
+  const markCore = (yy) => {
+    if (braceTop == null) braceTop = yy;
+    braceBot = yy;
+  };
 
   const arrow = (f, to, yy, color, opts = {}) => {
     const x1 = X(f), x2 = X(to);
@@ -274,6 +283,7 @@ function render(op) {
       y += 24;
       p.push(arrow(it.f, it.to, y, C.core, { dash: "4 3", mk: "c" }));
       p.push(`<text x="${(X(it.f) + X(it.to)) / 2}" y="${y - 5}" text-anchor="middle" font-size="10" fill="#7d8792" ${HALO}>${esc(it.l)}</text>`);
+      markCore(y);
     } else if (it.k === "loop") {
       y += 22;
       const x = X(it.at);
@@ -284,12 +294,14 @@ function render(op) {
       }
       p.push(`<path d="M${x} ${y} H${x + 30} V${y + 10} H${x + 3}" fill="none" stroke="${C.core}" stroke-width="1.4" marker-end="url(#${id}-h-c)"/>
         <text x="${x - 4}" y="${y + 9}" text-anchor="end" font-size="10" fill="#7d8792" ${HALO}>${esc(it.l)}</text>`);
+      markCore(y + 5);
       y += 10;
     } else if (it.k === "cnote") {
       y += 12;
       const x = X(it.at);
       p.push(`<rect x="${x - 56}" y="${y}" width="112" height="18" fill="#fff" stroke="#b5bcc5"/>
         <text x="${x}" y="${y + 12.5}" text-anchor="middle" font-size="10" fill="#7d8792">${esc(it.l)}</text>`);
+      markCore(y + 9);
       y += 18;
     } else if (it.k === "note") {
       y += 12;
@@ -308,6 +320,20 @@ function render(op) {
         <text x="${W / 2}" y="${y + 4}" text-anchor="middle" font-size="11" font-style="italic" fill="#555">··· ${esc(it.l)} ···</text>`);
       y += 6;
     }
+  }
+
+  if (op.brace && braceTop != null) {
+    const y1 = braceTop - 10;
+    const y2 = braceBot + 10;
+    const mid = (y1 + y2) / 2;
+    const x = 108;
+    const tip = 16;
+    const arm = Math.min(22, (y2 - y1) / 5);
+    const d = `M ${x} ${y1} Q ${x - 12} ${y1} ${x - 12} ${y1 + arm} V ${mid - arm} Q ${x - 12} ${mid} ${x - 12 - tip} ${mid} Q ${x - 12} ${mid} ${x - 12} ${mid + arm} V ${y2 - arm} Q ${x - 12} ${y2} ${x} ${y2}`;
+    p.push(`<path d="${d}" fill="none" stroke="${op.color}" stroke-width="2" stroke-dasharray="6 3.5"/>`);
+    p.push(`<text x="8" y="${mid - 6}" font-size="11" font-weight="700" fill="${op.color}">IMS core</text>`);
+    p.push(`<text x="8" y="${mid + 12}" font-size="16" font-weight="800" fill="${op.color}">${esc(op.brace.time)}</text>`);
+    p.push(`<text x="8" y="${mid + 26}" font-size="10" font-weight="700" fill="${op.color}">${esc(op.brace.range)}</text>`);
   }
 
   y += 30;
