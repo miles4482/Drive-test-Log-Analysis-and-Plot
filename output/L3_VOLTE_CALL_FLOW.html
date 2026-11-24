@@ -1,152 +1,382 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>4G/LTE Call flow steps</title>
-  <style>
-    * { box-sizing: border-box; }
-    html, body { margin: 0; background: #fff; color: #1a1a1a; }
-    body { font-family: Arial, Helvetica, sans-serif; padding: 12px 8px 28px; }
-    h1 { margin: 4px 0 2px; text-align: center; font-size: 30px; font-weight: 800; letter-spacing: -0.3px; }
-    .note { margin: 0 0 8px; text-align: center; font-size: 13px; color: #333; }
-    .wrap { display: flex; justify-content: center; align-items: flex-start; gap: 8px; flex-wrap: nowrap; }
-    figure { margin: 0; }
-    figcaption { text-align: center; font-weight: 800; font-size: 18px; margin: 0 0 2px; }
-    figcaption span { display: block; font-size: 12px; font-weight: 600; color: #333; }
-    svg { display: block; width: 500px; height: auto; }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoLTE call flow: Robi vs Banglalink vs Grameenphone</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #fff; color: #1d1d1d; font-family: Arial, Helvetica, sans-serif; }
+  header { padding: 16px 20px 6px; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .sub { margin: 0; font-size: 13px; color: #444; }
+  .gap { padding: 6px 20px 4px; }
+  table { border-collapse: collapse; font-size: 13px; min-width: 860px; }
+  th, td { border: 1px solid #cfd6e0; padding: 5px 9px; text-align: right; white-space: nowrap; }
+  th { background: #4f7fd1; color: #fff; font-weight: 700; }
+  td:first-child, th:first-child { text-align: left; }
+  tr.sub td { color: #555; font-style: italic; background: #fafafa; }
+  tr.total td { font-weight: 700; background: #eef3fb; }
+  td.bad { color: #c0392b; font-weight: 700; background: #fdecea; }
+  td.ok { color: #1e8449; }
+  .find { padding: 6px 20px 2px; font-size: 13px; line-height: 1.45; max-width: 1200px; }
+  .find b.bad { color: #c0392b; }
+  .bar { position: sticky; top: 0; z-index: 5; background: #fff; border-bottom: 1px solid #e3e3e3;
+         padding: 8px 20px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .bar button { border: 1px solid #4f7fd1; background: #fff; color: #2c5aa0; border-radius: 4px;
+                padding: 5px 12px; font-size: 13px; cursor: pointer; }
+  .bar button.on { background: #4f7fd1; color: #fff; }
+  .bar .sep { width: 1px; height: 22px; background: #ddd; margin: 0 6px; }
+  .legend { font-size: 12px; color: #444; display: flex; gap: 14px; flex-wrap: wrap; margin-left: 8px; }
+  .legend i { display: inline-block; width: 26px; height: 0; vertical-align: middle; margin-right: 5px; border-top: 2px solid #222; }
+  .legend i.d { border-top-style: dashed; }
+  .legend i.c { border-top: 2px dashed #9aa3ad; }
+  .legend i.q { border-top-color: #d35400; }
+  .charts { display: flex; gap: 16px; padding: 10px 20px 30px; overflow-x: auto; align-items: flex-start; }
+  .op { flex: none; }
+  .op h2 { margin: 0 0 2px; font-size: 18px; }
+  .op .meta { font-size: 12px; color: #444; margin-bottom: 4px; }
+  .op svg { display: block; cursor: zoom-in; }
+  .single .op svg { cursor: default; }
+</style>
 </head>
 <body>
-  <h1>4G/LTE Call flow steps</h1>
-  <p class="note">VoLTE setup on a good-RSRP sample call. Time is seconds after SIP INVITE.</p>
-  <div class="wrap" id="wrap"></div>
-  <script>
-    const ops = [
-      {
-        name: "Robi",
-        sub: "RSRP −76 dBm · rings at 3.27 s",
-        hue: "#9a3412",
-        rows: [
-          ["UE", "IMS Core", "SIP INVITE · 0.00 s", 1],
-          ["", "", "100 Trying · 0.08 s", -1],
-          ["eNodeB", "", "B-party RRC · 2.09 s", 1, 1],
-          ["MME", "", "Paging · 2.01 s", 1, 1],
-          ["PCRF", "", "Caller voice bearer · 2.75 s", 1, 1],
-          ["", "", "INVITE to B-party · 2.02 s", 1, 1],
-          ["PGW/SGW", "", "183 Session Progress · 2.07 s", -1],
-          ["", "", "Called voice bearer · 2.39 s", 1, 1],
-          ["", "", "180 Ringing · 3.27 s", "voice"],
-          ["IMS", "IMS Core\nP/I/S-CSCF", "Call setup · 3.27 s", 1, 1]
-        ]
-      },
-      {
-        name: "Grameenphone",
-        sub: "RSRP −85 dBm · rings at 2.20 s",
-        hue: "#1a5276",
-        rows: [
-          ["UE", "IMS Core", "SIP INVITE · 0.00 s", 1],
-          ["", "", "100 Trying · 0.16 s", -1],
-          ["eNodeB", "", "B-party RRC · 1.21 s", 1],
-          ["MME", "", "Paging · 1.13 s", 1],
-          ["PCRF", "", "Caller voice bearer · 0.24 s", 1],
-          ["", "", "INVITE to B-party · 1.33 s", 1],
-          ["PGW/SGW", "", "183 Session Progress · 1.37 s", -1],
-          ["", "", "Called voice bearer · 1.52 s", 1],
-          ["", "", "180 Ringing · 2.20 s", "voice"],
-          ["IMS", "IMS Core\nP/I/S-CSCF", "Call setup · 2.20 s", 1]
-        ]
-      },
-      {
-        name: "Banglalink",
-        sub: "RSRP −77 dBm · rings at 0.75 s",
-        hue: "#0e6655",
-        rows: [
-          ["UE", "IMS Core", "SIP INVITE · 0.00 s", 1],
-          ["", "", "100 Trying · 0.04 s", -1],
-          ["eNodeB", "", "Already connected", 1],
-          ["MME", "", "No paging", 1],
-          ["PCRF", "", "Caller voice bearer · 0.08 s", 1],
-          ["", "", "INVITE to B-party · 0.33 s", 1],
-          ["PGW/SGW", "", "183 Session Progress · 0.37 s", -1],
-          ["", "", "Called voice bearer · 0.46 s", 1],
-          ["", "", "180 Ringing · 0.75 s", "voice"],
-          ["IMS", "IMS Core\nP/I/S-CSCF", "Call setup · 0.75 s", 1]
-        ]
+<header>
+  <h1>VoLTE call flow — Robi vs Banglalink vs Grameenphone</h1>
+  <p class="sub">One good-RSRP on-net sample call per operator, Bogura L3 logs. Times are seconds after UE-A sends SIP INVITE. UE-A and UE-B are logged on the same clock.</p>
+</header>
+
+<section class="gap">
+  <table>
+    <thead>
+      <tr><th>Setup step (adds up to CST)</th><th>Robi</th><th>Banglalink</th><th>Grameenphone</th><th>Robi − BL</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1. UE-A INVITE → UE-B receives INVITE (IMS core, paging, RRC)</td><td class="bad">2.17 s</td><td class="ok">0.33 s</td><td>1.33 s</td><td class="bad">+1.84 s</td></tr>
+      <tr class="sub"><td>&nbsp;&nbsp;&nbsp;UE-B paged at</td><td>2.01 s (idle)</td><td>not paged (connected)</td><td>1.13 s (idle)</td><td></td></tr>
+      <tr><td>2. UE-B receives INVITE → UE-B sends 183</td><td>0.06 s</td><td>0.05 s</td><td>0.04 s</td><td>+0.01 s</td></tr>
+      <tr><td>3. UE-B sends 183 → UE-A receives 183</td><td class="bad">0.72 s</td><td class="ok">0.09 s</td><td>0.56 s</td><td class="bad">+0.63 s</td></tr>
+      <tr class="sub"><td>&nbsp;&nbsp;&nbsp;UE-A voice bearer (QCI 1) at</td><td>2.75 s (after B's 183)</td><td>0.08 s</td><td>0.24 s</td><td></td></tr>
+      <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td>0.33 s</td><td>0.29 s</td><td>0.28 s</td><td>+0.04 s</td></tr>
+      <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td>3.27 s</td><td>0.75 s</td><td>2.20 s</td><td>+2.52 s</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="find">
+  <b class="bad">Gap 1, +1.84 s.</b> Robi's INVITE needs 2.17 s to reach UE-B. UE-B was idle and read its paging occasion at 0.73 s with no page for it. The page came at the next occasion, 2.01 s, one 1.28 s paging cycle later. The terminating network got the INVITE between 0.73 s and 2.01 s, so the IMS core path takes at least 0.73 s. Banglalink's whole path to UE-B, with UE-B already connected, is 0.33 s.<br>
+  <b class="bad">Gap 2, +0.63 s.</b> Robi starts UE-A's QCI 1 voice bearer only after UE-B's 183 comes back (2.75 s) and holds the 183 until that bearer is up. Banglalink and GP start it right after INVITE (0.08 s and 0.24 s).
+</section>
+
+<div class="bar" id="bar">
+  <button data-view="all" class="on">All three side by side</button>
+  <button data-view="robi">Robi</button>
+  <button data-view="bl">Banglalink</button>
+  <button data-view="gp">Grameenphone</button>
+  <span class="sep"></span>
+  <button data-zoom="fit">Fit</button>
+  <button data-zoom="out">−</button>
+  <button data-zoom="in">+</button>
+  <span class="legend">
+    <span><i></i>at one UE</span>
+    <span><i class="d"></i>UE-A ↔ UE-B (send → receive)</span>
+    <span><i class="c"></i>IMS core hop, not in UE log</span>
+    <span><i class="q"></i>QCI 1 voice bearer</span>
+  </span>
+</div>
+
+<div class="charts" id="charts"></div>
+
+<script>
+const LANES = ["UE-A", "orig SBC\nwith P-CSCF", "orig S-CSCF", "O - TAS", "term I-CSCF", "term S-CSCF", "T-TAS", "term SBC\nwith P-CSCF", "UE-B"];
+const X = i => 56 + i * 86;
+const W = 800;
+const C = { line: "#222", core: "#9aa3ad", bad: "#c0392b", warn: "#b9770e", good: "#1e8449", bearer: "#d35400", lane: "#8f99a6" };
+
+const CORE = [
+  { k: "core", f: 1, to: 2, l: "SIP INVITE (SDP O1)" },
+  { k: "core", f: 2, to: 3, l: "SIP INVITE (SDP O1)" },
+  { k: "loop", at: 3, l: "UDR/UDA", opt: true },
+  { k: "cnote", at: 3, l: "originating services" },
+  { k: "core", f: 3, to: 2, l: "SIP INVITE (SDP O1)" },
+  { k: "loop", at: 2, l: "DNS" },
+  { k: "core", f: 2, to: 4, l: "SIP INVITE (SDP O1)" },
+  { k: "loop", at: 4, l: "LIR/LIA" },
+  { k: "core", f: 4, to: 5, l: "SIP INVITE (SDP O1)" },
+  { k: "core", f: 5, to: 6, l: "SIP INVITE (SDP O1)" },
+  { k: "loop", at: 6, l: "UDR/UDA", opt: true },
+  { k: "cnote", at: 6, l: "terminating services" },
+  { k: "core", f: 6, to: 5, l: "SIP INVITE (SDP O1)" },
+  { k: "core", f: 5, to: 7, l: "SIP INVITE (SDP O1)" }
+];
+
+const OPS = [
+  {
+    id: "robi", name: "Robi", color: "#c0392b", cst: 3269,
+    meta: "Log 10.txt · RSRP UE-A −73 to −80 dBm, UE-B −78 to −80 dBm · CST 3.27 s",
+    steps: [
+      { k: "msg", f: 0, to: 1, l: "SIP INVITE (SDP O1)", tm: "0.00 s", t: 0 },
+      { k: "msg", f: 1, to: 0, l: "100 Trying", tm: "0.08 s", t: 84 },
+      ...CORE,
+      { k: "note", side: "mid", cls: "bad", t: 2008, lines: ["Gap 1: INVITE needs 2.17 s to reach UE-B (Banglalink 0.33 s)", "UE-B idle: no page at its 0.73 s occasion, paged at the next one, 2.01 s (1.28 s cycle)"] },
+      { k: "note", side: "B", cls: "bad", t: 2009, lines: ["UE-B idle → paged 2.01 s", "Service Request, RRC 2.09 s"] },
+      { k: "msg", f: 7, to: 8, l: "SIP INVITE (SDP O1)", tm: "B 2.17 s", t: 2166, cls: "bad" },
+      { k: "msg", f: 8, to: 7, l: "183 In Progress (SDP A1)", tm: "B 2.22 s", t: 2223 },
+      { k: "bearer", f: 7, to: 8, l: "QCI 1 voice bearer (B)", tm: "2.39 s", t: 2392 },
+      { k: "bearer", f: 1, to: 0, l: "QCI 1 voice bearer (A)", tm: "2.75 s", t: 2753, cls: "bad" },
+      { k: "note", side: "A", cls: "bad", t: 2754, lines: ["Gap 2: A bearer starts only", "after B's 183 (BL: 0.08 s)"] },
+      { k: "e2e", f: 7, to: 0, l: "183 In Progress (SDP A1)", tm: "B 2.22 → A 2.94 s", t: 2941, cls: "bad" },
+      { k: "e2e", f: 0, to: 8, l: "SIP PRACK", tm: "A 2.96 → B 3.13 s", t: 2961 },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (PRACK)", tm: "B 3.15 → A 3.23 s", t: 3150 },
+      { k: "note", side: "B", t: 3151, lines: ["SDP ok, start to ring"] },
+      { k: "e2e", f: 8, to: 0, l: "180 Ringing", tm: "B 3.15 → A 3.27 s  ·  CST 3.27 s", t: 3153, cls: "cst" },
+      { k: "note", side: "B", t: 4828, lines: ["call accepted"] },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (INVITE)", tm: "B 4.83 → A 5.10 s", t: 4829 },
+      { k: "e2e", f: 0, to: 8, l: "SIP ACK", tm: "A 5.12 → B 5.22 s", t: 5117 },
+      { k: "rtp", t: 5300 },
+      { k: "brk", l: "talk time ≈ 85 s" },
+      { k: "note", side: "A", t: 90656, lines: ["call finished"] },
+      { k: "e2e", f: 0, to: 8, l: "SIP BYE", tm: "A 90.66 → B 90.99 s", t: 90657 },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (BYE)", tm: "B 91.02 → A 91.21 s", t: 91019 }
+    ]
+  },
+  {
+    id: "bl", name: "Banglalink", color: "#1e8449", cst: 748,
+    meta: "Log 9.txt · RSRP UE-A −83 dBm (last report), UE-B −83 to −84 dBm · CST 0.75 s",
+    steps: [
+      { k: "msg", f: 0, to: 1, l: "SIP INVITE (SDP O1)", tm: "0.00 s", t: 0 },
+      { k: "msg", f: 1, to: 0, l: "100 Trying", tm: "0.04 s", t: 44 },
+      { k: "bearer", f: 1, to: 0, l: "QCI 1 voice bearer (A)", tm: "0.08 s", t: 82, cls: "good" },
+      { k: "note", side: "A", cls: "good", t: 83, lines: ["A bearer right after INVITE"] },
+      ...CORE,
+      { k: "note", side: "B", cls: "good", t: 300, lines: ["UE-B already connected", "no paging needed"] },
+      { k: "msg", f: 7, to: 8, l: "SIP INVITE (SDP O1)", tm: "B 0.33 s", t: 326, cls: "good" },
+      { k: "msg", f: 8, to: 7, l: "183 In Progress (SDP A1)", tm: "B 0.37 s", t: 373 },
+      { k: "bearer", f: 7, to: 8, l: "QCI 1 voice bearer (B)", tm: "0.46 s", t: 460 },
+      { k: "e2e", f: 7, to: 0, l: "183 In Progress (SDP A1)", tm: "B 0.37 → A 0.46 s", t: 461, cls: "good" },
+      { k: "e2e", f: 0, to: 8, l: "SIP PRACK", tm: "A 0.48 → B 0.52 s", t: 478 },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (PRACK)", tm: "B 0.54 → A 0.60 s", t: 537 },
+      { k: "e2e", f: 0, to: 8, l: "SIP UPDATE (SDP O2)", tm: "A 0.61 → B 0.67 s", t: 606 },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (SDP A2 - UPDATE)", tm: "B 0.69 → A 0.75 s", t: 687 },
+      { k: "note", side: "B", t: 689, lines: ["SDP ok, start to ring"] },
+      { k: "e2e", f: 8, to: 0, l: "180 Ringing", tm: "B 0.69 → A 0.75 s  ·  CST 0.75 s", t: 691, cls: "cst" },
+      { k: "note", side: "B", t: 2359, lines: ["call accepted"] },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (INVITE)", tm: "B 2.36 → A 2.48 s", t: 2360 },
+      { k: "e2e", f: 0, to: 8, l: "SIP ACK", tm: "A 2.50 → B 2.55 s", t: 2499 },
+      { k: "rtp", t: 2600 },
+      { k: "brk", l: "talk time ≈ 88 s" },
+      { k: "note", side: "A", t: 90869, lines: ["call finished"] },
+      { k: "e2e", f: 0, to: 8, l: "SIP BYE", tm: "A 90.87 → B 90.93 s", t: 90870 },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (BYE)", tm: "B 90.95 → A 91.00 s", t: 90952 }
+    ]
+  },
+  {
+    id: "gp", name: "Grameenphone", color: "#1f4e9a", cst: 2204,
+    meta: "Log 6.txt · RSRP UE-A −84 to −87 dBm, UE-B −80 to −87 dBm · CST 2.20 s",
+    steps: [
+      { k: "msg", f: 0, to: 1, l: "SIP INVITE (SDP O1)", tm: "0.00 s", t: 0 },
+      { k: "msg", f: 1, to: 0, l: "100 Trying", tm: "0.16 s", t: 164 },
+      { k: "bearer", f: 1, to: 0, l: "QCI 1 voice bearer (A)", tm: "0.24 s", t: 238, cls: "good" },
+      { k: "note", side: "A", cls: "good", t: 239, lines: ["A bearer right after INVITE"] },
+      ...CORE,
+      { k: "note", side: "mid", cls: "warn", t: 1133, lines: ["INVITE needs 1.33 s to reach UE-B (Banglalink 0.33 s)", "UE-B idle: paged at 1.13 s"] },
+      { k: "note", side: "B", cls: "warn", t: 1134, lines: ["UE-B idle → paged 1.13 s", "Service Request, RRC 1.21 s"] },
+      { k: "msg", f: 7, to: 8, l: "SIP INVITE (SDP O1)", tm: "B 1.33 s", t: 1328, cls: "warn" },
+      { k: "msg", f: 8, to: 7, l: "183 In Progress (SDP A1)", tm: "B 1.37 s", t: 1366 },
+      { k: "bearer", f: 7, to: 8, l: "QCI 1 voice bearer (B)", tm: "1.52 s", t: 1517 },
+      { k: "e2e", f: 7, to: 0, l: "183 In Progress (SDP A1)", tm: "B 1.37 → A 1.93 s", t: 1928, cls: "warn" },
+      { k: "note", side: "A", cls: "warn", t: 1929, lines: ["183 needs 0.56 s B → A", "(Banglalink 0.09 s)"] },
+      { k: "e2e", f: 0, to: 8, l: "SIP PRACK", tm: "A 1.95 → B 2.08 s", t: 1945 },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (PRACK)", tm: "B 2.11 → A 2.20 s", t: 2107 },
+      { k: "note", side: "B", t: 2110, lines: ["SDP ok, start to ring"] },
+      { k: "e2e", f: 8, to: 0, l: "180 Ringing", tm: "B 2.11 → A 2.20 s  ·  CST 2.20 s", t: 2113, cls: "cst" },
+      { k: "note", side: "B", t: 3784, lines: ["call accepted"] },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (INVITE)", tm: "B 3.79 → A 4.01 s", t: 3785 },
+      { k: "e2e", f: 0, to: 8, l: "SIP ACK", tm: "A 4.03 → B 4.17 s", t: 4028 },
+      { k: "rtp", t: 4200 },
+      { k: "note", side: "mid", t: 23000, lines: ["Log ends 23 s after INVITE; no BYE captured for this call"] }
+    ]
+  }
+];
+
+const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const HALO = 'paint-order="stroke" stroke="#fff" stroke-width="3" stroke-linejoin="round"';
+
+function colorOf(cls, fallback) {
+  if (cls === "bad") return C.bad;
+  if (cls === "warn") return C.warn;
+  if (cls === "good") return C.good;
+  return fallback;
+}
+
+function laneBox(i, y) {
+  const lines = LANES[i].split("\n");
+  const cy = y + 20 - (lines.length - 1) * 6.5 + 4;
+  const text = lines.map((s, n) => `<tspan x="${X(i)}" y="${cy + n * 13}">${esc(s)}</tspan>`).join("");
+  return `<rect x="${X(i) - 40}" y="${y}" width="80" height="40" rx="4" fill="#4f7fd1" stroke="#3a64ad"/>
+    <text text-anchor="middle" font-size="11.5" font-weight="700" fill="#fff">${text}</text>`;
+}
+
+function render(op) {
+  const p = [];
+  const id = op.id;
+  let y = 64;
+  let lastT = null;
+
+  const arrow = (f, to, yy, color, opts = {}) => {
+    const x1 = X(f), x2 = X(to);
+    const dir = Math.sign(x2 - x1);
+    const end = x2 - dir * 2;
+    const dash = opts.dash ? ` stroke-dasharray="${opts.dash}"` : "";
+    const mk = opts.both ? `marker-start="url(#${id}-h-${opts.mk})" marker-end="url(#${id}-h-${opts.mk})"` : `marker-end="url(#${id}-h-${opts.mk})"`;
+    return `<line x1="${x1}" y1="${yy}" x2="${end}" y2="${yy}" stroke="${color}" stroke-width="${opts.w || 1.4}"${dash} ${mk}/>`;
+  };
+
+  const label = (f, to, yy, text, color, weight) => {
+    const x1 = X(f), x2 = X(to);
+    let anchor = "middle", x = (x1 + x2) / 2;
+    if (Math.abs(to - f) === 1) {
+      if (Math.min(f, to) === 0) { anchor = "start"; x = X(0) + 6; }
+      else if (Math.max(f, to) === 8) { anchor = "end"; x = X(8) - 6; }
+    }
+    return `<text x="${x}" y="${yy - 5}" text-anchor="${anchor}" font-size="11" font-weight="${weight || 600}" fill="${color}" ${HALO}>${esc(text)}</text>`;
+  };
+
+  const note = (it) => {
+    const h = it.lines.length * 14 + 8;
+    let x, w;
+    if (it.side === "A") { x = 12; w = 200; }
+    else if (it.side === "B") { x = W - 12 - 200; w = 200; }
+    else { x = X(1) + 8; w = X(7) - X(1) - 16; }
+    const stroke = colorOf(it.cls, "#8a8a8a");
+    const fill = it.cls === "bad" ? "#fdecea" : it.cls === "warn" ? "#fdf2e0" : it.cls === "good" ? "#e8f6ee" : "#ffffff";
+    const fold = `<path d="M${x + w - 9} ${y} L${x + w} ${y + 9} L${x + w - 9} ${y + 9} Z" fill="${stroke}" opacity="0.35"/>`;
+    const text = it.lines.map((s, n) =>
+      `<text x="${x + 7}" y="${y + 15 + n * 14}" font-size="11" font-weight="${n === 0 && it.cls ? 700 : 400}" fill="${it.cls ? stroke : "#222"}">${esc(s)}</text>`
+    ).join("");
+    p.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}" stroke="${stroke}"/>${fold}${text}`);
+    return h;
+  };
+
+  for (const it of op.steps) {
+    if (it.t != null && lastT != null && it.t <= op.cst && it.t - lastT > 250) {
+      y += Math.min(150, (it.t - lastT - 250) * 0.075);
+    }
+    if (it.t != null) lastT = it.t;
+
+    if (it.k === "msg" || it.k === "e2e" || it.k === "bearer") {
+      y += 30;
+      const isCst = it.cls === "cst";
+      let color = it.k === "bearer" ? C.bearer : C.line;
+      color = colorOf(it.cls, color);
+      const mk = it.k === "bearer" ? "q" : it.cls === "bad" ? "r" : it.cls === "warn" ? "w" : it.cls === "good" ? "g" : "k";
+      p.push(arrow(it.f, it.to, y, color, { dash: it.k === "e2e" ? "6 4" : "", mk, w: isCst || it.cls ? 2.2 : 1.4 }));
+      const txtColor = it.k === "bearer" && !it.cls ? C.bearer : color;
+      p.push(label(it.f, it.to, y, `${it.l}  ·  ${it.tm}`, txtColor, isCst ? 800 : 600));
+    } else if (it.k === "core") {
+      y += 24;
+      p.push(arrow(it.f, it.to, y, C.core, { dash: "4 3", mk: "c" }));
+      p.push(`<text x="${(X(it.f) + X(it.to)) / 2}" y="${y - 5}" text-anchor="middle" font-size="10" fill="#7d8792" ${HALO}>${esc(it.l)}</text>`);
+    } else if (it.k === "loop") {
+      y += 22;
+      const x = X(it.at);
+      if (it.opt) {
+        p.push(`<rect x="${x - 40}" y="${y - 12}" width="84" height="30" fill="#dfe8f7" stroke="#8aa6d8"/>
+          <rect x="${x - 40}" y="${y - 12}" width="22" height="11" fill="#4f7fd1"/>
+          <text x="${x - 29}" y="${y - 3.5}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#fff">opt</text>`);
       }
-    ];
-
-    const fill = {
-      "UE": ["#d6eaf8", "#2e86c1"],
-      "eNodeB": ["#d5f5e3", "#1e8449"],
-      "MME": ["#fdebd0", "#ca6f1e"],
-      "PCRF": ["#e5e8e8", "#7f8c8d"],
-      "PGW/SGW": ["#f5cba7", "#b9770e"],
-      "IMS": ["#d7bde2", "#6c3483"],
-      "IMS Core": ["#d7bde2", "#6c3483"],
-      "IMS Core\nP/I/S-CSCF": ["#d7bde2", "#6c3483"]
-    };
-
-    function esc(s) {
-      return s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
-    }
-
-    function box(x, y, w, h, label) {
-      const [bg, stroke] = fill[label];
-      const lines = label.split("\n");
-      const start = y + h / 2 - (lines.length - 1) * 8 + 5;
-      const text = lines.map((line, i) =>
-        `<tspan x="${x + w / 2}" y="${start + i * 16}">${esc(line)}</tspan>`
-      ).join("");
-      return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="7" fill="${bg}" stroke="${stroke}" stroke-width="1.7"/>
-        <text text-anchor="middle" font-family="Arial" font-size="14" font-weight="700" fill="#1a1a1a">${text}</text>`;
-    }
-
-    function arrow(y, dir, label, slow, gid) {
-      const x1 = 168, x2 = 372;
-      const color = slow ? "#9a3412" : "#222";
-      const head = dir === "voice" || dir === 1
-        ? `<polygon points="${x2},${y} ${x2 - 11},${y - 5} ${x2 - 11},${y + 5}" fill="${dir === "voice" ? "#e67e22" : color}"/>`
-        : `<polygon points="${x1},${y} ${x1 + 11},${y - 5} ${x1 + 11},${y + 5}" fill="${color}"/>`;
-      const lineColor = dir === "voice" ? "#e67e22" : color;
-      const xStart = dir === -1 ? x2 : x1;
-      const xEnd = dir === -1 ? x1 + 12 : x2 - 12;
-      let extra = "";
-      if (dir === "voice") {
-        extra = `<rect x="232" y="${y - 10}" width="76" height="20" rx="3" fill="#fdebd0"/>
-          <text x="270" y="${y + 4}" text-anchor="middle" font-family="Arial" font-size="12" font-weight="800" fill="#d35400">VOICE</text>
-          <text x="270" y="${y - 16}" text-anchor="middle" font-family="Arial" font-size="12" font-weight="700" fill="${color}">${esc(label)}</text>`;
-      } else {
-        extra = `<text x="270" y="${y - 7}" text-anchor="middle" font-family="Arial" font-size="12.5" font-weight="700" fill="${color}">${esc(label)}</text>`;
+      p.push(`<path d="M${x} ${y} H${x + 30} V${y + 10} H${x + 3}" fill="none" stroke="${C.core}" stroke-width="1.4" marker-end="url(#${id}-h-c)"/>
+        <text x="${x - 4}" y="${y + 9}" text-anchor="end" font-size="10" fill="#7d8792" ${HALO}>${esc(it.l)}</text>`);
+      y += 10;
+    } else if (it.k === "cnote") {
+      y += 12;
+      const x = X(it.at);
+      p.push(`<rect x="${x - 56}" y="${y}" width="112" height="18" fill="#fff" stroke="#b5bcc5"/>
+        <text x="${x}" y="${y + 12.5}" text-anchor="middle" font-size="10" fill="#7d8792">${esc(it.l)}</text>`);
+      y += 18;
+    } else if (it.k === "note") {
+      y += 12;
+      y += note(it);
+    } else if (it.k === "rtp") {
+      y += 30;
+      for (const [a, b] of [[0, 1], [1, 7], [7, 8]]) {
+        p.push(arrow(a, b, y, C.line, { both: true, mk: "k", w: 1.6 }));
       }
-      return `<line x1="${xStart}" y1="${y}" x2="${xEnd}" y2="${y}" stroke="${lineColor}" stroke-width="${slow || dir === "voice" ? 2.2 : 1.5}"/>${head}${extra}`;
+      p.push(`<text x="${X(0) + 6}" y="${y - 5}" font-size="11" font-weight="700" ${HALO}>RTP</text>`);
+      p.push(`<text x="${(X(1) + X(7)) / 2}" y="${y - 5}" text-anchor="middle" font-size="11" font-weight="700" ${HALO}>RTP</text>`);
+      p.push(`<text x="${X(8) - 6}" y="${y - 5}" text-anchor="end" font-size="11" font-weight="700" ${HALO}>RTP</text>`);
+    } else if (it.k === "brk") {
+      y += 30;
+      p.push(`<rect x="6" y="${y - 9}" width="${W - 12}" height="18" fill="#f4f6f9"/>
+        <text x="${W / 2}" y="${y + 4}" text-anchor="middle" font-size="11" font-style="italic" fill="#555">··· ${esc(it.l)} ···</text>`);
+      y += 6;
     }
+  }
 
-    function chart(op) {
-      const lx = 168;
-      const parts = [];
-      parts.push(`<line x1="${lx}" y1="62" x2="${lx}" y2="668" stroke="#222" stroke-width="1.7"/>`);
-      parts.push(`<line x1="372" y1="62" x2="372" y2="668" stroke="#222" stroke-width="1.7"/>`);
-      const yAt = [8, 78, 118, 196, 274, 352, 412, 478, 548, 668];
-      const hAt = [52, 0, 46, 46, 46, 0, 52, 0, 0, 56];
-      op.rows.forEach((row, i) => {
-        const [left, right, label, dir, slow] = row;
-        const y = yAt[i];
-        if (left) parts.push(box(lx - 132, y, 132, hAt[i], left));
-        if (right) parts.push(box(372, y, 148, hAt[i], right));
-        const ay = left ? y + hAt[i] / 2 : y;
-        if (label) parts.push(arrow(ay, dir, label, slow, op.name));
-      });
-      return `<figure>
-        <figcaption style="color:${op.hue}">${esc(op.name)}<span>${esc(op.sub)}</span></figcaption>
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 740" width="500" height="685">
-          <rect width="540" height="740" fill="#fff"/>
-          ${parts.join("")}
-        </svg>
-      </figure>`;
-    }
+  y += 30;
+  const H = y + 48;
+  const lanes = LANES.map((_, i) =>
+    `<line x1="${X(i)}" y1="48" x2="${X(i)}" y2="${y}" stroke="${C.lane}" stroke-width="1"/>`
+  ).join("");
+  const tops = LANES.map((_, i) => laneBox(i, 8)).join("");
+  const bottoms = LANES.map((_, i) => laneBox(i, y)).join("");
+  const marker = (k, col) =>
+    `<marker id="${id}-h-${k}" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="${col}"/></marker>`;
+  const defs = `<defs>${marker("k", C.line)}${marker("c", C.core)}${marker("r", C.bad)}${marker("w", C.warn)}${marker("g", C.good)}${marker("q", C.bearer)}</defs>`;
 
-    document.getElementById("wrap").innerHTML = ops.map(chart).join("");
-  </script>
+  return {
+    w: W, h: H,
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" font-family="Arial, Helvetica, sans-serif">
+      ${defs}<rect width="${W}" height="${H}" fill="#fff"/>${lanes}${p.join("")}${tops}${bottoms}</svg>`
+  };
+}
+
+const built = OPS.map(op => ({ op, ...render(op) }));
+const charts = document.getElementById("charts");
+let view = ["robi", "bl", "gp"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "all";
+let zoom = null;
+
+function fitZoom() {
+  const avail = charts.clientWidth - 40;
+  const n = view === "all" ? 3 : 1;
+  const z = (avail - (n - 1) * 16) / (n * W);
+  return Math.max(0.45, Math.min(n === 1 ? 1.5 : 1.2, z));
+}
+
+function draw() {
+  const z = zoom || fitZoom();
+  const list = view === "all" ? built : built.filter(b => b.op.id === view);
+  charts.className = "charts" + (view === "all" ? "" : " single");
+  charts.innerHTML = list.map(b => `
+    <div class="op" data-id="${b.op.id}" style="width:${Math.round(b.w * z)}px">
+      <h2 style="color:${b.op.color}">${esc(b.op.name)}</h2>
+      <div class="meta">${esc(b.op.meta)}</div>
+      ${b.svg.replace("<svg ", `<svg width="${Math.round(b.w * z)}" height="${Math.round(b.h * z)}" `)}
+    </div>`).join("");
+  document.querySelectorAll("[data-view]").forEach(btn => btn.classList.toggle("on", btn.dataset.view === view));
+}
+
+document.getElementById("bar").addEventListener("click", e => {
+  const btn = e.target.closest("button");
+  if (!btn) return;
+  if (btn.dataset.view) { view = btn.dataset.view; zoom = null; }
+  const cur = zoom || fitZoom();
+  if (btn.dataset.zoom === "fit") zoom = null;
+  if (btn.dataset.zoom === "in") zoom = Math.min(2, cur * 1.15);
+  if (btn.dataset.zoom === "out") zoom = Math.max(0.35, cur / 1.15);
+  draw();
+});
+
+charts.addEventListener("click", e => {
+  const card = e.target.closest(".op");
+  if (!card || view !== "all") return;
+  view = card.dataset.id;
+  zoom = null;
+  draw();
+});
+
+window.addEventListener("resize", () => { if (!zoom) draw(); });
+draw();
+</script>
 </body>
 </html>
