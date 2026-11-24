@@ -38,55 +38,17 @@
   .op .meta { font-size: 12px; color: #444; margin-bottom: 4px; }
   .op svg { display: block; cursor: zoom-in; }
   .single .op svg { cursor: default; }
+  .stage { border-top: 3px solid #4f7fd1; margin-top: 10px; }
+  .stage-title { margin: 0; padding: 14px 20px 4px; font-size: 22px; }
 </style>
 </head>
 <body>
 <header>
-  <h1>VoLTE call flow v10 — idle and connected</h1>
-  <p class="sub">Version v10. The tables are the median of every alerted call. The ladders follow the button: UE-B idle, or UE-B connected. Each ladder is one example of that state. Times are seconds after UE-A sends SIP INVITE.</p>
+  <h1>VoLTE call flow v11 — UE-B idle and UE-B connected, good coverage</h1>
+  <p class="sub">Version v11. Both cases are on one page. Each ladder is the call with the strongest RSRP on both phones for that operator and case. The tables are the median of calls with both phones at −90 dBm or better. Times are seconds after UE-A sends SIP INVITE, and the braces add up on that clock.</p>
 </header>
 
-<section class="gap">
-  <p class="sub"><b>UE-B idle, paged.</b> Robi 15 calls, Grameenphone 14 calls. Banglalink paged the called phone once, so that column is that single call.</p>
-  <table>
-    <thead>
-      <tr><th>Setup step</th><th>Robi</th><th>Banglalink</th><th>Grameenphone</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>UE-A INVITE → UE-B receives INVITE</td><td>1.91 s</td><td>1.80 s</td><td>2.03 s</td></tr>
-      <tr class="sub"><td>&nbsp;&nbsp;&nbsp;UE-B paged at</td><td>1.73 s</td><td>1.67 s</td><td>1.86 s</td></tr>
-      <tr class="sub"><td>&nbsp;&nbsp;&nbsp;Air time after the page</td><td>0.18 s</td><td>0.13 s</td><td>0.18 s</td></tr>
-      <tr><td>UE-B sends 183 → UE-A receives 183</td><td class="bad">0.73 s</td><td>0.10 s</td><td>0.52 s</td></tr>
-      <tr class="sub"><td>&nbsp;&nbsp;&nbsp;UE-A voice bearer (QCI 1) at</td><td class="bad">2.51 s</td><td>0.20 s</td><td>0.26 s</td></tr>
-      <tr><td>UE-B voice bearer (QCI 1) at</td><td>2.20 s</td><td>1.96 s</td><td>2.34 s</td></tr>
-      <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td>2.99 s</td><td>2.29 s</td><td>2.99 s</td></tr>
-    </tbody>
-  </table>
-  <p class="sub"><b>UE-B already connected, not paged.</b> Robi 8 calls, Banglalink 21 calls, Grameenphone 8 calls.</p>
-  <table>
-    <thead>
-      <tr><th>Setup step</th><th>Robi</th><th>Banglalink</th><th>Grameenphone</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>UE-A INVITE → UE-B receives INVITE</td><td class="bad">1.10 s</td><td class="ok">0.36 s</td><td>0.90 s</td></tr>
-      <tr><td>UE-B sends 183 → UE-A receives 183</td><td class="bad">0.69 s</td><td class="ok">0.09 s</td><td>0.48 s</td></tr>
-      <tr class="sub"><td>&nbsp;&nbsp;&nbsp;UE-A voice bearer (QCI 1) at</td><td class="bad">1.66 s</td><td class="ok">0.09 s</td><td>0.20 s</td></tr>
-      <tr><td>UE-B voice bearer (QCI 1) at</td><td>1.35 s</td><td>0.51 s</td><td>1.15 s</td></tr>
-      <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td>2.16 s</td><td class="ok">0.84 s</td><td>1.71 s</td></tr>
-    </tbody>
-  </table>
-</section>
-
-<section class="find">
-  With the called phone idle, Robi and Grameenphone ring in the same time: median 2.99 s. The INVITE reaches that phone at 1.91 s on Robi and 2.03 s on Grameenphone. The page is at 1.73 s and 1.86 s, and the air time after the page is 0.18 s on both. Banglalink has one idle call: CST 2.29 s, INVITE at 1.80 s, page at 1.67 s, air 0.13 s.<br>
-  The idle gap that remains is after the page. Robi starts the caller voice bearer at 2.51 s and the 183 takes 0.73 s to return. Grameenphone starts that bearer at 0.26 s and the 183 takes 0.52 s. On the one Banglalink idle call the bearer starts at 0.20 s and the 183 takes 0.10 s.<br>
-  With the called phone already connected, Robi is still slower: CST 2.16 s, against 1.71 s on Grameenphone and 0.84 s on Banglalink. The INVITE reaches UE-B at 1.10 s, 0.90 s, and 0.36 s. Robi starts the caller bearer at 1.66 s, Grameenphone at 0.20 s, Banglalink at 0.09 s.
-</section>
-
 <div class="bar" id="bar">
-  <button data-stage="idle" class="on">UE-B idle, paged</button>
-  <button data-stage="conn">UE-B connected</button>
-  <span class="sep"></span>
   <button data-view="all" class="on">All three side by side</button>
   <button data-view="robi">Robi</button>
   <button data-view="bl">Banglalink</button>
@@ -103,7 +65,46 @@
   </span>
 </div>
 
-<div class="charts" id="charts"></div>
+<section class="stage" id="idle">
+  <h2 class="stage-title">UE-B idle, paged</h2>
+  <section class="gap">
+    <table>
+      <thead><tr><th>Good coverage, both phones −90 dBm or better</th><th>Robi</th><th>Banglalink</th><th>Grameenphone</th></tr></thead>
+      <tbody>
+<tr class="sub"><td>Calls with both phones at −90 dBm or better</td><td>5 of 15</td><td>0 of 1</td><td>6 of 14</td></tr>
+<tr><td>UE-A INVITE → UE-B receives INVITE</td><td>1.94 s</td><td>—</td><td>1.78 s</td></tr>
+<tr class="sub"><td>&nbsp;&nbsp;&nbsp;UE-B paged at</td><td>1.78 s</td><td>—</td><td>1.60 s</td></tr>
+<tr class="sub"><td>&nbsp;&nbsp;&nbsp;Air time after the page</td><td>0.17 s</td><td>—</td><td>0.18 s</td></tr>
+<tr><td>UE-B sends 183 → UE-A receives 183</td><td>0.68 s</td><td>—</td><td>0.55 s</td></tr>
+<tr><td>UE-A voice bearer (QCI 1) at</td><td>2.51 s</td><td>—</td><td>0.26 s</td></tr>
+<tr><td>UE-B voice bearer (QCI 1) at</td><td>2.20 s</td><td>—</td><td>2.00 s</td></tr>
+<tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td>3.05 s</td><td>—</td><td>2.65 s</td></tr>
+      </tbody>
+    </table>
+  </section>
+  <p class="find">All idle calls, any coverage, median CST: Robi 2.99 s (15), Banglalink 2.29 s (1), Grameenphone 2.99 s (14). Banglalink paged the called phone only once in the drive, at −101 dBm, so it has no good-coverage idle call. Its ladder below is that one call.</p>
+  <div class="charts" id="charts-idle"></div>
+</section>
+
+<section class="stage" id="connected">
+  <h2 class="stage-title">UE-B connected, not paged</h2>
+  <section class="gap">
+    <table>
+      <thead><tr><th>Good coverage, both phones −90 dBm or better</th><th>Robi</th><th>Banglalink</th><th>Grameenphone</th></tr></thead>
+      <tbody>
+<tr class="sub"><td>Calls with both phones at −90 dBm or better</td><td>1 of 8</td><td>3 of 21</td><td>3 of 8</td></tr>
+<tr><td>UE-A INVITE → UE-B receives INVITE</td><td>2.02 s</td><td>0.34 s</td><td>0.91 s</td></tr>
+<tr><td>UE-B sends 183 → UE-A receives 183</td><td>0.72 s</td><td>0.09 s</td><td>0.50 s</td></tr>
+<tr><td>UE-A voice bearer (QCI 1) at</td><td>2.57 s</td><td>0.08 s</td><td>0.28 s</td></tr>
+<tr><td>UE-B voice bearer (QCI 1) at</td><td>2.81 s</td><td>0.46 s</td><td>1.25 s</td></tr>
+<tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td>3.05 s</td><td>0.79 s</td><td>1.78 s</td></tr>
+      </tbody>
+    </table>
+  </section>
+  <p class="find">All connected calls, any coverage, median CST: Robi 2.16 s (8), Banglalink 0.84 s (21), Grameenphone 1.71 s (8). Robi has one connected call at good coverage, so the Robi column is that call.</p>
+  <div class="charts" id="charts-conn"></div>
+</section>
+
 
 <script>
 const LANES = ["UE-A", "orig SBC\nwith P-CSCF", "orig S-CSCF", "O - TAS", "term I-CSCF", "term S-CSCF", "T-TAS", "term SBC\nwith P-CSCF", "UE-B"];
@@ -129,246 +130,7 @@ const CORE = [
   { k: "core", f: 5, to: 7, l: "SIP INVITE (SDP O1)" }
 ];
 
-const STAGES = { idle: [
-  {
-    id: "robi", name: "Robi", color: "#c0392b", cst: 2486,
-    meta: "Example, UE-B idle. Log 6.txt · RSRP UE-A −78 to −71 dBm, UE-B −75 to −70 dBm · CST 2.49 s",
-    segs: [
-      { from: "invite", to: "trying", dir: "UE-A → P-CSCF", time: "0.05 s" },
-      { from: "trying", to: "page", dir: "P-CSCF → term IMS", time: "1.24 s", cls: "bad" },
-      { from: "page", to: "binvite", dir: "MME → UE-B", time: "0.20 s", cls: "bad" },
-      { from: "binvite", to: "b183", dir: "UE-B → IMS", time: "0.06 s" },
-      { from: "b183", to: "bbear", dir: "PCRF → UE-B", time: "0.19 s" },
-      { from: "bbear", to: "abear", dir: "PCRF → UE-A", time: "0.31 s", cls: "bad" },
-      { from: "abear", to: "a183", dir: "IMS → UE-A", time: "0.18 s" },
-      { from: "a183", to: "prack", dir: "UE-A → UE-B", time: "0.02 s" },
-      { from: "prack", to: "ring", dir: "UE-B → UE-A", time: "0.13 s" },
-      { from: "ring", to: "ok", dir: "UE-B → UE-A", time: "1.64 s" },
-      { from: "ok", to: "ack", dir: "UE-A → UE-B", time: "0.31 s" }
-    ],
-    steps: [
-      { k: "msg", f: 0, to: 1, l: "SIP INVITE (SDP O1)", tm: "0.00 s", t: 0, mark: "invite" },
-      { k: "msg", f: 1, to: 0, l: "100 Trying", tm: "0.05 s", t: 51, mark: "trying" },
-      ...CORE,
-      { k: "note", side: "mid", cls: "bad", t: 1293, lines: ["This example is UE-B idle. INVITE at 1.49 s", "Idle median: Robi 1.91 s, GP 2.03 s. Air after the page 0.20 s"] },
-      { k: "note", side: "B", cls: "bad", t: 1294, lines: ["UE-B idle → paged 1.29 s", "Service Request same ms, RRC 1.38 s"], mark: "page" },
-      { k: "msg", f: 7, to: 8, l: "SIP INVITE (SDP O1)", tm: "B 1.49 s", t: 1492, cls: "bad", mark: "binvite" },
-      { k: "msg", f: 8, to: 7, l: "183 In Progress (SDP A1)", tm: "B 1.55 s", t: 1554, mark: "b183" },
-      { k: "bearer", f: 7, to: 8, l: "QCI 1 voice bearer (B)", tm: "1.74 s", t: 1740, mark: "bbear" },
-      { k: "bearer", f: 1, to: 0, l: "QCI 1 voice bearer (A)", tm: "2.05 s", t: 2045, cls: "bad", mark: "abear" },
-      { k: "note", side: "A", cls: "bad", t: 2046, lines: ["A bearer starts after B's 183", "Idle median: Robi 2.51 s, GP 0.26 s"] },
-      { k: "e2e", f: 7, to: 0, l: "183 In Progress (SDP A1)", tm: "B 1.55 → A 2.23 s", t: 2226, cls: "bad", mark: "a183" },
-      { k: "e2e", f: 0, to: 8, l: "SIP PRACK", tm: "A 2.25 → B 2.34 s", t: 2246, mark: "prack" },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (PRACK)", tm: "B 2.37 → A 2.49 s", t: 2372 },
-      { k: "note", side: "B", t: 2373, lines: ["SDP ok, start to ring"] },
-      { k: "e2e", f: 8, to: 0, l: "180 Ringing", tm: "B 2.38 → A 2.49 s  ·  CST 2.49 s", t: 2375, cls: "cst", mark: "ring" },
-      { k: "note", side: "B", t: 4012, lines: ["call accepted"] },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (INVITE)", tm: "B 4.01 → A 4.31 s", t: 4013, mark: "ok" },
-      { k: "e2e", f: 0, to: 8, l: "SIP ACK", tm: "A 4.32 → B 4.48 s", t: 4324, mark: "ack" },
-      { k: "rtp", t: 4500 },
-      { k: "note", side: "mid", t: 5000, lines: ["No BYE for this call in the log"] }
-    ]
-  },
-  {
-    id: "bl", name: "Banglalink", color: "#1e8449", cst: 2294,
-    meta: "Example, UE-B idle. The only Banglalink paged call. Log 10.txt · RSRP UE-A −102 to −100 dBm, UE-B −101 to −99 dBm · CST 2.29 s",
-    segs: [
-      { from: "invite", to: "trying", dir: "UE-A → P-CSCF", time: "0.04 s" },
-      { from: "trying", to: "abear", dir: "P-CSCF → PCRF", time: "0.16 s", cls: "good" },
-      { from: "abear", to: "page", dir: "PCRF → term IMS", time: "1.47 s", cls: "warn" },
-      { from: "page", to: "binvite", dir: "MME → UE-B", time: "0.13 s" },
-      { from: "binvite", to: "b183", dir: "UE-B → IMS", time: "0.08 s" },
-      { from: "b183", to: "bbear", dir: "PCRF → UE-B", time: "0.09 s" },
-      { from: "bbear", to: "a183", dir: "IMS → UE-A", time: "0.01 s", cls: "good" },
-      { from: "a183", to: "prack", dir: "UE-A → UE-B", time: "0.02 s" },
-      { from: "prack", to: "ring", dir: "UE-B → UE-A", time: "0.21 s" },
-      { from: "ring", to: "ok", dir: "UE-B → UE-A", time: "1.67 s" },
-      { from: "ok", to: "ack", dir: "UE-A → UE-B", time: "0.14 s" }
-    ],
-    steps: [
-      { k: "msg", f: 0, to: 1, l: "SIP INVITE (SDP O1)", tm: "0.00 s", t: 0, mark: "invite" },
-      { k: "msg", f: 1, to: 0, l: "100 Trying", tm: "0.04 s", t: 37, mark: "trying" },
-      { k: "bearer", f: 1, to: 0, l: "QCI 1 voice bearer (A)", tm: "0.20 s", t: 198, cls: "good", mark: "abear" },
-      { k: "note", side: "A", cls: "good", t: 199, lines: ["A bearer right after INVITE"] },
-      ...CORE,
-      { k: "note", side: "mid", cls: "warn", t: 1666, lines: ["The one BL idle call. INVITE at 1.80 s", "Page at 1.67 s, air time after the page 0.13 s"] },
-      { k: "note", side: "B", cls: "warn", t: 1667, lines: ["UE-B idle → paged 1.67 s", "Service Request same ms, RRC 1.74 s"], mark: "page" },
-      { k: "msg", f: 7, to: 8, l: "SIP INVITE (SDP O1)", tm: "B 1.80 s", t: 1797, mark: "binvite" },
-      { k: "msg", f: 8, to: 7, l: "183 In Progress (SDP A1)", tm: "B 1.87 s", t: 1873, mark: "b183" },
-      { k: "bearer", f: 7, to: 8, l: "QCI 1 voice bearer (B)", tm: "1.96 s", t: 1960, mark: "bbear" },
-      { k: "e2e", f: 7, to: 0, l: "183 In Progress (SDP A1)", tm: "B 1.87 → A 1.97 s", t: 1968, cls: "good", mark: "a183" },
-      { k: "e2e", f: 0, to: 8, l: "SIP PRACK", tm: "A 1.99 → B 2.03 s", t: 1990, mark: "prack" },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (PRACK)", tm: "B 2.05 → A 2.11 s", t: 2052 },
-      { k: "e2e", f: 0, to: 8, l: "SIP UPDATE (SDP O2)", tm: "A 2.13 → B 2.18 s", t: 2133 },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (SDP A2 - UPDATE)", tm: "B 2.19 → A 2.25 s", t: 2193 },
-      { k: "note", side: "B", t: 2194, lines: ["SDP ok, start to ring"] },
-      { k: "e2e", f: 8, to: 0, l: "180 Ringing", tm: "B 2.20 → A 2.29 s  ·  CST 2.29 s", t: 2195, cls: "cst", mark: "ring" },
-      { k: "note", side: "B", t: 3866, lines: ["call accepted"] },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (INVITE)", tm: "B 3.87 → A 3.99 s", t: 3867, mark: "ok" },
-      { k: "e2e", f: 0, to: 8, l: "SIP ACK", tm: "A 4.01 → B 4.06 s", t: 4011, mark: "ack" },
-      { k: "rtp", t: 4200 },
-      { k: "note", side: "mid", t: 4500, lines: ["BYE at 90.8 s"] }
-    ]
-  },
-  {
-    id: "gp", name: "Grameenphone", color: "#1f4e9a", cst: 2732,
-    meta: "Example, UE-B idle. Log 8.txt · RSRP UE-A −63 to −60 dBm, UE-B −69 to −63 dBm · CST 2.73 s",
-    segs: [
-      { from: "invite", to: "trying", dir: "UE-A → P-CSCF", time: "0.20 s" },
-      { from: "trying", to: "abear", dir: "P-CSCF → PCRF", time: "0.15 s", cls: "good" },
-      { from: "abear", to: "page", dir: "PCRF → term IMS", time: "1.32 s", cls: "warn" },
-      { from: "page", to: "binvite", dir: "MME → UE-B", time: "0.17 s" },
-      { from: "binvite", to: "b183", dir: "UE-B → IMS", time: "0.06 s" },
-      { from: "b183", to: "bbear", dir: "PCRF → UE-B", time: "0.13 s" },
-      { from: "bbear", to: "a183", dir: "IMS → UE-A", time: "0.30 s", cls: "warn" },
-      { from: "a183", to: "prack", dir: "UE-A → UE-B", time: "0.01 s" },
-      { from: "prack", to: "ring", dir: "UE-B → UE-A", time: "0.29 s" },
-      { from: "ring", to: "ok", dir: "UE-B → UE-A", time: "1.69 s" },
-      { from: "ok", to: "ack", dir: "UE-A → UE-B", time: "0.27 s" },
-      { from: "ack", to: "bye", dir: "UE-A → UE-B", time: "86 s" }
-    ],
-    steps: [
-      { k: "msg", f: 0, to: 1, l: "SIP INVITE (SDP O1)", tm: "0.00 s", t: 0, mark: "invite" },
-      { k: "msg", f: 1, to: 0, l: "100 Trying", tm: "0.20 s", t: 200, mark: "trying" },
-      { k: "bearer", f: 1, to: 0, l: "QCI 1 voice bearer (A)", tm: "0.35 s", t: 352, cls: "good", mark: "abear" },
-      { k: "note", side: "A", cls: "good", t: 353, lines: ["A bearer right after INVITE", "UE-A RRC up at 0.09 s"] },
-      ...CORE,
-      { k: "note", side: "mid", cls: "warn", t: 1670, lines: ["This example is UE-B idle. INVITE at 1.84 s", "Idle median: GP 2.03 s, Robi 1.91 s"] },
-      { k: "note", side: "B", cls: "warn", t: 1671, lines: ["UE-B idle → paged 1.67 s", "Service Request same ms, RRC 1.74 s"], mark: "page" },
-      { k: "msg", f: 7, to: 8, l: "SIP INVITE (SDP O1)", tm: "B 1.84 s", t: 1840, cls: "warn", mark: "binvite" },
-      { k: "msg", f: 8, to: 7, l: "183 In Progress (SDP A1)", tm: "B 1.90 s", t: 1900, mark: "b183" },
-      { k: "bearer", f: 7, to: 8, l: "QCI 1 voice bearer (B)", tm: "2.03 s", t: 2034, mark: "bbear" },
-      { k: "e2e", f: 7, to: 0, l: "183 In Progress (SDP A1)", tm: "B 1.90 → A 2.33 s", t: 2333, cls: "warn", mark: "a183" },
-      { k: "note", side: "A", cls: "warn", t: 2334, lines: ["183 takes 0.43 s on this call", "Idle median: GP 0.52 s, Robi 0.73 s"] },
-      { k: "e2e", f: 0, to: 8, l: "SIP PRACK", tm: "A 2.34 → B 2.61 s", t: 2344, mark: "prack" },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (PRACK)", tm: "B 2.63 → A 2.73 s", t: 2629 },
-      { k: "note", side: "B", t: 2630, lines: ["SDP ok, start to ring"] },
-      { k: "e2e", f: 8, to: 0, l: "180 Ringing", tm: "B 2.63 → A 2.73 s  ·  CST 2.73 s", t: 2630, cls: "cst", mark: "ring" },
-      { k: "note", side: "B", t: 4317, lines: ["call accepted"] },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (INVITE)", tm: "B 4.32 → A 4.57 s", t: 4318, mark: "ok" },
-      { k: "e2e", f: 0, to: 8, l: "SIP ACK", tm: "A 4.59 → B 4.68 s", t: 4590, mark: "ack" },
-      { k: "rtp", t: 4800 },
-      { k: "brk", l: "talk time ≈ 86 s" },
-      { k: "note", side: "A", t: 90787, lines: ["call finished"] },
-      { k: "e2e", f: 0, to: 8, l: "SIP BYE", tm: "A 90.79 → B 91.08 s", t: 90788, mark: "bye" },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (BYE)", tm: "B 91.11 → A 91.21 s", t: 91108 }
-    ]
-  }
-], conn: [
-  {
-    id: "robi", name: "Robi", color: "#c0392b", cst: 2274,
-    meta: "Example, UE-B connected. Log 8.txt · RSRP UE-A −95 to −91 dBm, UE-B −91 to −86 dBm · CST 2.27 s",
-    segs: [
-      { from: "invite", to: "trying", dir: "UE-A → P-CSCF", time: "0.08 s" },
-      { from: "trying", to: "binvite", dir: "P-CSCF → UE-B", time: "1.07 s", cls: "bad" },
-      { from: "binvite", to: "b183", dir: "UE-B → IMS", time: "0.05 s" },
-      { from: "b183", to: "bbear", dir: "PCRF → UE-B", time: "0.21 s" },
-      { from: "bbear", to: "abear", dir: "PCRF → UE-A", time: "0.34 s", cls: "bad" },
-      { from: "abear", to: "a183", dir: "IMS → UE-A", time: "0.20 s" },
-      { from: "a183", to: "prack", dir: "UE-A → UE-B", time: "0.02 s" },
-      { from: "prack", to: "ring", dir: "UE-B → UE-A", time: "0.18 s" },
-      { from: "ring", to: "ok", dir: "UE-B → UE-A", time: "1.64 s" },
-      { from: "ok", to: "ack", dir: "UE-A → UE-B", time: "0.34 s" }
-    ],
-    steps: [
-      { k: "msg", f: 0, to: 1, l: "SIP INVITE (SDP O1)", tm: "0.00 s", t: 0, mark: "invite" },
-      { k: "msg", f: 1, to: 0, l: "100 Trying", tm: "0.08 s", t: 79, mark: "trying" },
-      ...CORE,
-      { k: "note", side: "B", cls: "bad", t: 1100, lines: ["UE-B already connected", "no paging. INVITE at 1.15 s"] },
-      { k: "msg", f: 7, to: 8, l: "SIP INVITE (SDP O1)", tm: "B 1.15 s", t: 1148, cls: "bad", mark: "binvite" },
-      { k: "msg", f: 8, to: 7, l: "183 In Progress (SDP A1)", tm: "B 1.20 s", t: 1198, mark: "b183" },
-      { k: "bearer", f: 7, to: 8, l: "QCI 1 voice bearer (B)", tm: "1.41 s", t: 1407, mark: "bbear" },
-      { k: "bearer", f: 1, to: 0, l: "QCI 1 voice bearer (A)", tm: "1.74 s", t: 1744, cls: "bad", mark: "abear" },
-      { k: "note", side: "A", cls: "bad", t: 1745, lines: ["A bearer starts after B's 183", "Connected median: Robi 1.66 s"] },
-      { k: "e2e", f: 7, to: 0, l: "183 In Progress (SDP A1)", tm: "B 1.20 → A 1.94 s", t: 1940, cls: "bad", mark: "a183" },
-      { k: "e2e", f: 0, to: 8, l: "SIP PRACK", tm: "A 1.96 → B 2.12 s", t: 1959, mark: "prack" },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (PRACK)", tm: "B 2.14 → A 2.27 s", t: 2140 },
-      { k: "note", side: "B", t: 2142, lines: ["SDP ok, start to ring"] },
-      { k: "e2e", f: 8, to: 0, l: "180 Ringing", tm: "B 2.14 → A 2.27 s  ·  CST 2.27 s", t: 2143, cls: "cst", mark: "ring" },
-      { k: "note", side: "B", t: 3783, lines: ["call accepted"] },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (INVITE)", tm: "B 3.78 → A 4.10 s", t: 3784, mark: "ok" },
-      { k: "e2e", f: 0, to: 8, l: "SIP ACK", tm: "A 4.12 → B 4.30 s", t: 4123, mark: "ack" },
-      { k: "rtp", t: 4300 },
-      { k: "note", side: "mid", t: 4600, lines: ["No BYE for this call in the log"] }
-    ]
-  },
-  {
-    id: "bl", name: "Banglalink", color: "#1e8449", cst: 761,
-    meta: "Example, UE-B connected. Log 9.txt · RSRP UE-A −81 dBm (3.9 s before), UE-B −81 dBm · CST 0.76 s",
-    segs: [
-      { from: "invite", to: "trying", dir: "UE-A → P-CSCF", time: "0.05 s" },
-      { from: "trying", to: "abear", dir: "P-CSCF → PCRF", time: "0.03 s", cls: "good" },
-      { from: "abear", to: "binvite", dir: "PCRF → UE-B", time: "0.26 s", cls: "good" },
-      { from: "binvite", to: "b183", dir: "UE-B → IMS", time: "0.04 s" },
-      { from: "b183", to: "bbear", dir: "PCRF → UE-B", time: "0.08 s" },
-      { from: "bbear", to: "a183", dir: "IMS → UE-A", time: "0.02 s", cls: "good" },
-      { from: "a183", to: "prack", dir: "UE-A → UE-B", time: "0.01 s" },
-      { from: "prack", to: "ring", dir: "UE-B → UE-A", time: "0.20 s", cls: "good" },
-      { from: "ring", to: "ok", dir: "UE-B → UE-A", time: "1.66 s" },
-      { from: "ok", to: "ack", dir: "UE-A → UE-B", time: "0.13 s" }
-    ],
-    steps: [
-      { k: "msg", f: 0, to: 1, l: "SIP INVITE (SDP O1)", tm: "0.00 s", t: 0, mark: "invite" },
-      { k: "msg", f: 1, to: 0, l: "100 Trying", tm: "0.05 s", t: 46, mark: "trying" },
-      { k: "bearer", f: 1, to: 0, l: "QCI 1 voice bearer (A)", tm: "0.08 s", t: 79, cls: "good", mark: "abear" },
-      { k: "note", side: "A", cls: "good", t: 80, lines: ["A bearer right after INVITE"] },
-      ...CORE,
-      { k: "note", side: "B", cls: "good", t: 300, lines: ["UE-B already connected", "no paging needed"] },
-      { k: "msg", f: 7, to: 8, l: "SIP INVITE (SDP O1)", tm: "B 0.34 s", t: 337, cls: "good", mark: "binvite" },
-      { k: "msg", f: 8, to: 7, l: "183 In Progress (SDP A1)", tm: "B 0.38 s", t: 380, mark: "b183" },
-      { k: "bearer", f: 7, to: 8, l: "QCI 1 voice bearer (B)", tm: "0.46 s", t: 457, mark: "bbear" },
-      { k: "e2e", f: 7, to: 0, l: "183 In Progress (SDP A1)", tm: "B 0.38 → A 0.47 s", t: 472, cls: "good", mark: "a183" },
-      { k: "e2e", f: 0, to: 8, l: "SIP PRACK", tm: "A 0.48 → B 0.53 s", t: 484, mark: "prack" },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (PRACK)", tm: "B 0.54 → A 0.59 s", t: 538 },
-      { k: "e2e", f: 0, to: 8, l: "SIP UPDATE (SDP O2)", tm: "A 0.59 → B 0.66 s", t: 593 },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (SDP A2 - UPDATE)", tm: "B 0.68 → A 0.73 s", t: 676 },
-      { k: "note", side: "B", t: 677, lines: ["SDP ok, start to ring"] },
-      { k: "e2e", f: 8, to: 0, l: "180 Ringing", tm: "B 0.68 → A 0.76 s  ·  CST 0.76 s", t: 679, cls: "cst", mark: "ring" },
-      { k: "note", side: "B", t: 2334, lines: ["call accepted"] },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (INVITE)", tm: "B 2.34 → A 2.45 s", t: 2335, mark: "ok" },
-      { k: "e2e", f: 0, to: 8, l: "SIP ACK", tm: "A 2.47 → B 2.52 s", t: 2466, mark: "ack" },
-      { k: "rtp", t: 2600 },
-      { k: "note", side: "mid", t: 3000, lines: ["No BYE for this call in the log"] }
-    ]
-  },
-  {
-    id: "gp", name: "Grameenphone", color: "#1f4e9a", cst: 1776,
-    meta: "Example, UE-B connected. Log 8.txt · RSRP UE-A −73 dBm, UE-B −75 to −74 dBm · CST 1.78 s",
-    segs: [
-      { from: "invite", to: "trying", dir: "UE-A → P-CSCF", time: "0.08 s" },
-      { from: "trying", to: "abear", dir: "P-CSCF → PCRF", time: "0.22 s", cls: "good" },
-      { from: "abear", to: "binvite", dir: "PCRF → UE-B", time: "0.61 s" },
-      { from: "binvite", to: "b183", dir: "UE-B → IMS", time: "0.09 s" },
-      { from: "b183", to: "bbear", dir: "PCRF → UE-B", time: "0.26 s" },
-      { from: "bbear", to: "a183", dir: "IMS → UE-A", time: "0.25 s" },
-      { from: "a183", to: "prack", dir: "UE-A → UE-B", time: "0.02 s" },
-      { from: "prack", to: "ring", dir: "UE-B → UE-A", time: "0.14 s" },
-      { from: "ring", to: "ok", dir: "UE-B → UE-A", time: "1.85 s" },
-      { from: "ok", to: "ack", dir: "UE-A → UE-B", time: "0.24 s" }
-    ],
-    steps: [
-      { k: "msg", f: 0, to: 1, l: "SIP INVITE (SDP O1)", tm: "0.00 s", t: 0, mark: "invite" },
-      { k: "msg", f: 1, to: 0, l: "100 Trying", tm: "0.08 s", t: 82, mark: "trying" },
-      { k: "bearer", f: 1, to: 0, l: "QCI 1 voice bearer (A)", tm: "0.30 s", t: 300, cls: "good", mark: "abear" },
-      { k: "note", side: "A", cls: "good", t: 301, lines: ["A bearer right after INVITE"] },
-      ...CORE,
-      { k: "note", side: "B", t: 860, lines: ["UE-B already connected", "no paging. INVITE at 0.91 s"] },
-      { k: "msg", f: 7, to: 8, l: "SIP INVITE (SDP O1)", tm: "B 0.91 s", t: 910, mark: "binvite" },
-      { k: "msg", f: 8, to: 7, l: "183 In Progress (SDP A1)", tm: "B 1.00 s", t: 996, mark: "b183" },
-      { k: "bearer", f: 7, to: 8, l: "QCI 1 voice bearer (B)", tm: "1.25 s", t: 1253, mark: "bbear" },
-      { k: "e2e", f: 7, to: 0, l: "183 In Progress (SDP A1)", tm: "B 1.00 → A 1.51 s", t: 1505, mark: "a183" },
-      { k: "e2e", f: 0, to: 8, l: "SIP PRACK", tm: "A 1.52 → B 1.64 s", t: 1524, mark: "prack" },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (PRACK)", tm: "B 1.66 → A 1.75 s", t: 1664 },
-      { k: "note", side: "B", t: 1667, lines: ["SDP ok, start to ring"] },
-      { k: "e2e", f: 8, to: 0, l: "180 Ringing", tm: "B 1.67 → A 1.78 s  ·  CST 1.78 s", t: 1668, cls: "cst", mark: "ring" },
-      { k: "note", side: "B", t: 3521, lines: ["call accepted"] },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (INVITE)", tm: "B 3.52 → A 3.75 s", t: 3522, mark: "ok" },
-      { k: "e2e", f: 0, to: 8, l: "SIP ACK", tm: "A 3.77 → B 3.86 s", t: 3765, mark: "ack" },
-      { k: "rtp", t: 4000 },
-      { k: "note", side: "mid", t: 4300, lines: ["BYE at 90.2 s"] }
-    ]
-  }
-]};
+const STAGES = {"idle": [{"id": "robi", "name": "Robi", "color": "#c0392b", "cst": 2486.0, "meta": "UE-B idle · good coverage. Log 6.txt · RSRP UE-A −76 to −74 dBm, UE-B −72 to −70 dBm · CST 2.49 s", "segs": [{"from": "invite", "to": "trying", "dir": "UE-A → P-CSCF", "time": "0.05 s"}, {"from": "trying", "to": "page", "dir": "P-CSCF → term IMS", "time": "1.24 s", "cls": "bad"}, {"from": "page", "to": "binvite", "dir": "MME → UE-B", "time": "0.20 s"}, {"from": "binvite", "to": "b183", "dir": "UE-B → IMS", "time": "0.06 s"}, {"from": "b183", "to": "bbear", "dir": "PCRF → UE-B", "time": "0.19 s"}, {"from": "bbear", "to": "abear", "dir": "PCRF → UE-A", "time": "0.30 s", "cls": "bad"}, {"from": "abear", "to": "a183", "dir": "IMS → UE-A", "time": "0.18 s"}, {"from": "a183", "to": "prack", "dir": "UE-A → UE-B", "time": "0.02 s"}, {"from": "prack", "to": "ring", "dir": "UE-B → UE-A", "time": "0.24 s"}, {"from": "ring", "to": "ok", "dir": "UE-B → UE-A", "time": "1.82 s"}, {"from": "ok", "to": "ack", "dir": "UE-A → UE-B", "time": "0.02 s"}], "steps": [{"k": "msg", "f": 0, "to": 1, "l": "SIP INVITE (SDP O1)", "tm": "0.00 s", "t": 0, "mark": "invite"}, {"k": "msg", "f": 1, "to": 0, "l": "100 Trying", "tm": "0.05 s", "t": 51.0, "mark": "trying"}, {"k": "CORE"}, {"k": "note", "side": "mid", "cls": "bad", "t": 1293.0, "lines": ["UE-B idle. INVITE reaches UE-B at 1.49 s", "Page at 1.29 s, air time after the page 0.20 s"]}, {"k": "note", "side": "B", "cls": "bad", "t": 1294.0, "lines": ["UE-B idle → paged 1.29 s", "RRC request 1.29 s, setup 1.38 s"], "mark": "page"}, {"k": "msg", "f": 7, "to": 8, "l": "SIP INVITE (SDP O1)", "tm": "B 1.49 s", "t": 1492.0, "cls": "bad", "mark": "binvite"}, {"k": "msg", "f": 8, "to": 7, "l": "183 In Progress (SDP A1)", "tm": "B 1.55 s", "t": 1554.0, "mark": "b183"}, {"k": "bearer", "f": 7, "to": 8, "l": "QCI 1 voice bearer (B)", "tm": "1.74 s", "t": 1740.0, "mark": "bbear"}, {"k": "bearer", "f": 1, "to": 0, "l": "QCI 1 voice bearer (A)", "tm": "2.04 s", "t": 2045.0, "cls": "bad", "mark": "abear"}, {"k": "note", "side": "A", "cls": "bad", "t": 2046.0, "lines": ["A bearer starts after B's 183"]}, {"k": "e2e", "f": 7, "to": 0, "l": "183 In Progress (SDP A1)", "tm": "B 1.55 s → A 2.23 s", "t": 2226.0, "cls": "bad", "mark": "a183"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP PRACK", "tm": "A 2.25 s → B 2.34 s", "t": 2246.0, "mark": "prack"}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (PRACK)", "tm": "B 2.37 s → A 2.49 s", "t": 2485.5}, {"k": "note", "side": "B", "t": 2485.8, "lines": ["SDP ok, start to ring"]}, {"k": "e2e", "f": 8, "to": 0, "l": "180 Ringing", "tm": "B 2.38 s → A 2.49 s  ·  CST 2.49 s", "t": 2486.0, "cls": "cst", "mark": "ring"}, {"k": "note", "side": "B", "t": 4305.8, "lines": ["call accepted"]}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (INVITE)", "tm": "B 4.01 s → A 4.31 s", "t": 4306.0, "mark": "ok"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP ACK", "tm": "A 4.32 s → B 4.47 s", "t": 4324.0, "mark": "ack"}, {"k": "rtp", "t": 4625.0}, {"k": "note", "side": "mid", "t": 4924.0, "lines": ["No BYE for this call in the log"]}]}, {"id": "bl", "name": "Banglalink", "color": "#1e8449", "cst": 2294.0, "meta": "UE-B idle · best coverage this operator has in this state. Log 10.txt · RSRP UE-A −102 to −100 dBm, UE-B −101 to −100 dBm · CST 2.29 s", "segs": [{"from": "invite", "to": "trying", "dir": "UE-A → P-CSCF", "time": "0.04 s"}, {"from": "trying", "to": "abear", "dir": "P-CSCF → PCRF", "time": "0.16 s", "cls": "good"}, {"from": "abear", "to": "page", "dir": "PCRF → term IMS", "time": "1.47 s", "cls": "warn"}, {"from": "page", "to": "binvite", "dir": "MME → UE-B", "time": "0.13 s"}, {"from": "binvite", "to": "b183", "dir": "UE-B → IMS", "time": "0.08 s"}, {"from": "b183", "to": "bbear", "dir": "PCRF → UE-B", "time": "0.09 s"}, {"from": "bbear", "to": "a183", "dir": "IMS → UE-A", "time": "0.01 s"}, {"from": "a183", "to": "prack", "dir": "UE-A → UE-B", "time": "0.02 s"}, {"from": "prack", "to": "ring", "dir": "UE-B → UE-A", "time": "0.30 s"}, {"from": "ring", "to": "ok", "dir": "UE-B → UE-A", "time": "1.70 s"}, {"from": "ok", "to": "ack", "dir": "UE-A → UE-B", "time": "0.02 s"}], "steps": [{"k": "msg", "f": 0, "to": 1, "l": "SIP INVITE (SDP O1)", "tm": "0.00 s", "t": 0, "mark": "invite"}, {"k": "msg", "f": 1, "to": 0, "l": "100 Trying", "tm": "0.04 s", "t": 37.0, "mark": "trying"}, {"k": "bearer", "f": 1, "to": 0, "l": "QCI 1 voice bearer (A)", "tm": "0.20 s", "t": 198.0, "cls": "good", "mark": "abear"}, {"k": "note", "side": "A", "cls": "good", "t": 199.0, "lines": ["A bearer right after INVITE"]}, {"k": "CORE"}, {"k": "note", "side": "mid", "cls": "warn", "t": 1666.0, "lines": ["UE-B idle. INVITE reaches UE-B at 1.80 s", "Page at 1.67 s, air time after the page 0.13 s"]}, {"k": "note", "side": "B", "cls": "warn", "t": 1667.0, "lines": ["UE-B idle → paged 1.67 s", "RRC request 1.67 s, setup 1.74 s"], "mark": "page"}, {"k": "msg", "f": 7, "to": 8, "l": "SIP INVITE (SDP O1)", "tm": "B 1.80 s", "t": 1797.0, "mark": "binvite"}, {"k": "msg", "f": 8, "to": 7, "l": "183 In Progress (SDP A1)", "tm": "B 1.87 s", "t": 1873.0, "mark": "b183"}, {"k": "bearer", "f": 7, "to": 8, "l": "QCI 1 voice bearer (B)", "tm": "1.96 s", "t": 1960.0, "mark": "bbear"}, {"k": "e2e", "f": 7, "to": 0, "l": "183 In Progress (SDP A1)", "tm": "B 1.87 s → A 1.97 s", "t": 1968.0, "mark": "a183"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP PRACK", "tm": "A 1.99 s → B 2.03 s", "t": 1990.0, "mark": "prack"}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (PRACK)", "tm": "B 2.05 s → A 2.11 s", "t": 2112.5}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP UPDATE (SDP O2)", "tm": "A 2.13 s → B 2.18 s", "t": 2133.0}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (SDP A2 - UPDATE)", "tm": "B 2.19 s → A 2.25 s", "t": 2251.5}, {"k": "note", "side": "B", "t": 2293.8, "lines": ["SDP ok, start to ring"]}, {"k": "e2e", "f": 8, "to": 0, "l": "180 Ringing", "tm": "B 2.19 s → A 2.29 s  ·  CST 2.29 s", "t": 2294.0, "cls": "cst", "mark": "ring"}, {"k": "note", "side": "B", "t": 3993.8, "lines": ["call accepted"]}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (INVITE)", "tm": "B 3.87 s → A 3.99 s", "t": 3994.0, "mark": "ok"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP ACK", "tm": "A 4.01 s → B 4.06 s", "t": 4011.0, "mark": "ack"}, {"k": "rtp", "t": 4213.0}, {"k": "brk", "l": "talk time ≈ 87 s"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP BYE", "tm": "A 90.82 s → B 90.87 s", "t": 90819.0}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (BYE)", "tm": "B 90.90 s → A 90.97 s", "t": 90899.0}]}, {"id": "gp", "name": "Grameenphone", "color": "#1f4e9a", "cst": 2732.0, "meta": "UE-B idle · good coverage. Log 8.txt · RSRP UE-A −63 to −60 dBm, UE-B −69 to −63 dBm · CST 2.73 s", "segs": [{"from": "invite", "to": "trying", "dir": "UE-A → P-CSCF", "time": "0.20 s"}, {"from": "trying", "to": "abear", "dir": "P-CSCF → PCRF", "time": "0.15 s", "cls": "good"}, {"from": "abear", "to": "page", "dir": "PCRF → term IMS", "time": "1.32 s", "cls": "warn"}, {"from": "page", "to": "binvite", "dir": "MME → UE-B", "time": "0.17 s"}, {"from": "binvite", "to": "b183", "dir": "UE-B → IMS", "time": "0.06 s"}, {"from": "b183", "to": "bbear", "dir": "PCRF → UE-B", "time": "0.13 s"}, {"from": "bbear", "to": "a183", "dir": "IMS → UE-A", "time": "0.30 s"}, {"from": "a183", "to": "prack", "dir": "UE-A → UE-B", "time": "0.01 s"}, {"from": "prack", "to": "ring", "dir": "UE-B → UE-A", "time": "0.39 s"}, {"from": "ring", "to": "ok", "dir": "UE-B → UE-A", "time": "1.84 s"}, {"from": "ok", "to": "ack", "dir": "UE-A → UE-B", "time": "0.02 s"}], "steps": [{"k": "msg", "f": 0, "to": 1, "l": "SIP INVITE (SDP O1)", "tm": "0.00 s", "t": 0, "mark": "invite"}, {"k": "msg", "f": 1, "to": 0, "l": "100 Trying", "tm": "0.20 s", "t": 200.0, "mark": "trying"}, {"k": "bearer", "f": 1, "to": 0, "l": "QCI 1 voice bearer (A)", "tm": "0.35 s", "t": 352.0, "cls": "good", "mark": "abear"}, {"k": "note", "side": "A", "cls": "good", "t": 353.0, "lines": ["A bearer right after INVITE"]}, {"k": "CORE"}, {"k": "note", "side": "mid", "cls": "warn", "t": 1670.0, "lines": ["UE-B idle. INVITE reaches UE-B at 1.84 s", "Page at 1.67 s, air time after the page 0.17 s"]}, {"k": "note", "side": "B", "cls": "warn", "t": 1671.0, "lines": ["UE-B idle → paged 1.67 s", "RRC request 1.67 s, setup 1.74 s"], "mark": "page"}, {"k": "msg", "f": 7, "to": 8, "l": "SIP INVITE (SDP O1)", "tm": "B 1.84 s", "t": 1840.0, "mark": "binvite"}, {"k": "msg", "f": 8, "to": 7, "l": "183 In Progress (SDP A1)", "tm": "B 1.90 s", "t": 1900.0, "mark": "b183"}, {"k": "bearer", "f": 7, "to": 8, "l": "QCI 1 voice bearer (B)", "tm": "2.03 s", "t": 2034.0, "mark": "bbear"}, {"k": "e2e", "f": 7, "to": 0, "l": "183 In Progress (SDP A1)", "tm": "B 1.90 s → A 2.33 s", "t": 2333.0, "mark": "a183"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP PRACK", "tm": "A 2.34 s → B 2.61 s", "t": 2344.0, "mark": "prack"}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (PRACK)", "tm": "B 2.63 s → A 2.73 s", "t": 2731.5}, {"k": "note", "side": "B", "t": 2731.8, "lines": ["SDP ok, start to ring"]}, {"k": "e2e", "f": 8, "to": 0, "l": "180 Ringing", "tm": "B 2.63 s → A 2.73 s  ·  CST 2.73 s", "t": 2732.0, "cls": "cst", "mark": "ring"}, {"k": "note", "side": "B", "t": 4570.8, "lines": ["call accepted"]}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (INVITE)", "tm": "B 4.32 s → A 4.57 s", "t": 4571.0, "mark": "ok"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP ACK", "tm": "A 4.59 s → B 4.68 s", "t": 4590.0, "mark": "ack"}, {"k": "rtp", "t": 4831.0}, {"k": "brk", "l": "talk time ≈ 86 s"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP BYE", "tm": "A 90.79 s → B 91.08 s", "t": 90788.0}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (BYE)", "tm": "B 91.11 s → A 91.21 s", "t": 91108.0}]}], "conn": [{"id": "robi", "name": "Robi", "color": "#c0392b", "cst": 3054.0, "meta": "UE-B connected · good coverage. Log 10.txt · RSRP UE-A −84 to −80 dBm, UE-B −81 to −77 dBm · CST 3.05 s", "segs": [{"from": "invite", "to": "trying", "dir": "UE-A → P-CSCF", "time": "0.08 s"}, {"from": "trying", "to": "binvite", "dir": "P-CSCF → UE-B", "time": "1.95 s", "cls": "bad"}, {"from": "binvite", "to": "b183", "dir": "UE-B → IMS", "time": "0.05 s"}, {"from": "b183", "to": "abear", "dir": "PCRF → UE-A", "time": "0.49 s", "cls": "bad"}, {"from": "abear", "to": "a183", "dir": "IMS → UE-A", "time": "0.22 s"}, {"from": "a183", "to": "bbear", "dir": "PCRF → UE-B", "time": "0.02 s"}, {"from": "bbear", "to": "prack", "dir": "UE-A → UE-B", "time": "0.00 s"}, {"from": "prack", "to": "ring", "dir": "UE-B → UE-A", "time": "0.24 s"}, {"from": "ring", "to": "ok", "dir": "UE-B → UE-A", "time": "1.81 s"}, {"from": "ok", "to": "ack", "dir": "UE-A → UE-B", "time": "0.03 s"}], "steps": [{"k": "msg", "f": 0, "to": 1, "l": "SIP INVITE (SDP O1)", "tm": "0.00 s", "t": 0, "mark": "invite"}, {"k": "msg", "f": 1, "to": 0, "l": "100 Trying", "tm": "0.08 s", "t": 76.0, "mark": "trying"}, {"k": "CORE"}, {"k": "note", "side": "B", "cls": "bad", "t": 2020.0, "lines": ["UE-B already connected", "no paging. INVITE at 2.02 s"]}, {"k": "msg", "f": 7, "to": 8, "l": "SIP INVITE (SDP O1)", "tm": "B 2.02 s", "t": 2021.0, "cls": "bad", "mark": "binvite"}, {"k": "msg", "f": 8, "to": 7, "l": "183 In Progress (SDP A1)", "tm": "B 2.07 s", "t": 2073.0, "mark": "b183"}, {"k": "bearer", "f": 1, "to": 0, "l": "QCI 1 voice bearer (A)", "tm": "2.57 s", "t": 2568.0, "cls": "bad", "mark": "abear"}, {"k": "note", "side": "A", "cls": "bad", "t": 2569.0, "lines": ["A bearer starts after B's 183"]}, {"k": "e2e", "f": 7, "to": 0, "l": "183 In Progress (SDP A1)", "tm": "B 2.07 s → A 2.79 s", "t": 2790.0, "cls": "bad", "mark": "a183"}, {"k": "bearer", "f": 7, "to": 8, "l": "QCI 1 voice bearer (B)", "tm": "2.81 s", "t": 2811.0, "mark": "bbear"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP PRACK", "tm": "A 2.81 s → B 2.92 s", "t": 2811.0, "mark": "prack"}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (PRACK)", "tm": "B 2.94 s → A 3.04 s", "t": 3044.5}, {"k": "note", "side": "B", "t": 3053.8, "lines": ["SDP ok, start to ring"]}, {"k": "e2e", "f": 8, "to": 0, "l": "180 Ringing", "tm": "B 2.95 s → A 3.05 s  ·  CST 3.05 s", "t": 3054.0, "cls": "cst", "mark": "ring"}, {"k": "note", "side": "B", "t": 4864.8, "lines": ["call accepted"]}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (INVITE)", "tm": "B 4.58 s → A 4.87 s", "t": 4865.0, "mark": "ok"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP ACK", "tm": "A 4.89 s → B 4.98 s", "t": 4892.0, "mark": "ack"}, {"k": "rtp", "t": 5130.0}, {"k": "brk", "l": "talk time ≈ 86 s"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP BYE", "tm": "A 90.83 s → B 91.11 s", "t": 90834.0}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (BYE)", "tm": "B 91.14 s → A 91.34 s", "t": 91136.0}]}, {"id": "bl", "name": "Banglalink", "color": "#1e8449", "cst": 761.0, "meta": "UE-B connected · good coverage. Log 9.txt · RSRP UE-A −81 dBm (3.9 s before), UE-B −81 dBm · CST 0.76 s", "segs": [{"from": "invite", "to": "trying", "dir": "UE-A → P-CSCF", "time": "0.05 s"}, {"from": "trying", "to": "abear", "dir": "P-CSCF → PCRF", "time": "0.03 s", "cls": "good"}, {"from": "abear", "to": "binvite", "dir": "PCRF → UE-B", "time": "0.26 s"}, {"from": "binvite", "to": "b183", "dir": "UE-B → IMS", "time": "0.04 s"}, {"from": "b183", "to": "bbear", "dir": "PCRF → UE-B", "time": "0.08 s"}, {"from": "bbear", "to": "a183", "dir": "IMS → UE-A", "time": "0.01 s"}, {"from": "a183", "to": "prack", "dir": "UE-A → UE-B", "time": "0.01 s"}, {"from": "prack", "to": "ring", "dir": "UE-B → UE-A", "time": "0.28 s"}, {"from": "ring", "to": "ok", "dir": "UE-B → UE-A", "time": "1.69 s"}, {"from": "ok", "to": "ack", "dir": "UE-A → UE-B", "time": "0.02 s"}], "steps": [{"k": "msg", "f": 0, "to": 1, "l": "SIP INVITE (SDP O1)", "tm": "0.00 s", "t": 0, "mark": "invite"}, {"k": "msg", "f": 1, "to": 0, "l": "100 Trying", "tm": "0.05 s", "t": 46.0, "mark": "trying"}, {"k": "bearer", "f": 1, "to": 0, "l": "QCI 1 voice bearer (A)", "tm": "0.08 s", "t": 79.0, "cls": "good", "mark": "abear"}, {"k": "note", "side": "A", "cls": "good", "t": 80.0, "lines": ["A bearer right after INVITE"]}, {"k": "CORE"}, {"k": "note", "side": "B", "cls": "good", "t": 336.0, "lines": ["UE-B already connected", "no paging. INVITE at 0.34 s"]}, {"k": "msg", "f": 7, "to": 8, "l": "SIP INVITE (SDP O1)", "tm": "B 0.34 s", "t": 337.0, "mark": "binvite"}, {"k": "msg", "f": 8, "to": 7, "l": "183 In Progress (SDP A1)", "tm": "B 0.38 s", "t": 380.0, "mark": "b183"}, {"k": "bearer", "f": 7, "to": 8, "l": "QCI 1 voice bearer (B)", "tm": "0.46 s", "t": 457.0, "mark": "bbear"}, {"k": "e2e", "f": 7, "to": 0, "l": "183 In Progress (SDP A1)", "tm": "B 0.38 s → A 0.47 s", "t": 472.0, "mark": "a183"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP PRACK", "tm": "A 0.48 s → B 0.53 s", "t": 484.0, "mark": "prack"}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (PRACK)", "tm": "B 0.54 s → A 0.59 s", "t": 586.5}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP UPDATE (SDP O2)", "tm": "A 0.59 s → B 0.66 s", "t": 593.0}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (SDP A2 - UPDATE)", "tm": "B 0.68 s → A 0.73 s", "t": 727.5}, {"k": "note", "side": "B", "t": 760.8, "lines": ["SDP ok, start to ring"]}, {"k": "e2e", "f": 8, "to": 0, "l": "180 Ringing", "tm": "B 0.68 s → A 0.76 s  ·  CST 0.76 s", "t": 761.0, "cls": "cst", "mark": "ring"}, {"k": "note", "side": "B", "t": 2447.8, "lines": ["call accepted"]}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (INVITE)", "tm": "B 2.33 s → A 2.45 s", "t": 2448.0, "mark": "ok"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP ACK", "tm": "A 2.47 s → B 2.52 s", "t": 2466.0, "mark": "ack"}, {"k": "rtp", "t": 2670.0}, {"k": "note", "side": "mid", "t": 3066.0, "lines": ["No BYE for this call in the log"]}]}, {"id": "gp", "name": "Grameenphone", "color": "#1f4e9a", "cst": 1776.0, "meta": "UE-B connected · good coverage. Log 8.txt · RSRP UE-A −73 dBm, UE-B −75 to −74 dBm · CST 1.78 s", "segs": [{"from": "invite", "to": "trying", "dir": "UE-A → P-CSCF", "time": "0.08 s"}, {"from": "trying", "to": "abear", "dir": "P-CSCF → PCRF", "time": "0.22 s", "cls": "good"}, {"from": "abear", "to": "binvite", "dir": "PCRF → UE-B", "time": "0.61 s", "cls": "warn"}, {"from": "binvite", "to": "b183", "dir": "UE-B → IMS", "time": "0.09 s"}, {"from": "b183", "to": "bbear", "dir": "PCRF → UE-B", "time": "0.26 s"}, {"from": "bbear", "to": "a183", "dir": "IMS → UE-A", "time": "0.25 s"}, {"from": "a183", "to": "prack", "dir": "UE-A → UE-B", "time": "0.02 s"}, {"from": "prack", "to": "ring", "dir": "UE-B → UE-A", "time": "0.25 s"}, {"from": "ring", "to": "ok", "dir": "UE-B → UE-A", "time": "1.97 s"}, {"from": "ok", "to": "ack", "dir": "UE-A → UE-B", "time": "0.01 s"}], "steps": [{"k": "msg", "f": 0, "to": 1, "l": "SIP INVITE (SDP O1)", "tm": "0.00 s", "t": 0, "mark": "invite"}, {"k": "msg", "f": 1, "to": 0, "l": "100 Trying", "tm": "0.08 s", "t": 82.0, "mark": "trying"}, {"k": "bearer", "f": 1, "to": 0, "l": "QCI 1 voice bearer (A)", "tm": "0.30 s", "t": 300.0, "cls": "good", "mark": "abear"}, {"k": "note", "side": "A", "cls": "good", "t": 301.0, "lines": ["A bearer right after INVITE"]}, {"k": "CORE"}, {"k": "note", "side": "B", "cls": "good", "t": 909.0, "lines": ["UE-B already connected", "no paging. INVITE at 0.91 s"]}, {"k": "msg", "f": 7, "to": 8, "l": "SIP INVITE (SDP O1)", "tm": "B 0.91 s", "t": 910.0, "mark": "binvite"}, {"k": "msg", "f": 8, "to": 7, "l": "183 In Progress (SDP A1)", "tm": "B 1.00 s", "t": 996.0, "mark": "b183"}, {"k": "bearer", "f": 7, "to": 8, "l": "QCI 1 voice bearer (B)", "tm": "1.25 s", "t": 1253.0, "mark": "bbear"}, {"k": "e2e", "f": 7, "to": 0, "l": "183 In Progress (SDP A1)", "tm": "B 1.00 s → A 1.50 s", "t": 1505.0, "mark": "a183"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP PRACK", "tm": "A 1.52 s → B 1.64 s", "t": 1524.0, "mark": "prack"}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (PRACK)", "tm": "B 1.66 s → A 1.75 s", "t": 1746.5}, {"k": "note", "side": "B", "t": 1775.8, "lines": ["SDP ok, start to ring"]}, {"k": "e2e", "f": 8, "to": 0, "l": "180 Ringing", "tm": "B 1.67 s → A 1.78 s  ·  CST 1.78 s", "t": 1776.0, "cls": "cst", "mark": "ring"}, {"k": "note", "side": "B", "t": 3749.8, "lines": ["call accepted"]}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (INVITE)", "tm": "B 3.52 s → A 3.75 s", "t": 3750.0, "mark": "ok"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP ACK", "tm": "A 3.77 s → B 3.86 s", "t": 3765.0, "mark": "ack"}, {"k": "rtp", "t": 4014.0}, {"k": "brk", "l": "talk time ≈ 86 s"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP BYE", "tm": "A 90.20 s → B 90.47 s", "t": 90198.0}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (BYE)", "tm": "B 90.50 s → A 90.59 s", "t": 90501.0}]}]};
 
 const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const HALO = 'paint-order="stroke" stroke="#fff" stroke-width="3" stroke-linejoin="round"';
@@ -431,7 +193,7 @@ function render(op) {
     return h;
   };
 
-  for (const it of op.steps) {
+  for (const it of op.steps.flatMap(s => s.k === "CORE" ? CORE : [s])) {
     if (it.t != null && lastT != null && it.t <= op.cst && it.t - lastT > 250) {
       y += Math.min(150, (it.t - lastT - 250) * 0.075);
     }
@@ -540,13 +302,12 @@ const built = {
   idle: STAGES.idle.map(op => ({ op, ...render(op) })),
   conn: STAGES.conn.map(op => ({ op, ...render(op) }))
 };
-const charts = document.getElementById("charts");
-let stage = location.hash.slice(1) === "connected" ? "conn" : "idle";
+const boxes = { idle: document.getElementById("charts-idle"), conn: document.getElementById("charts-conn") };
 let view = "all";
 let zoom = null;
 
 function fitZoom() {
-  const avail = charts.clientWidth - 40;
+  const avail = document.documentElement.clientWidth - 80;
   const n = view === "all" ? 3 : 1;
   const z = (avail - (n - 1) * 16) / (n * W);
   return Math.max(0.45, Math.min(n === 1 ? 1.5 : 1.2, z));
@@ -554,23 +315,23 @@ function fitZoom() {
 
 function draw() {
   const z = zoom || fitZoom();
-  const set = built[stage];
-  const list = view === "all" ? set : set.filter(b => b.op.id === view);
-  charts.className = "charts" + (view === "all" ? "" : " single");
-  charts.innerHTML = list.map(b => `
-    <div class="op" data-id="${b.op.id}" style="width:${Math.round(b.w * z)}px">
-      <h2 style="color:${b.op.color}">${esc(b.op.name)}</h2>
-      <div class="meta">${esc(b.op.meta)}</div>
-      ${b.svg.replace("<svg ", `<svg width="${Math.round(b.w * z)}" height="${Math.round(b.h * z)}" `)}
-    </div>`).join("");
+  for (const key of ["idle", "conn"]) {
+    const list = view === "all" ? built[key] : built[key].filter(b => b.op.id === view);
+    const box = boxes[key];
+    box.className = "charts" + (view === "all" ? "" : " single");
+    box.innerHTML = list.map(b => `
+      <div class="op" data-id="${b.op.id}" style="width:${Math.round(b.w * z)}px">
+        <h2 style="color:${b.op.color}">${esc(b.op.name)}</h2>
+        <div class="meta">${esc(b.op.meta)}</div>
+        ${b.svg.replace("<svg ", `<svg width="${Math.round(b.w * z)}" height="${Math.round(b.h * z)}" `)}
+      </div>`).join("");
+  }
   document.querySelectorAll("[data-view]").forEach(btn => btn.classList.toggle("on", btn.dataset.view === view));
-  document.querySelectorAll("[data-stage]").forEach(btn => btn.classList.toggle("on", btn.dataset.stage === stage));
 }
 
 document.getElementById("bar").addEventListener("click", e => {
   const btn = e.target.closest("button");
   if (!btn) return;
-  if (btn.dataset.stage) { stage = btn.dataset.stage; view = "all"; zoom = null; history.replaceState(null, "", stage === "conn" ? "#connected" : "#idle"); }
   if (btn.dataset.view) { view = btn.dataset.view; zoom = null; }
   const cur = zoom || fitZoom();
   if (btn.dataset.zoom === "fit") zoom = null;
@@ -579,13 +340,15 @@ document.getElementById("bar").addEventListener("click", e => {
   draw();
 });
 
-charts.addEventListener("click", e => {
-  const card = e.target.closest(".op");
-  if (!card || view !== "all") return;
-  view = card.dataset.id;
-  zoom = null;
-  draw();
-});
+for (const box of Object.values(boxes)) {
+  box.addEventListener("click", e => {
+    const card = e.target.closest(".op");
+    if (!card || view !== "all") return;
+    view = card.dataset.id;
+    zoom = null;
+    draw();
+  });
+}
 
 window.addEventListener("resize", () => { if (!zoom) draw(); });
 draw();
