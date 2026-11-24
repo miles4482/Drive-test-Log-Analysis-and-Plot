@@ -138,21 +138,25 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
-## Download Excel report (v1.96)
+## Download Excel report (v2.06)
 
-**v2.05 (current — Excel / PPT / Web same version):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.05.xlsx
+**v2.06 (current — Excel / PPT / Web same version):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.06.xlsx
 
-Summary PPT **v2.05:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.05.pptx
+Summary PPT **v2.06:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.06.pptx
 
-Web **v2.05:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.05.zip
+Web **v2.06:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.06.zip
 
-Excel v2.05 restores openable Cover Active charts (v2.03/v2.04 PNG embeds were corrupt). PPT still shows band serving and legend-coloured hists. Excel / PPT / Web share version **v2.05**.
+Excel v2.06 opens in Excel. v1.98 through v2.05 were not well-formed: `xl/workbook.xml` used `r:id` on the EP Details sheet with no `xmlns:r` in scope, and the Bad Spot RSRP_Active drawing used `a:` on its 122 circles with no `xmlns:a` in scope. `publish_report_v206.py` keeps the v1.94 package rules (namespaces declared once on the workbook and drawing roots, v1.94 `_rels/.rels`, `docProps/app.xml` and theme) and carries the v2.05 Active Session-ID content unchanged: Cover Active first with native legend-coloured histograms, Bad Spot RSRP_Active with 97 Active and 26 Scanner bad spots, EP Details. The Cover Active Mode block now lists the Active dataset and KPIs; v1.98–v2.05 had the Idle numbers there. Check any build with `python3 validate_xlsx_package.py output/Bogura_DriveTest_Report_v2.06.xlsx`. Excel / PPT / Web share version **v2.06**.
+
+**v2.05 (corrupt Excel — do not use):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.05.xlsx
 
 **v2.04 (corrupt Excel — do not use):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.04.xlsx
 
 **v2.03 (corrupt Excel — do not use):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.03.xlsx
 
-**v1.98:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.98.xlsx
+**v1.98 (corrupt Excel — do not use):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.98.xlsx
+
+Summary PPT **v2.05:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.05.pptx
 
 Summary PPT **v2.02:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.02.pptx
 
@@ -168,7 +172,7 @@ Active bad-spot maps: every red/blank run inside the area gets a circle and a so
 
 ## Download summary presentation (v1.96)
 
-**v1.96 summary (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.96.pptx
+**v1.96 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.96.pptx
 
 Footer reads Excel v1.96 and Web v1.89. The web map stays v1.89.
 
@@ -232,7 +236,9 @@ The Feeder swap sheet adds BOSDR02. Its three sectors are a rotation: A is heard
 
 **v1.89 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.89.pptx
 
-**v2.05 web (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.05.zip
+**v2.06 web (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.06.zip
+
+**v2.05 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.05.zip
 
 **v2.04 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.04.zip
 
