@@ -140,11 +140,17 @@ GitHub shows `index.html` as a file, not as a running map. Download the `web` fo
 
 ## Download Excel report (v1.96)
 
-**v1.98 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.98.xlsx
+**v2.03 (current — Excel / PPT / Web same version):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.03.xlsx
 
-Summary PPT **v2.02 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.02.pptx
+Summary PPT **v2.03:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.03.pptx
 
-Executive Summary Active histograms use the same map-legend colours as the Excel Cover (green / yellow / red for RSRP and RSRQ; SINR blues), with a legend on each chart. PPT rebuild regenerates those PNGs so a solid navy fill cannot replace them.
+Web **v2.03:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.03.zip
+
+Cover Active histograms are the same map-legend PNGs as the PPT Executive Summary. Excel / PPT / Web share version **v2.03**.
+
+**v1.98:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.98.xlsx
+
+Summary PPT **v2.02:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.02.pptx
 
 Summary PPT **v2.01:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.01.pptx
 
@@ -222,7 +228,9 @@ The Feeder swap sheet adds BOSDR02. Its three sectors are a rotation: A is heard
 
 **v1.89 summary:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v1.89.pptx
 
-**v1.90 web (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.90.zip
+**v2.03 web (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.03.zip
+
+**v1.90 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.90.zip
 
 **v1.89 web:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v1.89.zip
 

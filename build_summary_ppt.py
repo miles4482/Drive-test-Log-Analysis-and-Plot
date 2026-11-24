@@ -26,13 +26,13 @@ from pptx.util import Emu, Inches, Pt
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
-REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.98.xlsx"
+REPORT = OUTPUT / "Bogura_DriveTest_Report_v2.03.xlsx"
 IDLE_NOTES = OUTPUT / "idle_vs_active_notes.json"
 PLOTS = OUTPUT / "plots"
 DESCRIPTIONS = OUTPUT / "bad_spot_descriptions.json"
-SUMMARY_VERSION = "2.02"
+SUMMARY_VERSION = "2.03"
 DEST = OUTPUT / f"Bogura_DriveTest_Summary_v{SUMMARY_VERSION}.pptx"
-EXCEL_VERSION = "1.98"
+EXCEL_VERSION = "2.03"
 EXEC_HIST_DIR = PLOTS / "ppt_exec_v198"
 EXEC_HIST = {
     "RSRP": EXEC_HIST_DIR / "active_rsrp_hist.png",
@@ -326,7 +326,7 @@ def _text(slide, left, top, width, height, text: str, size: int, color: RGBColor
 def _footer(slide, page: int, pages: int) -> None:
     _text(
         slide, Inches(0.4), Inches(7.18), Inches(10), Inches(0.24),
-        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v{EXCEL_VERSION}  ·  Web v1.90",
+        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v{EXCEL_VERSION}  ·  Web v{SUMMARY_VERSION}",
         11, MUTED,
     )
     _text(
@@ -1018,7 +1018,7 @@ def _annex_workbook(prs: Presentation, page: int, pages: int, groups: list[dict]
     rows = [
         ("Excel v1.97 / PPT v2.00", "One Bad Spot sheet: Active Mode first, Scanner second. PPT Executive Summary: Active histograms + band/RSRP tables + Active bad-spot count and solution notes only."),
         ("This deck", deck),
-        ("Web v1.90", "Feeder draws the idle feeder swaps. Click a site for the sectors. A three-sector rotation uses red, cyan and violet. A two-sector swap stays red and cyan, with the third arm yellow. Site names stay white with a dark edge. Active coverage layers refresh with --active-only; Idle stays as published."),
+        ("Web v2.03", "Feeder draws the idle feeder swaps. Click a site for the sectors. A three-sector rotation uses red, cyan and violet. A two-sector swap stays red and cyan, with the third arm yellow. Site names stay white with a dark edge. Active coverage layers refresh with --active-only; Idle stays as published."),
         ("RSRQ and SINR", "The coverage maps are in this deck. The workbook no longer has separate RSRQ or SINR bad-spot sheets. Poor RSRQ is at or below −20 dB. Poor SINR is at or below 0 dB."),
     ]
     top = 0.95
