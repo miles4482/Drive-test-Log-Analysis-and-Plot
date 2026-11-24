@@ -43,7 +43,7 @@ Current file is **v8**. Each publish is a new version. Previous workbooks stay i
 
 ## VoLTE call flow chart
 
-Current file is **v7**. Each publish is a new HTML file. Previous charts stay in the repo. `output/L3_VOLTE_CALL_FLOW.html` is a copy of the current version.
+Current file is **v8**. Each publish is a new HTML file. Previous charts stay in the repo. `output/L3_VOLTE_CALL_FLOW.html` is a copy of the current version.
 
 | Version | File | Contents |
 | --- | --- | --- |
@@ -54,6 +54,7 @@ Current file is **v7**. Each publish is a new HTML file. Previous charts stay in
 | v5 | `output/L3_VOLTE_CALL_FLOW_v5.html` | Full ladder, UE-A to UE-B. Good-RSRP sample (about −75 to −85 dBm). |
 | v6 | `output/L3_VOLTE_CALL_FLOW_v6.html` | Same ladder. Strongest call of each operator. Nothing in the drive is above −50 dBm. |
 | v7 | `output/L3_VOLTE_CALL_FLOW_v7.html` | v6, with a brace on the IMS core and the time that block takes. |
+| v8 | `output/L3_VOLTE_CALL_FLOW_v8.html` | v7, with a brace on every step and the direction of that step. |
 
 ```bash
 python3 -c "import py7zr; py7zr.SevenZipFile('Layer 3_Active Mode_Data_Robi_v1.7z').extractall('extracted/l3')"
