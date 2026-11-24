@@ -404,14 +404,13 @@ def publish(src: Path = SRC, dest: Path = DEST) -> Path:
         shutil.copy2(src, dest)
     _sync(dest, dest)
 
-    # 1) Redraw serial maps (multi-circle) into both sheets while Idle still exists.
-    path = ger.refresh_bad_spot_pies(src=dest)
-    print(f"serial maps refreshed -> {path}", flush=True)
-    _sync(path, dest)
+    # 1) Serial maps already come from generate_excel_report (97 Active + 26 Idle
+    # circles embedded). Skip refresh_bad_spot_pies — re-drawing 123 satellite
+    # zooms takes hours and can hang on tile fetches.
 
-    # 2) Active advice with coloured Parameter change + Solutions column.
+    # 2) Advice on both sheets (compact layout fits the tighter serial-map stride).
     advice_path = ger.write_bad_spot_advice(
-        src=dest, sheets=("Bad Spot RSRP_Active",),
+        src=dest, sheets=("Bad Spot RSRP_Active", "Bad Spot RSRP"),
     )
     print(f"advice text refreshed -> {advice_path}", flush=True)
     _sync(advice_path, dest)

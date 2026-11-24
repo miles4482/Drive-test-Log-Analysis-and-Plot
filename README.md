@@ -140,7 +140,15 @@ GitHub shows `index.html` as a file, not as a running map. Download the `web` fo
 
 ## Download Excel report (v1.96)
 
-**v1.96 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.96.xlsx
+**v1.98 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.98.xlsx
+
+Summary PPT **v2.01:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.01.pptx
+
+Active source: `Data_active_session ID_Bogra.xlsb` (Raw Session Id). Active RSRP bad spots: **97**.
+
+**v1.97:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.97.xlsx
+
+**v1.96:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.96.xlsx
 
 Active bad-spot maps: every red/blank run inside the area gets a circle and a solution; proposed azimuth arms are dotted with a minimum 45° sector gap. Idle-area maps under each Active spot draw the same yellow active serving lines (plus blue idle serving) so gaps are easy to compare. Built surgically from the openable v1.95 package. The web map stays v1.89.
 

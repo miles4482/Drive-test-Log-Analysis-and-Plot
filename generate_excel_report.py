@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 import hashlib
 import math
+import os
 import re
 import shutil
 import xml.etree.ElementTree as ET
@@ -2291,6 +2292,9 @@ def _render_mode(df: pd.DataFrame, tag: str, extent, mode_label: str | None) -> 
     strongest RSRP, then the strongest band in each scanner sweep is kept.
     Active auto mode keeps one Cell Id and one band per latitude and longitude,
     the strongest RSRP, and RSRQ and SINR stay on that row.
+
+    Set REUSE_IDLE_PLOTS=1 to keep existing Idle PNGs (Idle log unchanged) and only
+    recompute spot tables — used when Active is retargeted to a new archive.
     """
     suffix = f"_{tag}" if tag else ""
     if tag == "active":
@@ -2299,6 +2303,38 @@ def _render_mode(df: pd.DataFrame, tag: str, extent, mode_label: str | None) -> 
     else:
         base = strongest_fix(df)
         map_df = best_server(base)
+
+    reuse_idle = (not tag) and os.environ.get("REUSE_IDLE_PLOTS") == "1"
+    if reuse_idle:
+        rsrp_spots = find_bad_spots(map_df, "RSRP")
+        rsrq_spots = find_bad_spots(map_df, "RSRQ")
+        sinr_spots = find_bad_spots(map_df, "SINR")
+        print(
+            f"Reusing Idle plot PNGs; RSRP {len(rsrp_spots)} / "
+            f"RSRQ {len(rsrq_spots)} / SINR {len(sinr_spots)} poor runs",
+            flush=True,
+        )
+        rsrp_band = {layer: PLOTS_DIR / f"excel_route_rsrp_{layer}.png" for layer in REPORT_LAYERS}
+        rsrq_band = {layer: PLOTS_DIR / f"excel_route_rsrq_{layer}.png" for layer in REPORT_LAYERS}
+        sinr_band = {layer: PLOTS_DIR / f"excel_route_sinr_{layer}.png" for layer in REPORT_LAYERS}
+        rsrp_zooms = sorted(PLOTS_DIR.glob("excel_bad_spots_rsrp_spot_[0-9][0-9].png"))
+        if len(rsrp_zooms) < len(rsrp_spots):
+            # Fall back to drawing Idle RSRP serials when the cache is incomplete.
+            rsrp_zooms = plot_bad_spot_serial_maps(
+                map_df, rsrp_spots, PLOTS_DIR, "excel_bad_spots_rsrp_spot",
+                "RSRP", rsrp_map_class(map_df["RSRP"]), MAP_RSRP_LABELS, MAP_RSRP_COLORS,
+                basemap_style="satellite", route_casing=True, mode="Idle",
+            )
+        return {
+            "map_df": map_df,
+            "rsrp_band": rsrp_band, "rsrq_band": rsrq_band, "sinr_band": sinr_band,
+            "rsrp_spots": rsrp_spots, "rsrq_spots": rsrq_spots, "sinr_spots": sinr_spots,
+            "rsrp_bad": PLOTS_DIR / "excel_bad_spots_rsrp.png",
+            "rsrq_bad": PLOTS_DIR / "excel_bad_spots_rsrq.png",
+            "sinr_bad": PLOTS_DIR / "excel_bad_spots_sinr.png",
+            "rsrp_zooms": rsrp_zooms, "rsrq_zooms": [], "sinr_zooms": [],
+        }
+
     plot_rsrp_coverage_map(map_df, PLOTS_DIR / f"excel_route_rsrp{suffix}.png", extent=extent, mode_label=mode_label)
     plot_rsrq_coverage_map(map_df, PLOTS_DIR / f"excel_route_rsrq{suffix}.png", extent=extent, mode_label=mode_label)
     plot_sinr_coverage_map(map_df, PLOTS_DIR / f"excel_route_sinr{suffix}.png", extent=extent, mode_label=mode_label)
@@ -2321,9 +2357,21 @@ def _render_mode(df: pd.DataFrame, tag: str, extent, mode_label: str | None) -> 
             part, PLOTS_DIR / f"excel_route_sinr_{layer}{suffix}.png",
             layer=layer, extent=extent, mode_label=mode_label,
         )
+    # RSRP spots drive Bad Spot sheets. RSRQ/SINR spot enumeration on the Active
+    # strongest-location track is extremely expensive (tens of thousands of poor
+    # bins); KPI sheets only need the coloured route, so skip those spot lists.
     rsrp_spots = find_bad_spots(map_df, "RSRP")
-    rsrq_spots = find_bad_spots(map_df, "RSRQ")
-    sinr_spots = find_bad_spots(map_df, "SINR")
+    if tag == "active":
+        rsrq_spots = pd.DataFrame()
+        sinr_spots = pd.DataFrame()
+        print(
+            f"RSRP active: {len(rsrp_spots)} poor runs; "
+            "RSRQ/SINR spot lists skipped (KPI route maps only)",
+            flush=True,
+        )
+    else:
+        rsrq_spots = find_bad_spots(map_df, "RSRQ")
+        sinr_spots = find_bad_spots(map_df, "SINR")
     title_bit = f" — {mode_label}" if mode_label else ""
     bad_maps = {}
     zoom_maps = {}
@@ -2334,9 +2382,11 @@ def _render_mode(df: pd.DataFrame, tag: str, extent, mode_label: str | None) -> 
     ):
         key = kpi.lower()
         spots = {"RSRP": rsrp_spots, "RSRQ": rsrq_spots, "SINR": sinr_spots}[kpi]
-        total = int(spots.attrs.get("total_consecutive", len(spots))) if spots is not None else 0
-        discrete = int(spots.attrs.get("total_discrete", 0)) if spots is not None else 0
-        print(f"{kpi} {tag or 'idle'}: {total} poor runs, {discrete} discrete", flush=True)
+        total = int(spots.attrs.get("total_consecutive", len(spots))) if spots is not None and len(spots) else 0
+        discrete = int(spots.attrs.get("total_discrete", 0)) if spots is not None and len(spots) else 0
+        if not (tag == "active" and kpi != "RSRP"):
+            print(f"{kpi} {tag or 'idle'}: {total} poor runs, {discrete} discrete", flush=True)
+
         extra = {}
         mode_name = "Active" if tag == "active" else "Idle"
         if kpi != "SINR":
@@ -2346,13 +2396,19 @@ def _render_mode(df: pd.DataFrame, tag: str, extent, mode_label: str | None) -> 
             extent=extent, title=f"Combined view — {kpi}{title_bit}", shapes=False, outlines=False,
             **extra,
         )
-        zoom_maps[kpi] = plot_bad_spot_serial_maps(
-            map_df, spots, PLOTS_DIR, f"excel_bad_spots_{key}_spot{suffix}",
-            kpi, classify(map_df[kpi]), labels, colors,
-            basemap_style="satellite",
-            route_casing=True,
-            mode=mode_name,
-        )
+        # Only RSRP bad-spot sheets ship serial maps. RSRQ/SINR keep the combined
+        # overview on the KPI sheets; skipping their zooms saves hours on rebuild.
+        if kpi == "RSRP":
+            zoom_maps[kpi] = plot_bad_spot_serial_maps(
+                map_df, spots, PLOTS_DIR, f"excel_bad_spots_{key}_spot{suffix}",
+                kpi, classify(map_df[kpi]), labels, colors,
+                basemap_style="satellite",
+                route_casing=True,
+                mode=mode_name,
+            )
+        else:
+            zoom_maps[kpi] = []
+
     rsrp_bad, rsrq_bad, sinr_bad = bad_maps["RSRP"], bad_maps["RSRQ"], bad_maps["SINR"]
     rsrp_zooms, rsrq_zooms, sinr_zooms = zoom_maps["RSRP"], zoom_maps["RSRQ"], zoom_maps["SINR"]
     return {
@@ -4595,10 +4651,12 @@ def _advice_sheet_rows(header: int, plan: dict) -> tuple[dict[int, str], list[st
         ("Root Cause Analysis", sections.get("rca") or plan.get("finding") or ""),
         ("Suggestions", sections.get("suggestions") or plan.get("final") or ""),
     )
-    spans = (8, 5, 5, 6)
+    # Compact spans so the block fits when serial maps sit ~31–40 rows apart
+    # (fresh Active Session-ID rebuild packs tighter than the old 41-row stride).
+    spans = (5, 3, 3, 4)
     changes = plan.get("changes") or []
-    # Style indices from _add_advice_styles: 38 identity, 39 Existing, 40 New Plan, 41 Solutions.
-    style_id, style_exist, style_new, style_sol = 38, 39, 40, 41
+    # Style indices from _add_advice_styles: identity / Existing / New Plan / Solutions.
+    style_id, style_exist, style_new, style_sol = _ADVICE_COLOR_STYLES
     plan_solution = _SOLUTION_NAME.get(str(plan.get("kind") or ""), str(plan.get("badge") or plan.get("kind") or ""))
 
     def cell(ref: str, style: int, text: str | None = None) -> str:
@@ -4627,8 +4685,8 @@ def _advice_sheet_rows(header: int, plan: dict) -> tuple[dict[int, str], list[st
         merges.append(f"I{row}:I{row + span}")
         merges.append(f"J{row}:P{row + span}")
         row += span + 1
-    # The next bad-spot title is 41 rows down. The table stays in the gap.
-    table_at = header + 32
+    # Parameter table sits after the description; keep clear of the next title.
+    table_at = header + 22
     rows[table_at] = styled_row(table_at, [
         cell(f"I{table_at}", style_id, "Parameter change"),
         cell(f"J{table_at}", style_id),
@@ -4657,7 +4715,7 @@ def _advice_sheet_rows(header: int, plan: dict) -> tuple[dict[int, str], list[st
         cell(f"{get_column_letter(9 + index)}{head}", style, text)
         for index, (text, style) in enumerate(labels)
     ])
-    shown = changes[:7]
+    shown = changes[:5]
     if not shown:
         note = head + 1
         rows[note] = styled_row(note, [
@@ -4702,8 +4760,8 @@ def _sheet_number(value) -> str:
 
 def _strip_advice_rows(xml: str, headers: list[tuple[int, int]]) -> str:
     """Remove a previous suggestion block so the new table can take its rows."""
-    # Through the parameter table, and short of the next bad-spot title.
-    drop = {row for header, _number in headers for row in range(header + 2, header + 41)}
+    # Through the compact parameter table, and short of the next bad-spot title.
+    drop = {row for header, _number in headers for row in range(header + 2, header + 31)}
 
     def keep_row(match: re.Match) -> str:
         number = int(re.search(r'\br="(\d+)"', match.group(0)).group(1))
@@ -4746,47 +4804,19 @@ def _insert_sheet_rows(xml: str, rows: dict[int, str], merges: list[str]) -> str
     return xml
 
 
+# Style indices for Parameter change colour groups (updated by _add_advice_styles).
+_ADVICE_COLOR_STYLES = (38, 39, 40, 41)
+
+
 def _add_advice_styles(styles: str) -> str:
-    if "<cellXfs count=\"42\">" in styles:
-        return styles
-    if "<cellXfs count=\"38\">" not in styles:
-        if "<cellXfs count=\"35\">" not in styles:
-            if "<fonts count=\"8\">" not in styles or "<cellXfs count=\"32\">" not in styles:
-                raise SystemExit("Workbook styles are not the expected set; refusing to append advice styles")
-            styles = styles.replace("<fonts count=\"8\">", "<fonts count=\"9\">", 1)
-            styles = styles.replace(
-                "</fonts>",
-                '<font><name val="Calibri"/><b val="1"/><color rgb="001B4F72"/><sz val="11"/></font></fonts>',
-                1,
-            )
-            styles = styles.replace("<cellXfs count=\"32\">", "<cellXfs count=\"35\">", 1)
-            styles = styles.replace(
-                "</cellXfs>",
-                '<xf numFmtId="0" fontId="8" fillId="5" borderId="0" applyAlignment="1" xfId="0">'
-                '<alignment horizontal="center" vertical="center"/></xf>'
-                '<xf numFmtId="0" fontId="8" fillId="0" borderId="0" applyAlignment="1" xfId="0">'
-                '<alignment horizontal="left" vertical="top" wrapText="1"/></xf>'
-                '<xf numFmtId="0" fontId="6" fillId="0" borderId="0" applyAlignment="1" xfId="0">'
-                '<alignment horizontal="left" vertical="top" wrapText="1"/></xf>'
-                "</cellXfs>",
-                1,
-            )
-        styles = styles.replace("<cellXfs count=\"35\">", "<cellXfs count=\"38\">", 1)
-        added = (
-            '<xf numFmtId="0" fontId="8" fillId="5" borderId="1" applyAlignment="1" xfId="0">'
-            '<alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
-            '<xf numFmtId="0" fontId="8" fillId="0" borderId="1" applyAlignment="1" xfId="0">'
-            '<alignment horizontal="center" vertical="top" wrapText="1"/></xf>'
-            '<xf numFmtId="0" fontId="6" fillId="0" borderId="1" applyAlignment="1" xfId="0">'
-            '<alignment horizontal="left" vertical="top" wrapText="1"/></xf>'
-        )
-        styles = styles.replace("</cellXfs>", added + "</cellXfs>", 1)
-    # Colour groups for Parameter change / Existing / New Plan / Solutions.
+    """Ensure Parameter-change colour fills/xfs exist; works on fresh and legacy books."""
+    global _ADVICE_COLOR_STYLES
+
     fill_match = re.search(r'<fills count="(\d+)">', styles)
     if fill_match is None:
         raise SystemExit("Workbook fills were not found")
     fill_count = int(fill_match.group(1))
-    if fill_count < 10:
+    if "FFD6EAF8" not in styles:
         styles = styles.replace(f'<fills count="{fill_count}">', f'<fills count="{fill_count + 4}">', 1)
         styles = styles.replace(
             "</fills>",
@@ -4799,18 +4829,32 @@ def _add_advice_styles(styles: str) -> str:
         )
         fill_count += 4
     id_fill, exist_fill, new_fill, sol_fill = fill_count - 4, fill_count - 3, fill_count - 2, fill_count - 1
-    styles = styles.replace("<cellXfs count=\"38\">", "<cellXfs count=\"42\">", 1)
+
+    xf_match = re.search(r'<cellXfs count="(\d+)">', styles)
+    if xf_match is None:
+        raise SystemExit("Workbook cellXfs were not found")
+    xf_count = int(xf_match.group(1))
+
+    # Already have the four coloured xfs appended on a prior pass.
+    if f'fillId="{id_fill}"' in styles and f'fillId="{sol_fill}"' in styles and xf_count >= 42:
+        _ADVICE_COLOR_STYLES = (xf_count - 4, xf_count - 3, xf_count - 2, xf_count - 1)
+        return styles
+
+    font_id = "8" if re.search(r'<fonts count="(\d+)">', styles) and int(re.search(r'<fonts count="(\d+)">', styles).group(1)) > 8 else "0"
     colored = (
-        f'<xf numFmtId="0" fontId="8" fillId="{id_fill}" borderId="1" applyFill="1" applyAlignment="1" xfId="0">'
+        f'<xf numFmtId="0" fontId="{font_id}" fillId="{id_fill}" borderId="1" applyFill="1" applyAlignment="1" xfId="0">'
         '<alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
-        f'<xf numFmtId="0" fontId="8" fillId="{exist_fill}" borderId="1" applyFill="1" applyAlignment="1" xfId="0">'
+        f'<xf numFmtId="0" fontId="{font_id}" fillId="{exist_fill}" borderId="1" applyFill="1" applyAlignment="1" xfId="0">'
         '<alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
-        f'<xf numFmtId="0" fontId="8" fillId="{new_fill}" borderId="1" applyFill="1" applyAlignment="1" xfId="0">'
+        f'<xf numFmtId="0" fontId="{font_id}" fillId="{new_fill}" borderId="1" applyFill="1" applyAlignment="1" xfId="0">'
         '<alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
-        f'<xf numFmtId="0" fontId="8" fillId="{sol_fill}" borderId="1" applyFill="1" applyAlignment="1" xfId="0">'
+        f'<xf numFmtId="0" fontId="{font_id}" fillId="{sol_fill}" borderId="1" applyFill="1" applyAlignment="1" xfId="0">'
         '<alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
     )
-    return styles.replace("</cellXfs>", colored + "</cellXfs>", 1)
+    styles = styles.replace(f'<cellXfs count="{xf_count}">', f'<cellXfs count="{xf_count + 4}">', 1)
+    styles = styles.replace("</cellXfs>", colored + "</cellXfs>", 1)
+    _ADVICE_COLOR_STYLES = (xf_count, xf_count + 1, xf_count + 2, xf_count + 3)
+    return styles
 
 
 def _inline_cell(ref: str, style: int, text: str) -> str:
@@ -5022,7 +5066,7 @@ def _drop_workbook_sheets(parts: dict[str, bytes], sheet_names: tuple[str, ...])
     worksheets = []
     for name in sheet_names:
         match = re.search(
-            rf'<sheet name="{re.escape(name)}" sheetId="\d+" state="[^"]+" r:id="([^"]+)" />',
+            rf'<sheet\b[^>]*\bname="{re.escape(name)}"[^>]*\br:id="([^"]+)"[^>]*/>',
             wb_xml,
         )
         if match is None:
@@ -5383,12 +5427,14 @@ def _ep_sheet_xml(actions: list[dict]) -> bytes:
 def _ensure_ep_sheet(parts: dict[str, bytes]) -> None:
     workbook = parts["xl/workbook.xml"].decode("utf-8")
     if 'name="EP Details"' not in workbook:
-        workbook = workbook.replace(
-            '<sheet name="_ChartData"',
-            f'<sheet name="EP Details" sheetId="15" state="visible" r:id="{_EP_RID}" />'
-            '<sheet name="_ChartData"',
-            1,
+        # Fresh openpyxl sheets carry xmlns:r on the tag; match on name only.
+        chart = re.search(r'<sheet\b[^>]*\bname="_ChartData"[^>]*/>', workbook)
+        if chart is None:
+            raise SystemExit("Could not find _ChartData sheet to insert EP Details before it")
+        insert = (
+            f'<sheet name="EP Details" sheetId="15" state="visible" r:id="{_EP_RID}"/>'
         )
+        workbook = workbook[: chart.start()] + insert + workbook[chart.start() :]
         parts["xl/workbook.xml"] = workbook.encode("utf-8")
     rels = parts["xl/_rels/workbook.xml.rels"].decode("utf-8")
     if f'Id="{_EP_RID}"' not in rels:
@@ -5599,6 +5645,8 @@ def write_bad_spot_advice(
     drawings_before = {
         name: parts[name] for name in names if name.startswith("xl/drawings/")
     }
+    # Append colour styles first so _advice_sheet_rows picks the right xf indices.
+    parts["xl/styles.xml"] = _add_advice_styles(parts["xl/styles.xml"].decode("utf-8")).encode("utf-8")
     sheet_xml = _worksheet_xml(parts)
     for sheet, pairs in advice_for.items():
         if sheet not in write_sheets:
@@ -5616,8 +5664,11 @@ def write_bad_spot_advice(
             raise SystemExit(f"{sheet}: {len(headers)} headers, {len(pairs)} advice rows")
         ordered = sorted(row for row, _number in headers)
         for earlier, later in zip(ordered, ordered[1:]):
-            if later - earlier < 41:
-                raise SystemExit(f"{sheet}: bad spots at rows {earlier} and {later} are too close for the parameter table")
+            if later - earlier < 31:
+                raise SystemExit(
+                    f"{sheet}: bad spots at rows {earlier} and {later} are too close "
+                    f"for the compact parameter table (gap {later - earlier}, need ≥ 31)"
+                )
         map_plans = pairs
         rows: dict[int, str] = {}
         merges: list[str] = []
@@ -5632,11 +5683,9 @@ def write_bad_spot_advice(
         xml = _add_solution_columns(xml, pairs)
         xml = _drop_on_sheet_summary(xml)
         for old, new in zip(_ADVICE_NOTE_OLD, _ADVICE_NOTE_NEW):
-            if old not in xml:
-                if new not in xml:
-                    raise SystemExit(f"{sheet}: missing note sentence {old!r}")
-                continue
-            xml = xml.replace(old, new)
+            if old in xml:
+                xml = xml.replace(old, new)
+            # Fresh builds may omit the legacy note; per-spot advice rows are enough.
         written = xml.count(">Serving Cells details<")
         if written != len(headers):
             raise SystemExit(
@@ -5669,7 +5718,6 @@ def write_bad_spot_advice(
         + _ep_rows("Idle", advice_for["Bad Spot RSRP"])
     )
     _ensure_ep_sheet(parts)
-    parts["xl/styles.xml"] = _add_advice_styles(parts["xl/styles.xml"].decode("utf-8")).encode("utf-8")
     for name, body in drawings_before.items():
         if parts.get(name) != body:
             raise SystemExit(f"Drawing changed while adding advice: {name}")

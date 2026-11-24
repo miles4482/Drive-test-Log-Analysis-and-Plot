@@ -26,13 +26,13 @@ from pptx.util import Emu, Inches, Pt
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
-REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.97.xlsx"
+REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.98.xlsx"
 IDLE_NOTES = OUTPUT / "idle_vs_active_notes.json"
 PLOTS = OUTPUT / "plots"
 DESCRIPTIONS = OUTPUT / "bad_spot_descriptions.json"
-SUMMARY_VERSION = "2.00"
+SUMMARY_VERSION = "2.01"
 DEST = OUTPUT / f"Bogura_DriveTest_Summary_v{SUMMARY_VERSION}.pptx"
-EXCEL_VERSION = "1.97"
+EXCEL_VERSION = "1.98"
 EXEC_HIST = {
     "RSRP": PLOTS / "ppt_exec_v198" / "active_rsrp_hist.png",
     "RSRQ": PLOTS / "ppt_exec_v198" / "active_rsrq_hist.png",
@@ -378,7 +378,7 @@ def _report(prs: Presentation, pages: int) -> None:
         (
             "RSRP",
             EXEC_HIST["RSRP"],
-            "Median −98.1 dBm. Below −120: 1,077 samples (0.4%) — these drive the 99 Active bad spots. "
+            "Median −98.4 dBm. Below −120: 1,062 samples (0.4%) — these drive the 97 Active bad spots. "
             "Peak sits in −110 to −95 (46.4%).",
         ),
         (
@@ -389,7 +389,7 @@ def _report(prs: Presentation, pages: int) -> None:
         (
             "SINR",
             EXEC_HIST["SINR"],
-            "Median 8.1 dB. ≤ 0: 12.6%. About 41% ≥ 10 dB.",
+            "Median 8.0 dB. ≤ 0: 13.4%.",
         ),
     ]
     chart_w = 4.10
@@ -415,10 +415,10 @@ def _report(prs: Presentation, pages: int) -> None:
     _text(slide, Inches(0.28), Inches(table_top), Inches(4), Inches(0.20), "Active band mix", 12, NAVY, True)
     band_rows = [
         ("Band", "Samples", "Share"),
-        ("L1800", "190,026", "65.9%"),
-        ("L2100", "89,020", "30.9%"),
-        ("L2600", "4,898", "1.7%"),
-        ("L900", "4,364", "1.5%"),
+        ("L1800", "176,937", "65.7%"),
+        ("L2100", "83,725", "31.1%"),
+        ("L2600", "4,309", "1.6%"),
+        ("L900", "4,297", "1.6%"),
     ]
     bw = [1.35, 1.30, 1.05]
     ty = table_top + 0.22
@@ -435,11 +435,11 @@ def _report(prs: Presentation, pages: int) -> None:
     _text(slide, Inches(4.35), Inches(table_top), Inches(4.2), Inches(0.20), "Active RSRP range (dBm)", 12, NAVY, True)
     range_rows = [
         ("Range", "Samples", "Share"),
-        ("−95 to 0", "116,945", "40.6%"),
-        ("−110 to −95", "133,790", "46.4%"),
-        ("−115 to −110", "26,949", "9.3%"),
-        ("−120 to −115", "9,547", "3.3%"),
-        ("−150 to −120", "1,077", "0.4%"),
+        ("−95 to 0", "106,349", "39.5%"),
+        ("−110 to −95", "126,584", "47.0%"),
+        ("−115 to −110", "25,910", "9.6%"),
+        ("−120 to −115", "9,363", "3.5%"),
+        ("−150 to −120", "1,062", "0.4%"),
     ]
     rw = [1.50, 1.20, 0.95]
     ty = table_top + 0.22
@@ -456,9 +456,9 @@ def _report(prs: Presentation, pages: int) -> None:
     _text(slide, Inches(8.55), Inches(table_top), Inches(4.5), Inches(0.20), "Active Mode Bad Spot summary", 12, NAVY, True)
     _text(
         slide, Inches(8.55), Inches(table_top + 0.24), Inches(4.5), Inches(2.20),
-        "99 Active bad spots.\n"
+        "97 Active bad spots.\n"
         "• 42 tilt / azimuth tune (existing sectors face the hole).\n"
-        "• 45 new 4th L900 sector on a host within ~3 km.\n"
+        "• 43 new 4th L900 sector on a host within ~3 km.\n"
         "• 12 new 3-sector L900 sites where no host can cover.",
         12, INK,
     )
@@ -1063,7 +1063,7 @@ KPI_SLIDES = [
         "idle": PLOTS / "excel_route_rsrp.png",
         "active": PLOTS / "excel_route_rsrp_active.png",
         "idle_stats": [("Median", "−78.8 dBm"), ("−95 to 0", "90.2%"), ("−110 to −95", "9.0%"), ("Below −120", "0.2%, 142"), ("Bad spots", "26")],
-        "active_stats": [("Median", "−98.1 dBm"), ("−95 to 0", "40.6%"), ("−110 to −95", "46.4%"), ("Below −120", "0.4%, 1,077"), ("Bad spots", "99")],
+        "active_stats": [("Median", "−98.4 dBm"), ("−95 to 0", "39.5%"), ("−110 to −95", "47.0%"), ("Below −120", "0.4%, 1,062"), ("Bad spots", "97")],
         "legend": [("#008000", "−95 to 0"), ("#00FF00", "−110 to −95"), ("#FFFF00", "−115 to −110"), ("#FF6666", "−120 to −115"), ("#FF0000", "below −120")],
     },
     {
