@@ -30,7 +30,7 @@ REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.97.xlsx"
 IDLE_NOTES = OUTPUT / "idle_vs_active_notes.json"
 PLOTS = OUTPUT / "plots"
 DESCRIPTIONS = OUTPUT / "bad_spot_descriptions.json"
-SUMMARY_VERSION = "1.98"
+SUMMARY_VERSION = "1.99"
 DEST = OUTPUT / f"Bogura_DriveTest_Summary_v{SUMMARY_VERSION}.pptx"
 EXCEL_VERSION = "1.97"
 EXEC_HIST = {
@@ -360,7 +360,7 @@ def _share_bar(slide, left: float, top: float, width: float, height: float, part
 
 
 def _report(prs: Presentation, pages: int) -> None:
-    """Executive Summary: Active Mode histogram charts, notes, band mix, RSRP ranges."""
+    """Executive Summary: Active histograms, band/RSRP tables, bad-spot action notes."""
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _box(slide, 0, 0, prs.slide_width, prs.slide_height, WHITE)
     _heading(slide, "Executive Summary")
@@ -369,66 +369,35 @@ def _report(prs: Presentation, pages: int) -> None:
         f"11–21 May 2026    ·    v{SUMMARY_VERSION}", 14, WHITE, align=PP_ALIGN.RIGHT,
     )
 
-    # Compact DT route — Active first, Scanner second.
-    _text(slide, Inches(0.28), Inches(0.66), Inches(4), Inches(0.20), "DT route", 12, NAVY, True)
-    headers = ["Mode", "Source", "Plotted", "What is drawn"]
-    values = [
-        ["Active", "Borga_Active_mode_11Nov26", "288,308", "Robi M-PCell, strongest RSRP per location."],
-        ["Scanner", "Borga_Idle_V2.0", "60,957", "Idle scanner — comparison only, not actual UE coverage."],
-    ]
-    widths = [1.15, 3.15, 1.35, 6.95]
-    top = 0.88
-    x = 0.28
-    for header, width in zip(headers, widths):
-        _box(slide, Inches(x), Inches(top), Inches(width), Inches(0.24), NAVY)
-        _text(slide, Inches(x + 0.05), Inches(top + 0.01), Inches(width - 0.08), Inches(0.22), header, 10, WHITE, True)
-        x += width
-    for row_index, row in enumerate(values):
-        y = top + 0.24 + row_index * 0.24
-        x = 0.28
-        fill = PAPER if row_index % 2 == 0 else WHITE
-        for value, width in zip(row, widths):
-            _box(slide, Inches(x), Inches(y), Inches(width), Inches(0.24), fill, LINE)
-            _text(slide, Inches(x + 0.05), Inches(y + 0.01), Inches(width - 0.08), Inches(0.22), value, 10, INK)
-            x += width
+    # Active Mode histogram charts — moved up; no DT-route table / mode boilerplate.
     _text(
-        slide, Inches(0.28), Inches(1.62), Inches(12.7), Inches(0.28),
-        "Active Mode only on this slide. Scanner coverage does not reflect actual UE coverage. "
-        "Excel Bad Spot RSRP_Active: 99 Active spots then 26 Scanner spots. A bad spot is a 50 m bin with median RSRP below −120 dBm.",
-        11, MUTED,
-    )
-
-    # Three Active Mode histogram charts (real stacked histograms, not share bars).
-    _text(
-        slide, Inches(0.28), Inches(1.92), Inches(8), Inches(0.22),
-        "Active Mode — RSRP / RSRQ / SINR histogram charts", 13, NAVY, True,
+        slide, Inches(0.28), Inches(0.70), Inches(10), Inches(0.22),
+        "Active Mode — RSRP / RSRQ / SINR", 14, NAVY, True,
     )
     hist_notes = [
         (
             "RSRP",
             EXEC_HIST["RSRP"],
-            "Median −98.1 dBm. Poor (< −120): 1,077 samples, 0.4%. "
-            "Most samples sit in −110 to −95 (46.4%) and −95 to 0 (40.6%).",
+            "Median −98.1 dBm. Below −120: 1,077 samples (0.4%) — these drive the 99 Active bad spots. "
+            "Peak sits in −110 to −95 (46.4%).",
         ),
         (
             "RSRQ",
             EXEC_HIST["RSRQ"],
-            "Median −9.7 dB. At or below −20: 0.2%. "
-            "55.4% in −10 to 0; 43.2% in −17 to −10.",
+            "Median −9.7 dB. ≤ −20 only 0.2%. Quality is mostly fine; coverage holes (RSRP) are the main risk.",
         ),
         (
             "SINR",
             EXEC_HIST["SINR"],
-            "Median 8.1 dB. At or below 0: 12.6%. "
-            "About 41% of samples are at or above 10 dB.",
+            "Median 8.1 dB. ≤ 0: 12.6%. About 41% ≥ 10 dB. Interference is secondary to RSRP holes on this drive.",
         ),
     ]
-    chart_w = 4.05
-    chart_h = 2.55
-    gap = 0.18
+    chart_w = 4.10
+    chart_h = 2.70
+    gap = 0.16
     left0 = 0.28
-    chart_top = 2.18
-    for index, (title, path, note) in enumerate(hist_notes):
+    chart_top = 0.96
+    for index, (_title, path, note) in enumerate(hist_notes):
         if not path.exists():
             raise SystemExit(f"Missing Active histogram: {path}")
         left = left0 + index * (chart_w + gap)
@@ -438,11 +407,11 @@ def _report(prs: Presentation, pages: int) -> None:
         )
         _text(
             slide, Inches(left), Inches(chart_top + chart_h + 0.04),
-            Inches(chart_w), Inches(0.72), note, 11, INK,
+            Inches(chart_w), Inches(0.70), note, 11, INK,
         )
 
-    # Band mix + RSRP range tables under the charts (full width of remaining space).
-    table_top = 5.55
+    # Band mix + RSRP range + constructive bad-spot / solution note.
+    table_top = 4.50
     _text(slide, Inches(0.28), Inches(table_top), Inches(4), Inches(0.20), "Active band mix", 12, NAVY, True)
     band_rows = [
         ("Band", "Samples", "Share"),
@@ -451,7 +420,7 @@ def _report(prs: Presentation, pages: int) -> None:
         ("L2600", "4,898", "1.7%"),
         ("L900", "4,364", "1.5%"),
     ]
-    bw = [1.4, 1.35, 1.1]
+    bw = [1.35, 1.30, 1.05]
     ty = table_top + 0.22
     for r_i, row in enumerate(band_rows):
         x = 0.28
@@ -463,7 +432,7 @@ def _report(prs: Presentation, pages: int) -> None:
             x += width
         ty += 0.22
 
-    _text(slide, Inches(4.6), Inches(table_top), Inches(4.5), Inches(0.20), "Active RSRP range (dBm)", 12, NAVY, True)
+    _text(slide, Inches(4.35), Inches(table_top), Inches(4.2), Inches(0.20), "Active RSRP range (dBm)", 12, NAVY, True)
     range_rows = [
         ("Range", "Samples", "Share"),
         ("−95 to 0", "116,945", "40.6%"),
@@ -472,10 +441,10 @@ def _report(prs: Presentation, pages: int) -> None:
         ("−120 to −115", "9,547", "3.3%"),
         ("−150 to −120", "1,077", "0.4%"),
     ]
-    rw = [1.55, 1.25, 1.0]
+    rw = [1.50, 1.20, 0.95]
     ty = table_top + 0.22
     for r_i, row in enumerate(range_rows):
-        x = 4.6
+        x = 4.35
         for value, width in zip(row, rw):
             fill = NAVY if r_i == 0 else (PAPER if r_i % 2 else WHITE)
             color = WHITE if r_i == 0 else INK
@@ -484,12 +453,16 @@ def _report(prs: Presentation, pages: int) -> None:
             x += width
         ty += 0.22
 
+    _text(slide, Inches(8.55), Inches(table_top), Inches(4.5), Inches(0.20), "Bad spots & solutions (Active)", 12, NAVY, True)
     _text(
-        slide, Inches(9.0), Inches(table_top), Inches(4.0), Inches(1.35),
-        "Executive note\n"
-        "Prefer Active Mode solutions for network action. "
-        "Scanner maps show where idle best-server differs from the UE serving cell — "
-        "do not treat Scanner bad spots as the primary action list.",
+        slide, Inches(8.55), Inches(table_top + 0.24), Inches(4.5), Inches(2.20),
+        "99 Active bad spots on Bad Spot RSRP_Active — act on these first.\n"
+        "• 42 tilt / azimuth tune (existing sectors face the hole).\n"
+        "• 45 new 4th L900 sector on a host within ~3 km.\n"
+        "• 12 new 3-sector L900 sites where no host can cover.\n"
+        "Each spot has map + serving cells + Existing / New Plan table.\n"
+        "Scanner section (26 spots) is for comparison only — keep its solutions there; do not mix into Active actions.\n"
+        "Start with longest Active runs and new-site / 4th-sector spots; then batch the tilt/azimuth tunes.",
         11, INK,
     )
     _footer(slide, 1, pages)
@@ -1045,7 +1018,7 @@ def _annex_workbook(prs: Presentation, page: int, pages: int, groups: list[dict]
     if partial:
         deck += "Samples: " + ", ".join(partial) + "."
     rows = [
-        ("Excel v1.97 / PPT v1.98", "One Bad Spot sheet: Active Mode first, Scanner second. Cover is an executive summary. PPT Executive Summary shows Active-only RSRP/RSRQ/SINR histogram charts plus band mix / RSRP ranges."),
+        ("Excel v1.97 / PPT v1.99", "One Bad Spot sheet: Active Mode first, Scanner second. PPT Executive Summary: Active histograms + band/RSRP tables + bad-spot solution counts. No DT-route table on that slide."),
         ("This deck", deck),
         ("Web v1.89", "Feeder draws the idle feeder swaps. Click a site for the sectors. A three-sector rotation uses red, cyan and violet. A two-sector swap stays red and cyan, with the third arm yellow. Site names stay white with a dark edge."),
         ("RSRQ and SINR", "The coverage maps are in this deck. The workbook no longer has separate RSRQ or SINR bad-spot sheets. Poor RSRQ is at or below −20 dB. Poor SINR is at or below 0 dB."),
