@@ -35,13 +35,20 @@ SUMMARY_MD = OUTPUT_DIR / "analysis_summary.md"
 # Cell-level system dump. One site pie is built from its Sector column, not from the
 # old node-level Physical_Site_Database_V1.0.xlsb.
 SITE_DB_PATH = ROOT / "System DUMP.xlsb"
-# Active Mode UE log. The 11 Nov 2026 archive replaces Borga_Active_mode.csv.
-# It holds one CSV per collection, the same shape as the idle export. Robi,
-# Grameenphone and Banglalink are in the files; the report draws Robi only.
-ACTIVE_ARCHIVE = ROOT / "Borga_Active_mode_11Nov26.7z"
-ACTIVE_DIR = EXTRACT_DIR / "Borga_Active_mode_11Nov26"
+# Active Mode UE log with Raw Session Id (for L3 join). Multi-part zip on the
+# repo root unpacks to one xlsb (sheets d1–d15). Older CSV/7z exports still load.
+ACTIVE_ZIP_PARTS = (
+    ROOT / "Data_active_session ID_Bogra.zip.001",
+    ROOT / "Data_active_session ID_Bogra.zip.002",
+    ROOT / "Data_active_session ID_Bogra.zip.003",
+)
+ACTIVE_XLSB = ROOT / "Data_active_session ID_Bogra.xlsb"
+ACTIVE_ARCHIVE = ACTIVE_XLSB
+ACTIVE_DIR = EXTRACT_DIR / "Data_active_session_ID_Bogra"
 ACTIVE_MERGED = OUTPUT_DIR / "Bogura_active_merged.csv.gz"
-# The CSV stores a clock ("8:40:30 AM") and no calendar date. Pin that clock
+# Excel 1900 date system origin used by .xlsb serials (and by openpyxl).
+ACTIVE_EXCEL_EPOCH = pd.Timestamp("1899-12-30")
+# Older CSV exports store a clock ("8:40:30 AM") and no calendar date. Pin that clock
 # so a later rebuild does not move the timestamp onto the day the script runs.
 ACTIVE_CLOCK_ANCHOR = pd.Timestamp("1970-01-01")
 # Idle maps are the Robi scanner. The active file also carries a Grameenphone UE on the
@@ -50,6 +57,20 @@ ACTIVE_OPERATOR = "Robi"
 # Primary serving cell. M-SCell1 and M-SCell2 are carrier-aggregation neighbours
 # and are left out of the Active maps.
 ACTIVE_CELL_TYPE = "M-PCell"
+# Extra Active columns kept in the merged CSV (Session Id unlocks L3 pairing).
+ACTIVE_EXTRA_COLUMNS = (
+    "Operator",
+    "Data Technology",
+    "Technology Band",
+    "Collection",
+    "Campaign",
+    "Type",
+    "Raw Session Id",
+    "MNC",
+    "CGI",
+    "TAC",
+    "UL EARFCN",
+)
 
 SCANNER_RENAME = {
     "NB RSRP": "RSRP",
@@ -4063,7 +4084,7 @@ def min_consecutive_m(column: str) -> float:
 # a later edit that retunes a rule fails the report check instead of passing quietly.
 # Spot counts are circles and discrete areas per sheet.
 # Idle stays on the published Borga_Idle_V2.0 result. Active follows
-# Borga_Active_mode_11Nov26.7z: Robi M-PCell only, strongest RSRP at each location.
+# Data_active_session ID_Bogra.xlsb: Robi M-PCell only, strongest RSRP at each location.
 LOGIC_LOCK = {
     "active_operator": "Robi",
     "sweep_s": 4.0,
@@ -4086,7 +4107,7 @@ LOGIC_LOCK = {
     # keep these circle counts. RSRQ and SINR rules still colour the KPI maps.
     "counts": {
         "Bad Spot RSRP": (26, 0),
-        "Bad Spot RSRP_Active": (99, 0),
+        "Bad Spot RSRP_Active": (97, 0),
     },
 }
 
@@ -6627,14 +6648,113 @@ def _cgi_eci(value: object) -> object:
     return int(token)
 
 
-def _parse_active_time(series: pd.Series) -> pd.Series:
-    """Parse either a full timestamp or a clock with no date."""
+def _collection_anchor_date(value: object) -> pd.Timestamp | pd.NaT:
+    """Calendar day from a Collection label such as SYS-1_21-05-26 or 20-05-26."""
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return pd.NaT
+    match = re.search(r"(\d{2})-(\d{2})-(\d{2})\s*$", str(value).strip())
+    if not match:
+        return pd.NaT
+    day, month, year = (int(part) for part in match.groups())
+    return pd.Timestamp(year=2000 + year, month=month, day=day)
+
+
+def _parse_active_time(series: pd.Series, collection: pd.Series | None = None) -> pd.Series:
+    """Parse Excel serials, full timestamps, or a clock with no date."""
+    numeric = pd.to_numeric(series, errors="coerce")
+    numeric_share = float(numeric.notna().mean()) if len(series) else 0.0
+    if numeric_share > 0.9:
+        serial = numeric.astype(float)
+        full = ACTIVE_EXCEL_EPOCH + pd.to_timedelta(serial, unit="D")
+        if collection is None or float((serial >= 1).mean()) > 0.9:
+            return full
+        # Sheet d1 stores time-of-day only (serial < 1). Anchor with Collection.
+        anchors = collection.map(_collection_anchor_date)
+        clock = anchors + pd.to_timedelta(serial, unit="D")
+        return full.where(serial >= 1, clock)
+
     raw = series.astype("string").str.strip()
     clock = raw.str.match(r"^\d{1,2}:\d{2}:\d{2}\s*[AaPp][Mm]$", na=False)
     if float(clock.mean()) > 0.9:
         parsed = pd.to_datetime(raw.where(clock), format="%I:%M:%S %p", errors="coerce")
         return ACTIVE_CLOCK_ANCHOR + (parsed - parsed.dt.normalize())
     return pd.to_datetime(series, errors="coerce")
+
+
+def ensure_active_xlsb() -> Path:
+    """Return the Active xlsb, joining multi-part zip pieces when needed."""
+    if ACTIVE_XLSB.exists() and ACTIVE_XLSB.stat().st_size > 0:
+        return ACTIVE_XLSB
+    if not all(part.exists() for part in ACTIVE_ZIP_PARTS):
+        missing = [part.name for part in ACTIVE_ZIP_PARTS if not part.exists()]
+        sys.exit(
+            "Missing Active Session-ID archive. Need "
+            f"{ACTIVE_XLSB.name} or zip parts {', '.join(p.name for p in ACTIVE_ZIP_PARTS)}. "
+            f"Missing: {', '.join(missing)}"
+        )
+    import zipfile
+
+    joined = EXTRACT_DIR / "Data_active_session_ID_Bogra.zip"
+    EXTRACT_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"Joining {len(ACTIVE_ZIP_PARTS)} Active zip parts -> {joined.name}")
+    with open(joined, "wb") as out:
+        for part in ACTIVE_ZIP_PARTS:
+            out.write(part.read_bytes())
+    with zipfile.ZipFile(joined) as zf:
+        names = [name for name in zf.namelist() if name.lower().endswith(".xlsb")]
+        if not names:
+            sys.exit(f"{joined.name} has no .xlsb member")
+        member = names[0]
+        print(f"Extracting {member} -> {ACTIVE_XLSB.name}")
+        ACTIVE_XLSB.write_bytes(zf.read(member))
+    return ACTIVE_XLSB
+
+
+def load_active_xlsb(path: Path) -> pd.DataFrame:
+    """Load every sheet of the Active Session-ID xlsb into one frame."""
+    from pyxlsb import open_workbook
+
+    print(f"Loading active xlsb {path.name} ...")
+    frames: list[pd.DataFrame] = []
+    with open_workbook(str(path)) as workbook:
+        for sheet_name in workbook.sheets:
+            with workbook.get_sheet(sheet_name) as sheet:
+                rows = sheet.rows()
+                header = [cell.v for cell in next(rows)]
+                data = [[cell.v for cell in row] for row in rows]
+            frame = pd.DataFrame(data, columns=header)
+            frame["Source"] = sheet_name
+            print(f"  {sheet_name}: {len(frame):,} rows")
+            frames.append(frame)
+    if not frames:
+        sys.exit(f"{path.name} has no sheets")
+    df = pd.concat(frames, ignore_index=True)
+    df = df.loc[:, ~df.columns.astype(str).str.startswith("Unnamed")].copy()
+    if "Home Operator" in df.columns and "Operator" not in df.columns:
+        df = df.rename(columns={"Home Operator": "Operator"})
+    if "Cell Id" not in df.columns:
+        if "CGI" not in df.columns:
+            sys.exit(f"{path.name} has no Cell Id and no CGI")
+        df["Cell Id"] = df["CGI"].map(_cgi_eci)
+    missing = [column for column in COLUMNS if column not in df.columns]
+    if missing:
+        sys.exit(f"{path.name} is missing columns: {missing}")
+    collection = df["Collection"] if "Collection" in df.columns else None
+    df["Time"] = _parse_active_time(df["Time"], collection)
+    for col in ("RSRP", "RSRQ", "SINR", "Longitude", "Latitude", "DL EARFCN"):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["Cell Id"] = pd.to_numeric(df["Cell Id"], errors="coerce").astype("Int64")
+    df["DL EARFCN"] = df["DL EARFCN"].astype("Int64")
+    if "Raw Session Id" in df.columns:
+        df["Raw Session Id"] = pd.to_numeric(df["Raw Session Id"], errors="coerce").astype("Int64")
+    if "Operator" in df.columns:
+        df["Operator"] = df["Operator"].astype("string").str.strip()
+    keep = [column for column in df.columns if column in set(COLUMNS) | set(ACTIVE_EXTRA_COLUMNS) | {"Source"}]
+    df = df[keep].copy()
+    df["Band"] = df["DL EARFCN"].map(earfcn_to_band)
+    df["Layer"] = df["DL EARFCN"].map(earfcn_to_layer)
+    print(f"  xlsb total {len(df):,} rows")
+    return df
 
 
 def earfcn_to_layer(earfcn: object) -> str:
@@ -6881,17 +7001,18 @@ def load_active_csv(path: Path) -> pd.DataFrame:
     missing = [c for c in COLUMNS if c not in df.columns]
     if missing:
         sys.exit(f"{path.name} is missing columns: {missing}")
-    keep = [c for c in df.columns if c in set(COLUMNS) | {
-        "Operator", "Data Technology", "Technology Band", "Collection", "Campaign", "Type",
-    }]
+    keep = [c for c in df.columns if c in set(COLUMNS) | set(ACTIVE_EXTRA_COLUMNS)]
     df = df[keep].copy()
     if "Operator" in df.columns:
         df["Operator"] = df["Operator"].astype("string").str.strip()
-    df["Time"] = _parse_active_time(df["Time"])
+    collection = df["Collection"] if "Collection" in df.columns else None
+    df["Time"] = _parse_active_time(df["Time"], collection)
     for col in ("RSRP", "RSRQ", "SINR", "Longitude", "Latitude", "DL EARFCN"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df["Cell Id"] = pd.to_numeric(df["Cell Id"], errors="coerce").astype("Int64")
     df["DL EARFCN"] = df["DL EARFCN"].astype("Int64")
+    if "Raw Session Id" in df.columns:
+        df["Raw Session Id"] = pd.to_numeric(df["Raw Session Id"], errors="coerce").astype("Int64")
     df["Source"] = path.name
     df["Band"] = df["DL EARFCN"].map(earfcn_to_band)
     df["Layer"] = df["DL EARFCN"].map(earfcn_to_layer)
@@ -6900,16 +7021,24 @@ def load_active_csv(path: Path) -> pd.DataFrame:
 
 
 def merge_active() -> pd.DataFrame:
-    if not ACTIVE_ARCHIVE.exists():
-        sys.exit(f"Missing active log: {ACTIVE_ARCHIVE.name}")
-    print(f"Extracting {ACTIVE_ARCHIVE.name} -> {ACTIVE_DIR}")
-    extract_7z(ACTIVE_ARCHIVE, EXTRACT_DIR)
-    files = active_csv_files()
-    if not files:
-        sys.exit(f"Extraction finished but no CSV files were found in {ACTIVE_DIR}")
-    print(f"  {len(files)} active CSV files")
-    frames = [load_active_csv(path) for path in files]
-    merged = pd.concat(frames, ignore_index=True)
+    """Merge Active Mode samples from the Session-ID xlsb (or a legacy CSV 7z)."""
+    legacy_7z = ROOT / "Borga_Active_mode_11Nov26.7z"
+    if ACTIVE_XLSB.exists() or all(part.exists() for part in ACTIVE_ZIP_PARTS):
+        xlsb = ensure_active_xlsb()
+        merged = load_active_xlsb(xlsb)
+    elif legacy_7z.exists():
+        print(f"Extracting legacy {legacy_7z.name} -> {EXTRACT_DIR / 'Borga_Active_mode_11Nov26'}")
+        extract_7z(legacy_7z, EXTRACT_DIR)
+        files = _numbered_csvs(EXTRACT_DIR / "Borga_Active_mode_11Nov26")
+        if not files:
+            sys.exit(f"Extraction finished but no CSV files were found in {EXTRACT_DIR / 'Borga_Active_mode_11Nov26'}")
+        print(f"  {len(files)} active CSV files")
+        merged = pd.concat([load_active_csv(path) for path in files], ignore_index=True)
+    else:
+        sys.exit(
+            f"Missing active log: need {ACTIVE_XLSB.name} (or zip parts) "
+            f"or legacy {legacy_7z.name}"
+        )
     merged = merged.drop_duplicates(subset=["Time", "Operator", "Cell Id", "DL EARFCN", "RSRP"], keep="first")
     sort_cols = ["Time", "Source"]
     if "Operator" in merged.columns:

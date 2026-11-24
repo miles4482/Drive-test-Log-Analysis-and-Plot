@@ -1,25 +1,25 @@
 # Drive-test Log Analysis and Plot
 
-LTE **IDLE Mode scanner** and **Active Mode UE** logs from **Bogura** (Robi). Idle source is `Borga_Idle_V2.0.7z` and is unchanged. Active source is `Borga_Active_mode_11Nov26.7z`, which replaces `Borga_Active_mode.csv`. The report draws **Robi** only.
+LTE **IDLE Mode scanner** and **Active Mode UE** logs from **Bogura** (Robi). Idle source is `Borga_Idle_V2.0.7z` and is unchanged. Active source is `Data_active_session ID_Bogra.zip.001/.002/.003` → `Data_active_session ID_Bogra.xlsb` (includes **Raw Session Id** for L3 join). The report draws **Robi** only.
 
 ## What these files are
 
 | File(s) | Role | After extract |
 | --- | --- | --- |
 | `Borga_Idle_V2.0.7z` | IDLE Mode scanner export | `extracted/Borga_Idle_V2.0/1.csv` … `15.csv` |
-| `Borga_Active_mode_11Nov26.7z` | Active Mode UE export, 15 CSVs (Robi and Grameenphone) | `output/Bogura_active_merged.csv.gz` |
+| `Data_active_session ID_Bogra.zip.001` … `.003` | Active Mode UE export with Session ID (split zip) | `Data_active_session ID_Bogra.xlsb` → `output/Bogura_active_merged.csv.gz` |
 | `System DUMP.xlsb` | Cell-level site dump. Several EUtranCellId values share one Sector name | Sector name on every arm, plus the distance line, on the individual bad-spot maps only |
 | `Physical_Site_Database_V2.0.xlsx` | Earlier physical site database | Not used on the current maps |
 
 Idle scanner columns include `Time`, `Longitude`, `Latitude`, `Cell Id`, `DL EARFCN`, `NB RSRP`, `NB RSRQ`, `NB RS SINR` (mapped to RSRP / RSRQ / SINR). Campaign is **Scanner**. Files 1–15 cover 11–21 May 2026.
 
-Active columns are already named `RSRP`, `RSRQ`, `SINR`, plus `Operator`, `Data Technology`, `DL EARFCN`, `CGI` and `Cell Id`. `Borga_Active_mode_11Nov26` has full timestamps from 11 May 2026 13:01:27 through 21 May 2026 14:07:35. `Operator` contains Robi and Grameenphone. `Type` is M-PCell, M-SCell1 or M-SCell2. The report keeps rows whose operator is exactly **Robi** and whose Type is exactly **M-PCell**. Every Grameenphone row is dropped before a map, a histogram, or a bad spot, including its M-PCell rows. Robi secondary cells are dropped the same way. Cell Id is the Cell Id column, which is the E-UTRAN cell identity. An older export that only has `Home Operator` and `CGI` still loads: Cell Id is then the last number of the CGI.
+Active columns are named `RSRP`, `RSRQ`, `SINR`, plus `Operator`, `Data Technology`, `DL EARFCN`, `CGI`, `Cell Id`, and **`Raw Session Id`**. The Session-ID xlsb covers 12 May 2026 08:09 through 21 May 2026 14:07. `Operator` contains Robi and Grameenphone. `Type` is M-PCell, M-SCell1 or M-SCell2. The report keeps rows whose operator is exactly **Robi** and whose Type is exactly **M-PCell**. Every Grameenphone row is dropped before a map, a histogram, or a bad spot, including its M-PCell rows. Robi secondary cells are dropped the same way. Cell Id is the Cell Id column, which is the E-UTRAN cell identity. An older export that only has `Home Operator` and `CGI` still loads: Cell Id is then the last number of the CGI.
 
 Active auto mode keeps **one band at each latitude and longitude**: the strongest RSRP. RSRQ and SINR come from that row. Idle still collapses rows that share a latitude, longitude and timestamp, then keeps the strongest band in each scanner sweep (at most 4 s and 40 m).
 
 ```
 Borga_Idle_V2.0.7z     -->  1.csv … 15.csv               -->  output/Bogura_merged.csv.gz
-Borga_Active_mode_11Nov26.7z  -->  1.csv … 15.csv  -->  output/Bogura_active_merged.csv.gz
+Data_active_session ID_Bogra.xlsb (d1…d15)  -->  output/Bogura_active_merged.csv.gz
 ```
 
 ## How to rebuild the final file and plots
@@ -36,7 +36,7 @@ The script:
 
 1. Extracts `Borga_Idle_V2.0.7z` into `extracted/Borga_Idle_V2.0/`
 2. Merges the 15 idle CSVs into `output/Bogura_merged.csv.gz`
-3. Extracts `Borga_Active_mode_11Nov26.7z` into `extracted/Borga_Active_mode_11Nov26/` and merges those 15 CSVs into `output/Bogura_active_merged.csv.gz`
+3. Loads `Data_active_session ID_Bogra.xlsb` (or joins the `.zip.001/.002/.003` parts) and merges sheets d1–d15 into `output/Bogura_active_merged.csv.gz` (keeps `Raw Session Id`)
 4. Writes KPI plots under `output/plots/` and a text summary in `output/analysis_summary.md`
 5. Writes `output/Bogura_DriveTest_Report.xlsx` — freeze panes off and gridlines off on every sheet
 
@@ -80,7 +80,7 @@ python merge_and_analyze.py --from-merged
 | Dominant bands | B8 900 (28.4%), B1 2100 (25.4%), B3 1800 (23.5%), B41 2500 (22.7%) |
 | Unique Cell Ids | 5,132 |
 
-Active log (`Borga_Active_mode_11Nov26.7z`, 15 CSVs): 2,185,848 rows, 2,185,081 after exact duplicates are dropped. Robi 1,075,048, Grameenphone 1,110,033. The drawn set is Robi and M-PCell: 553,201 rows, of which 520,596 have a Cell Id. At each latitude and longitude one band remains, the strongest RSRP: 288,308 plotted rows. Plotted mix: L1800 190,026, L2100 89,020, L2600 4,898, L900 4,364. An Active L1800 map is blank wherever another layer was stronger at that same coordinate. RSRQ and SINR come from that same row. The drive runs 2026-05-11 13:01:27 through 2026-05-21 14:07:35. Campaign is AUTO DATA. Idle is still `Borga_Idle_V2.0` and its charts are not retuned.
+Active log (`Data_active_session ID_Bogra.xlsb`, sheets d1–d15, with `Raw Session Id`): 2,167,684 rows, 2,164,666 after exact duplicates are dropped. Robi 1,067,162, Grameenphone 1,100,522. The drawn set is Robi and M-PCell: 545,620 rows. At each latitude and longitude one band remains, the strongest RSRP: 269,268 plotted rows. The drive runs 2026-05-12 08:09 through 2026-05-21 14:07. Campaign is AUTO DATA. Idle is still `Borga_Idle_V2.0` and its charts are not retuned.
 
 The Idle all-band coverage maps show the **best server per scanner sweep**. Rows that already share a latitude, longitude and timestamp are reduced to the strongest RSRP first (395,121 of 1,178,276). The scanner still writes the bands at their own millisecond timestamps and revisits each band about every 3 s, so the remaining rows are grouped into sweep windows (at most 4 s and 40 m of the same pass) before the strongest band is taken. Idle band maps are built from those surviving rows, then the same sweep.
 
@@ -107,7 +107,7 @@ Active Mode plots **one band per latitude and longitude** (Robi only): the stron
 - **Sector marks are only on those individual bad-spot maps.** Cells in `System DUMP.xlsb` are rolled up by the Sector column: one sector name covers many EUtranCellId values. If any sector of a site falls in the view, every sector of that site is drawn. The mark is a transparent cyan outline with no fill, and the Sector name is written at the end of each arm. A yellow dashed line starts at the end of the serving sector, not at the middle of the site, and runs to each red sample inside the orange circle. That cell is the Cell Id on the sample, and it has to be an L900, L1800, L2100 or L2600 cell in the dump. Every serving cell is drawn. The length beside the red is the full red stretch, and a short gap of good coverage stays in that length.
 - **Discrete area:** leftover poor bins covering at least 1 km² where that area is at least half poor (dotted circle). With every run already covered, this drive has none
 - Each sheet draws the 16 longest circles as separate maps and lists up to 300 in the table, longest first, and states the full count
-- Published circle counts, with 0 discrete areas: Idle RSRP 26, RSRQ 45, SINR 204; Active Robi M-PCell on `Borga_Active_mode_11Nov26.7z` RSRP 99, RSRQ 41, SINR 186. These rules are locked in `LOGIC_LOCK`. `verify_report` fails if a rebuild moves a threshold, a colour, the circle size, or a count
+- Published circle counts, with 0 discrete areas: Idle RSRP 26, RSRQ 45, SINR 204; Active Robi M-PCell on `Data_active_session ID_Bogra.xlsb` RSRP 97. These rules are locked in `LOGIC_LOCK`. `verify_report` fails if a rebuild moves a threshold, a colour, the circle size, or a count
 
 ### Cover shows the Active histograms and the DT route (v1.45)
 
@@ -447,7 +447,7 @@ Sector marks are the connected Y again. On the Cover sheet, Bad Spot Summary acr
 
 ### Every bad spot, one cover table (v1.62)
 
-Idle and Active each draw a map for every bad spot: 26 idle maps and 99 active maps. The Cover sheet has one BAD Spot Summary table for both modes, with the sector and the serving cell on each row. Sector marks are transparent and the arms no longer meet at the centre.
+Idle and Active each draw a map for every bad spot: 26 idle maps and 97 active maps. The Cover sheet has one BAD Spot Summary table for both modes, with the sector and the serving cell on each row. Sector marks are transparent and the arms no longer meet at the centre.
 
 ### 3 km fourth-sector reach, cover summary, and EP Details (v1.61)
 
@@ -477,7 +477,7 @@ Each bad-spot map draws a yellow dashed line from the end of the serving sector 
 
 ### Active Mode uses the 11 Nov 2026 log (v1.52)
 
-The Active maps, histograms, bad spots, DT route and the web map read `Borga_Active_mode_11Nov26.7z`, keeping operator **Robi** and Type **M-PCell**. Idle stays on `Borga_Idle_V2.0` with the same charts and the same circle counts (RSRP 26, RSRQ 45, SINR 204). Active bad-spot circles are RSRP 99, RSRQ 41 and SINR 186.
+The Active maps, histograms and bad spots read `Data_active_session ID_Bogra.xlsb`, keeping operator **Robi** and Type **M-PCell**, and retaining `Raw Session Id` in the merged Active CSV for L3 join. Idle stays on `Borga_Idle_V2.0` with the same charts and the same circle counts (RSRP 26). Active bad-spot circles are RSRP 97.
 
 ### RSRP legend has light red from −115 (v1.51)
 

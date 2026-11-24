@@ -91,7 +91,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "1.97"
+REPORT_VERSION = "1.98"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -104,6 +104,9 @@ SVG_LAYERS: dict[Path, Path] = {}
 BAD_SPOT_TABLE_MAX = 300
 REPORT_XLSX = OUTPUT_DIR / "Bogura_DriveTest_Report.xlsx"
 VERSIONED_XLSX = OUTPUT_DIR / f"Bogura_DriveTest_Report_v{REPORT_VERSION}.xlsx"
+
+# Locked Active bad-spot circle count (LOGIC_LOCK). Idle-area helpers use this.
+ACTIVE_BAD_SPOT_N = LOGIC_LOCK["counts"]["Bad Spot RSRP_Active"][0]
 
 NAVY = "1B4F72"
 WHITE = "FFFFFF"
@@ -2835,8 +2838,8 @@ def place_active_idle_area_maps(src: Path, dest: Path, pngs: list[Path], clean_f
     import io
     from PIL import Image
 
-    if len(pngs) != 99:
-        raise SystemExit(f"expected 99 idle-area maps, got {len(pngs)}")
+    if len(pngs) != ACTIVE_BAD_SPOT_N:
+        raise SystemExit(f"expected {ACTIVE_BAD_SPOT_N} idle-area maps, got {len(pngs)}")
     with zipfile.ZipFile(src) as zf:
         names = zf.namelist()
         parts = {name: zf.read(name) for name in names}
@@ -2862,8 +2865,8 @@ def place_active_idle_area_maps(src: Path, dest: Path, pngs: list[Path], clean_f
             pictures.append((row, cx))
     pictures.sort()
     serial = pictures[1:]
-    if len(serial) != 99:
-        raise SystemExit(f"active sheet has {len(serial)} serial maps, expected 99")
+    if len(serial) != ACTIVE_BAD_SPOT_N:
+        raise SystemExit(f"active sheet has {len(serial)} serial maps, expected {ACTIVE_BAD_SPOT_N}")
 
     sheet_path = _sheet_part_path(parts, "Bad Spot RSRP_Active")
     xml = parts[sheet_path].decode("utf-8")
@@ -2947,8 +2950,8 @@ def refresh_idle_area_maps(src: Path, dest: Path, pngs: list[Path], notes: list[
     import io
     from PIL import Image
 
-    if len(pngs) != 99 or len(notes) != 99:
-        raise SystemExit(f"expected 99 idle maps and notes, got {len(pngs)} and {len(notes)}")
+    if len(pngs) != ACTIVE_BAD_SPOT_N or len(notes) != ACTIVE_BAD_SPOT_N:
+        raise SystemExit(f"expected {ACTIVE_BAD_SPOT_N} idle maps and notes, got {len(pngs)} and {len(notes)}")
     with zipfile.ZipFile(src) as zf:
         names = zf.namelist()
         parts = {name: zf.read(name) for name in names}
@@ -2983,8 +2986,8 @@ def refresh_idle_area_maps(src: Path, dest: Path, pngs: list[Path], notes: list[
     sheet_path = _sheet_part_path(parts, "Bad Spot RSRP_Active")
     xml = parts[sheet_path].decode("utf-8")
     headers = _title_rows(xml)
-    if len(headers) != 99:
-        raise SystemExit(f"found {len(headers)} active bad-spot titles, expected 99")
+    if len(headers) != ACTIVE_BAD_SPOT_N:
+        raise SystemExit(f"found {len(headers)} active bad-spot titles, expected {ACTIVE_BAD_SPOT_N}")
 
     # Refresh Idle-vs-active notes on the existing note rows (column F+, just after
     # each idle RSRP map within the spot band). Do not insert — that would collide
@@ -3031,8 +3034,8 @@ def refit_idle_area_scale(src: Path, dest: Path, pngs: list[Path]) -> Path:
     import io
     from PIL import Image
 
-    if len(pngs) != 99:
-        raise SystemExit(f"expected 99 idle maps, got {len(pngs)}")
+    if len(pngs) != ACTIVE_BAD_SPOT_N:
+        raise SystemExit(f"expected {ACTIVE_BAD_SPOT_N} idle maps, got {len(pngs)}")
     with zipfile.ZipFile(src) as zf:
         names = zf.namelist()
         parts = {name: zf.read(name) for name in names}
@@ -3061,7 +3064,7 @@ def refit_idle_area_scale(src: Path, dest: Path, pngs: list[Path]) -> Path:
             active_cx.append((row, int(re.search(r'<ext cx="(\d+)"', block).group(1))))
     active_cx.sort()
     serial = active_cx[1:]
-    if len(serial) != 99 or len(idle_index) != 99:
+    if len(serial) != ACTIVE_BAD_SPOT_N or len(idle_index) != ACTIVE_BAD_SPOT_N:
         raise SystemExit(f"pictures active {len(serial)} idle {len(idle_index)}")
 
     aspects: dict[int, float] = {}
@@ -3089,8 +3092,8 @@ def refit_idle_area_scale(src: Path, dest: Path, pngs: list[Path]) -> Path:
         row = int(re.match(r'<row r="(\d+)"', xml[start:]).group(1))
         if 's="5"' in xml[start:match.start()]:
             headers[int(match.group(1))] = row
-    if len(headers) != 99:
-        raise SystemExit(f"found {len(headers)} titles")
+    if len(headers) != ACTIVE_BAD_SPOT_N:
+        raise SystemExit(f"found {len(headers)} titles, expected {ACTIVE_BAD_SPOT_N}")
 
     # The comparison note occupies header+42 through header+48. The wider idle
     # picture starts on the next free row so it does not cover that note.
@@ -3112,12 +3115,13 @@ def refit_idle_area_scale(src: Path, dest: Path, pngs: list[Path]) -> Path:
     )
 
     content_rows = [int(row) for row in re.findall(r'<row r="(\d+)"', xml)]
-    tail = [row for row in content_rows if row > headers[99] + 48]
-    bounds = {number: headers[number + 1] for number in range(1, 99)}
+    n_spots = ACTIVE_BAD_SPOT_N
+    tail = [row for row in content_rows if row > headers[n_spots] + 48]
+    bounds = {number: headers[number + 1] for number in range(1, n_spots)}
     if tail:
-        bounds[99] = tail[0]
+        bounds[n_spots] = tail[0]
 
-    for number in range(99, 0, -1):
+    for number in range(n_spots, 0, -1):
         nxt = bounds.get(number)
         if nxt is None:
             continue
@@ -3532,8 +3536,8 @@ def publish_report_v182(
     import io
     from PIL import Image
 
-    if len(idle_pngs) != 99 or len(notes) != 99 or len(active_scales) != 99:
-        raise SystemExit("v1.82 expects 99 idle maps, notes and circle scales")
+    if len(idle_pngs) != ACTIVE_BAD_SPOT_N or len(notes) != ACTIVE_BAD_SPOT_N or len(active_scales) != ACTIVE_BAD_SPOT_N:
+        raise SystemExit(f"v1.82 expects {ACTIVE_BAD_SPOT_N} idle maps, notes and circle scales")
     with zipfile.ZipFile(src) as zf:
         names = zf.namelist()
         parts = {name: zf.read(name) for name in names}
@@ -3542,8 +3546,8 @@ def publish_report_v182(
     idle_sheet = _sheet_part_path(parts, "Bad Spot RSRP")
     xml = parts[active_sheet].decode("utf-8")
     headers = _title_rows(xml)
-    if len(headers) != 99:
-        raise SystemExit(f"found {len(headers)} active titles, expected 99")
+    if len(headers) != ACTIVE_BAD_SPOT_N:
+        raise SystemExit(f"found {len(headers)} active titles, expected {ACTIVE_BAD_SPOT_N}")
     for number, (coverage, serving) in enumerate(notes, start=1):
         xml = _replace_inline_text(xml, headers[number] + 42, "Idle vs active")
         xml = _replace_inline_text(xml, headers[number] + 43, coverage + "\n" + serving)
@@ -3575,7 +3579,7 @@ def publish_report_v182(
             active_size.append((row, int(ext.group(1)), int(ext.group(2))))
     active_size.sort()
     serial = active_size[1:]
-    if len(serial) != 99 or len(idle_index) != 99:
+    if len(serial) != ACTIVE_BAD_SPOT_N or len(idle_index) != ACTIVE_BAD_SPOT_N:
         raise SystemExit(f"pictures active {len(serial)} idle {len(idle_index)}")
 
     new_cy: dict[int, int] = {}
@@ -3605,11 +3609,12 @@ def publish_report_v182(
     )
     row_emu = 15 * 12700
     content_rows = [int(row) for row in re.findall(r'<row r="(\d+)"', xml)]
-    tail = [row for row in content_rows if row > headers[99] + 48]
-    bounds = {number: headers[number + 1] for number in range(1, 99)}
+    n_spots = ACTIVE_BAD_SPOT_N
+    tail = [row for row in content_rows if row > headers[n_spots] + 48]
+    bounds = {number: headers[number + 1] for number in range(1, n_spots)}
     if tail:
-        bounds[99] = tail[0]
-    for number in range(99, 0, -1):
+        bounds[n_spots] = tail[0]
+    for number in range(n_spots, 0, -1):
         nxt = bounds.get(number)
         if nxt is None:
             continue
