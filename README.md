@@ -142,6 +142,10 @@ GitHub shows `index.html` as a file, not as a running map. Download the `web` fo
 
 **v1.98 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v1.98.xlsx
 
+Summary PPT **v2.02 (current):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.02.pptx
+
+Executive Summary Active histograms use the same map-legend colours as the Excel Cover (green / yellow / red for RSRP and RSRQ; SINR blues), with a legend on each chart. PPT rebuild regenerates those PNGs so a solid navy fill cannot replace them.
+
 Summary PPT **v2.01:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.01.pptx
 
 Active source: `Data_active_session ID_Bogra.xlsb` (Raw Session Id). Active RSRP bad spots: **97**.

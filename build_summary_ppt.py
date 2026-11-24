@@ -30,13 +30,14 @@ REPORT = OUTPUT / "Bogura_DriveTest_Report_v1.98.xlsx"
 IDLE_NOTES = OUTPUT / "idle_vs_active_notes.json"
 PLOTS = OUTPUT / "plots"
 DESCRIPTIONS = OUTPUT / "bad_spot_descriptions.json"
-SUMMARY_VERSION = "2.01"
+SUMMARY_VERSION = "2.02"
 DEST = OUTPUT / f"Bogura_DriveTest_Summary_v{SUMMARY_VERSION}.pptx"
 EXCEL_VERSION = "1.98"
+EXEC_HIST_DIR = PLOTS / "ppt_exec_v198"
 EXEC_HIST = {
-    "RSRP": PLOTS / "ppt_exec_v198" / "active_rsrp_hist.png",
-    "RSRQ": PLOTS / "ppt_exec_v198" / "active_rsrq_hist.png",
-    "SINR": PLOTS / "ppt_exec_v198" / "active_sinr_hist.png",
+    "RSRP": EXEC_HIST_DIR / "active_rsrp_hist.png",
+    "RSRQ": EXEC_HIST_DIR / "active_rsrq_hist.png",
+    "SINR": EXEC_HIST_DIR / "active_sinr_hist.png",
 }
 CIRCLES = PLOTS / "bad_spot_circles.json"
 
@@ -325,7 +326,7 @@ def _text(slide, left, top, width, height, text: str, size: int, color: RGBColor
 def _footer(slide, page: int, pages: int) -> None:
     _text(
         slide, Inches(0.4), Inches(7.18), Inches(10), Inches(0.24),
-        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v{EXCEL_VERSION}  ·  Web v1.89",
+        f"Bogura drive test  ·  Summary v{SUMMARY_VERSION}  ·  Excel v{EXCEL_VERSION}  ·  Web v1.90",
         11, MUTED,
     )
     _text(
@@ -1017,7 +1018,7 @@ def _annex_workbook(prs: Presentation, page: int, pages: int, groups: list[dict]
     rows = [
         ("Excel v1.97 / PPT v2.00", "One Bad Spot sheet: Active Mode first, Scanner second. PPT Executive Summary: Active histograms + band/RSRP tables + Active bad-spot count and solution notes only."),
         ("This deck", deck),
-        ("Web v1.89", "Feeder draws the idle feeder swaps. Click a site for the sectors. A three-sector rotation uses red, cyan and violet. A two-sector swap stays red and cyan, with the third arm yellow. Site names stay white with a dark edge."),
+        ("Web v1.90", "Feeder draws the idle feeder swaps. Click a site for the sectors. A three-sector rotation uses red, cyan and violet. A two-sector swap stays red and cyan, with the third arm yellow. Site names stay white with a dark edge. Active coverage layers refresh with --active-only; Idle stays as published."),
         ("RSRQ and SINR", "The coverage maps are in this deck. The workbook no longer has separate RSRQ or SINR bad-spot sheets. Poor RSRQ is at or below −20 dB. Poor SINR is at or below 0 dB."),
     ]
     top = 0.95
@@ -1087,9 +1088,132 @@ KPI_SLIDES = [
 ]
 
 
+def _render_exec_hists() -> None:
+    """Active Mode Executive histograms: same map-legend colours as Excel Cover.
+
+    Bars are green / yellow / red (and SINR blues) by the coverage-map bins, with
+    a legend on each chart. Do not replace these with a single navy fill.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import pandas as pd
+
+    from merge_and_analyze import (
+        ACTIVE_MERGED,
+        MAP_RSRP_COLORS,
+        MAP_RSRP_LABELS,
+        MAP_RSRQ_COLORS,
+        MAP_RSRQ_LABELS,
+        MAP_SINR_COLORS,
+        MAP_SINR_LABELS,
+        load_active_merged,
+        rsrp_map_class,
+        rsrq_map_class,
+        select_active_report,
+        sinr_map_class,
+        strongest_location,
+        style_axes,
+    )
+
+    if not ACTIVE_MERGED.exists():
+        raise SystemExit(f"Missing {ACTIVE_MERGED}")
+    plotted = strongest_location(select_active_report(load_active_merged()))
+    if plotted is None or plotted.empty:
+        raise SystemExit("No Active Robi M-PCell rows for Executive histograms")
+
+    EXEC_HIST_DIR.mkdir(parents=True, exist_ok=True)
+    specs = [
+        (
+            "RSRP",
+            plotted["RSRP"],
+            rsrp_map_class,
+            MAP_RSRP_LABELS,
+            MAP_RSRP_COLORS,
+            np.arange(-140, -48, 2),
+            "Active RSRP",
+            "RSRP (dBm)",
+            "RSRP",
+            (-140, -50),
+        ),
+        (
+            "RSRQ",
+            plotted["RSRQ"],
+            rsrq_map_class,
+            MAP_RSRQ_LABELS,
+            MAP_RSRQ_COLORS,
+            np.arange(-24, -2.5, 0.5),
+            "Active RSRQ",
+            "RSRQ (dB)",
+            "RSRQ",
+            (-24, -3),
+        ),
+        (
+            "SINR",
+            plotted["SINR"],
+            sinr_map_class,
+            MAP_SINR_LABELS,
+            MAP_SINR_COLORS,
+            np.arange(-15, 31, 1),
+            "Active SINR",
+            "SINR (dB)",
+            "SINR",
+            (-15, 30),
+        ),
+    ]
+    # Readable legend on the small PPT cards (Cover charts use the same bins).
+    def _one(ax, values, classifier, labels, colors, bins, title, xlabel, legend_title, xlim):
+        v = pd.to_numeric(values, errors="coerce")
+        cls = classifier(v)
+        bottom = np.zeros(len(bins) - 1)
+        widths = np.diff(bins)
+        for lab, color in zip(labels, colors):
+            counts, _ = np.histogram(v[cls == lab].dropna(), bins=bins)
+            ax.bar(
+                bins[:-1],
+                counts,
+                width=widths,
+                align="edge",
+                bottom=bottom,
+                color=color,
+                edgecolor="none",
+                label=lab,
+            )
+            bottom += counts
+        ax.legend(title=legend_title, fontsize=8, title_fontsize=9, loc="upper right", framealpha=0.92)
+        style_axes(ax, title, xlabel, "Samples")
+        ax.set_xlim(*xlim)
+        ax.grid(False)
+        ax.set_facecolor("white")
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+
+    for name, values, classifier, labels, colors, bins, title, xlabel, legend_title, xlim in specs:
+        fig, ax = plt.subplots(figsize=(5.4, 3.0), dpi=160)
+        _one(ax, values, classifier, labels, colors, bins, title, xlabel, legend_title, xlim)
+        fig.tight_layout(pad=0.35)
+        out = EXEC_HIST[name]
+        fig.savefig(out, dpi=160, facecolor="white")
+        plt.close(fig)
+        print(f"Wrote {out.relative_to(ROOT)}")
+
+    fig, axes = plt.subplots(1, 3, figsize=(14.5, 3.6), dpi=160)
+    for ax, (_name, values, classifier, labels, colors, bins, title, xlabel, legend_title, xlim) in zip(axes, specs):
+        _one(ax, values, classifier, labels, colors, bins, title, xlabel, legend_title, xlim)
+    fig.suptitle("Active Mode — RSRP / RSRQ / SINR histograms", fontsize=12, fontweight="bold", y=1.02)
+    fig.tight_layout()
+    combined = EXEC_HIST_DIR / "active_kpi_histograms.png"
+    fig.savefig(combined, dpi=160, facecolor="white", bbox_inches="tight")
+    plt.close(fig)
+    print(f"Wrote {combined.relative_to(ROOT)}")
+
+
 def build() -> Path:
     if not REPORT.exists():
         raise SystemExit(f"Missing {REPORT.name}")
+    _render_exec_hists()
     rows = _cover_rows()
     groups = _example_groups(rows)
     missing = []
