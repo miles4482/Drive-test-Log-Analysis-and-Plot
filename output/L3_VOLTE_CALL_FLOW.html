@@ -43,7 +43,7 @@
 <body>
 <header>
   <h1>VoLTE call flow — Robi vs Banglalink vs Grameenphone</h1>
-  <p class="sub">One good-RSRP on-net sample call per operator, Bogura L3 logs. Times are seconds after UE-A sends SIP INVITE. UE-A and UE-B are logged on the same clock.</p>
+  <p class="sub">Strongest alerted on-net call per operator. No serving-cell measurement in this drive is above −50 dBm: the best is −60 dBm (GP), −66 dBm (Robi), −67 dBm (BL). Times are seconds after UE-A sends SIP INVITE.</p>
 </header>
 
 <section class="gap">
@@ -52,20 +52,20 @@
       <tr><th>Setup step (adds up to CST)</th><th>Robi</th><th>Banglalink</th><th>Grameenphone</th><th>Robi − BL</th></tr>
     </thead>
     <tbody>
-      <tr><td>1. UE-A INVITE → UE-B receives INVITE (IMS core, paging, RRC)</td><td class="bad">2.17 s</td><td class="ok">0.33 s</td><td>1.33 s</td><td class="bad">+1.84 s</td></tr>
-      <tr class="sub"><td>&nbsp;&nbsp;&nbsp;UE-B paged at</td><td>2.01 s (idle)</td><td>not paged (connected)</td><td>1.13 s (idle)</td><td></td></tr>
-      <tr><td>2. UE-B receives INVITE → UE-B sends 183</td><td>0.06 s</td><td>0.05 s</td><td>0.04 s</td><td>+0.01 s</td></tr>
-      <tr><td>3. UE-B sends 183 → UE-A receives 183</td><td class="bad">0.72 s</td><td class="ok">0.09 s</td><td>0.56 s</td><td class="bad">+0.63 s</td></tr>
-      <tr class="sub"><td>&nbsp;&nbsp;&nbsp;UE-A voice bearer (QCI 1) at</td><td>2.75 s (after B's 183)</td><td>0.08 s</td><td>0.24 s</td><td></td></tr>
-      <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td>0.33 s</td><td>0.29 s</td><td>0.28 s</td><td>+0.04 s</td></tr>
-      <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td>3.27 s</td><td>0.75 s</td><td>2.20 s</td><td>+2.52 s</td></tr>
+      <tr><td>1. UE-A INVITE → UE-B receives INVITE (IMS core, paging, RRC)</td><td class="bad">1.49 s</td><td class="ok">0.34 s</td><td>1.84 s</td><td class="bad">+1.16 s</td></tr>
+      <tr class="sub"><td>&nbsp;&nbsp;&nbsp;UE-B paged at</td><td>1.29 s (idle, answered immediately)</td><td>not paged (connected)</td><td>1.67 s (idle, answered immediately)</td><td></td></tr>
+      <tr><td>2. UE-B receives INVITE → UE-B sends 183</td><td>0.06 s</td><td>0.04 s</td><td>0.06 s</td><td>+0.02 s</td></tr>
+      <tr><td>3. UE-B sends 183 → UE-A receives 183</td><td class="bad">0.67 s</td><td class="ok">0.09 s</td><td>0.43 s</td><td class="bad">+0.58 s</td></tr>
+      <tr class="sub"><td>&nbsp;&nbsp;&nbsp;UE-A voice bearer (QCI 1) at</td><td>2.05 s (after B's 183)</td><td>0.08 s</td><td>0.35 s</td><td></td></tr>
+      <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td>0.26 s</td><td>0.29 s</td><td>0.40 s</td><td>−0.03 s</td></tr>
+      <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td>2.49 s</td><td>0.76 s</td><td>2.73 s</td><td>+1.73 s</td></tr>
     </tbody>
   </table>
 </section>
 
 <section class="find">
-  <b class="bad">Gap 1, +1.84 s.</b> Robi's INVITE needs 2.17 s to reach UE-B. UE-B was idle and read its paging occasion at 0.73 s with no page for it. The page came at the next occasion, 2.01 s, one 1.28 s paging cycle later. The terminating network got the INVITE between 0.73 s and 2.01 s, so the IMS core path takes at least 0.73 s. Banglalink's whole path to UE-B, with UE-B already connected, is 0.33 s.<br>
-  <b class="bad">Gap 2, +0.63 s.</b> Robi starts UE-A's QCI 1 voice bearer only after UE-B's 183 comes back (2.75 s) and holds the 183 until that bearer is up. Banglalink and GP start it right after INVITE (0.08 s and 0.24 s).
+  <b class="bad">Gap 1, +1.16 s, and it is not the radio.</b> At −70 to −78 dBm, Robi's INVITE still needs 1.49 s to reach UE-B. UE-B was idle. The page for that phone arrived at 1.29 s, the phone answered in the same millisecond, RRC was up at 1.38 s, and the INVITE arrived at 1.49 s. The air interface after the page is 0.20 s. The wait is before the page. Banglalink's UE-B was already connected and had the INVITE at 0.34 s. Grameenphone, on the strongest call in the drive (−60 to −69 dBm), is slower than Robi: its idle UE-B is paged at 1.67 s and receives the INVITE at 1.84 s.<br>
+  <b class="bad">Gap 2, +0.58 s.</b> Robi starts UE-A's QCI 1 bearer at 2.05 s, after UE-B has sent 183, and that 183 takes 0.67 s to reach UE-A. Banglalink starts the bearer at 0.08 s and returns the 183 in 0.09 s. GP starts its bearer at 0.35 s.
 </section>
 
 <div class="bar" id="bar">
@@ -112,89 +112,86 @@ const CORE = [
 
 const OPS = [
   {
-    id: "robi", name: "Robi", color: "#c0392b", cst: 3269,
-    meta: "Log 10.txt · RSRP UE-A −73 to −80 dBm, UE-B −78 to −80 dBm · CST 3.27 s",
+    id: "robi", name: "Robi", color: "#c0392b", cst: 2486,
+    meta: "Log 6.txt · strongest Robi call · RSRP UE-A −78 to −71 dBm, UE-B −75 to −70 dBm · CST 2.49 s",
     steps: [
       { k: "msg", f: 0, to: 1, l: "SIP INVITE (SDP O1)", tm: "0.00 s", t: 0 },
-      { k: "msg", f: 1, to: 0, l: "100 Trying", tm: "0.08 s", t: 84 },
+      { k: "msg", f: 1, to: 0, l: "100 Trying", tm: "0.05 s", t: 51 },
       ...CORE,
-      { k: "note", side: "mid", cls: "bad", t: 2008, lines: ["Gap 1: INVITE needs 2.17 s to reach UE-B (Banglalink 0.33 s)", "UE-B idle: no page at its 0.73 s occasion, paged at the next one, 2.01 s (1.28 s cycle)"] },
-      { k: "note", side: "B", cls: "bad", t: 2009, lines: ["UE-B idle → paged 2.01 s", "Service Request, RRC 2.09 s"] },
-      { k: "msg", f: 7, to: 8, l: "SIP INVITE (SDP O1)", tm: "B 2.17 s", t: 2166, cls: "bad" },
-      { k: "msg", f: 8, to: 7, l: "183 In Progress (SDP A1)", tm: "B 2.22 s", t: 2223 },
-      { k: "bearer", f: 7, to: 8, l: "QCI 1 voice bearer (B)", tm: "2.39 s", t: 2392 },
-      { k: "bearer", f: 1, to: 0, l: "QCI 1 voice bearer (A)", tm: "2.75 s", t: 2753, cls: "bad" },
-      { k: "note", side: "A", cls: "bad", t: 2754, lines: ["Gap 2: A bearer starts only", "after B's 183 (BL: 0.08 s)"] },
-      { k: "e2e", f: 7, to: 0, l: "183 In Progress (SDP A1)", tm: "B 2.22 → A 2.94 s", t: 2941, cls: "bad" },
-      { k: "e2e", f: 0, to: 8, l: "SIP PRACK", tm: "A 2.96 → B 3.13 s", t: 2961 },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (PRACK)", tm: "B 3.15 → A 3.23 s", t: 3150 },
-      { k: "note", side: "B", t: 3151, lines: ["SDP ok, start to ring"] },
-      { k: "e2e", f: 8, to: 0, l: "180 Ringing", tm: "B 3.15 → A 3.27 s  ·  CST 3.27 s", t: 3153, cls: "cst" },
-      { k: "note", side: "B", t: 4828, lines: ["call accepted"] },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (INVITE)", tm: "B 4.83 → A 5.10 s", t: 4829 },
-      { k: "e2e", f: 0, to: 8, l: "SIP ACK", tm: "A 5.12 → B 5.22 s", t: 5117 },
-      { k: "rtp", t: 5300 },
-      { k: "brk", l: "talk time ≈ 85 s" },
-      { k: "note", side: "A", t: 90656, lines: ["call finished"] },
-      { k: "e2e", f: 0, to: 8, l: "SIP BYE", tm: "A 90.66 → B 90.99 s", t: 90657 },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (BYE)", tm: "B 91.02 → A 91.21 s", t: 91019 }
+      { k: "note", side: "mid", cls: "bad", t: 1293, lines: ["Gap 1: INVITE needs 1.49 s to reach UE-B (Banglalink 0.34 s)", "Page at 1.29 s, phone answers immediately. Air time after the page is 0.20 s"] },
+      { k: "note", side: "B", cls: "bad", t: 1294, lines: ["UE-B idle → paged 1.29 s", "Service Request same ms, RRC 1.38 s"] },
+      { k: "msg", f: 7, to: 8, l: "SIP INVITE (SDP O1)", tm: "B 1.49 s", t: 1492, cls: "bad" },
+      { k: "msg", f: 8, to: 7, l: "183 In Progress (SDP A1)", tm: "B 1.55 s", t: 1554 },
+      { k: "bearer", f: 7, to: 8, l: "QCI 1 voice bearer (B)", tm: "1.74 s", t: 1740 },
+      { k: "bearer", f: 1, to: 0, l: "QCI 1 voice bearer (A)", tm: "2.05 s", t: 2045, cls: "bad" },
+      { k: "note", side: "A", cls: "bad", t: 2046, lines: ["Gap 2: A bearer starts only", "after B's 183 (BL: 0.08 s)"] },
+      { k: "e2e", f: 7, to: 0, l: "183 In Progress (SDP A1)", tm: "B 1.55 → A 2.23 s", t: 2226, cls: "bad" },
+      { k: "e2e", f: 0, to: 8, l: "SIP PRACK", tm: "A 2.25 → B 2.34 s", t: 2246 },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (PRACK)", tm: "B 2.37 → A 2.49 s", t: 2372 },
+      { k: "note", side: "B", t: 2373, lines: ["SDP ok, start to ring"] },
+      { k: "e2e", f: 8, to: 0, l: "180 Ringing", tm: "B 2.38 → A 2.49 s  ·  CST 2.49 s", t: 2375, cls: "cst" },
+      { k: "note", side: "B", t: 4012, lines: ["call accepted"] },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (INVITE)", tm: "B 4.01 → A 4.31 s", t: 4013 },
+      { k: "e2e", f: 0, to: 8, l: "SIP ACK", tm: "A 4.32 → B 4.48 s", t: 4324 },
+      { k: "rtp", t: 4500 },
+      { k: "note", side: "mid", t: 5000, lines: ["No BYE for this call in the log"] }
     ]
   },
   {
-    id: "bl", name: "Banglalink", color: "#1e8449", cst: 748,
-    meta: "Log 9.txt · RSRP UE-A −83 dBm (last report), UE-B −83 to −84 dBm · CST 0.75 s",
+    id: "bl", name: "Banglalink", color: "#1e8449", cst: 761,
+    meta: "Log 9.txt · strongest BL call · RSRP UE-A −81 dBm (3.9 s before), UE-B −81 dBm · CST 0.76 s",
     steps: [
       { k: "msg", f: 0, to: 1, l: "SIP INVITE (SDP O1)", tm: "0.00 s", t: 0 },
-      { k: "msg", f: 1, to: 0, l: "100 Trying", tm: "0.04 s", t: 44 },
-      { k: "bearer", f: 1, to: 0, l: "QCI 1 voice bearer (A)", tm: "0.08 s", t: 82, cls: "good" },
-      { k: "note", side: "A", cls: "good", t: 83, lines: ["A bearer right after INVITE"] },
+      { k: "msg", f: 1, to: 0, l: "100 Trying", tm: "0.05 s", t: 46 },
+      { k: "bearer", f: 1, to: 0, l: "QCI 1 voice bearer (A)", tm: "0.08 s", t: 79, cls: "good" },
+      { k: "note", side: "A", cls: "good", t: 80, lines: ["A bearer right after INVITE"] },
       ...CORE,
       { k: "note", side: "B", cls: "good", t: 300, lines: ["UE-B already connected", "no paging needed"] },
-      { k: "msg", f: 7, to: 8, l: "SIP INVITE (SDP O1)", tm: "B 0.33 s", t: 326, cls: "good" },
-      { k: "msg", f: 8, to: 7, l: "183 In Progress (SDP A1)", tm: "B 0.37 s", t: 373 },
-      { k: "bearer", f: 7, to: 8, l: "QCI 1 voice bearer (B)", tm: "0.46 s", t: 460 },
-      { k: "e2e", f: 7, to: 0, l: "183 In Progress (SDP A1)", tm: "B 0.37 → A 0.46 s", t: 461, cls: "good" },
-      { k: "e2e", f: 0, to: 8, l: "SIP PRACK", tm: "A 0.48 → B 0.52 s", t: 478 },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (PRACK)", tm: "B 0.54 → A 0.60 s", t: 537 },
-      { k: "e2e", f: 0, to: 8, l: "SIP UPDATE (SDP O2)", tm: "A 0.61 → B 0.67 s", t: 606 },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (SDP A2 - UPDATE)", tm: "B 0.69 → A 0.75 s", t: 687 },
-      { k: "note", side: "B", t: 689, lines: ["SDP ok, start to ring"] },
-      { k: "e2e", f: 8, to: 0, l: "180 Ringing", tm: "B 0.69 → A 0.75 s  ·  CST 0.75 s", t: 691, cls: "cst" },
-      { k: "note", side: "B", t: 2359, lines: ["call accepted"] },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (INVITE)", tm: "B 2.36 → A 2.48 s", t: 2360 },
-      { k: "e2e", f: 0, to: 8, l: "SIP ACK", tm: "A 2.50 → B 2.55 s", t: 2499 },
+      { k: "msg", f: 7, to: 8, l: "SIP INVITE (SDP O1)", tm: "B 0.34 s", t: 337, cls: "good" },
+      { k: "msg", f: 8, to: 7, l: "183 In Progress (SDP A1)", tm: "B 0.38 s", t: 380 },
+      { k: "bearer", f: 7, to: 8, l: "QCI 1 voice bearer (B)", tm: "0.46 s", t: 457 },
+      { k: "e2e", f: 7, to: 0, l: "183 In Progress (SDP A1)", tm: "B 0.38 → A 0.47 s", t: 472, cls: "good" },
+      { k: "e2e", f: 0, to: 8, l: "SIP PRACK", tm: "A 0.48 → B 0.53 s", t: 484 },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (PRACK)", tm: "B 0.54 → A 0.59 s", t: 538 },
+      { k: "e2e", f: 0, to: 8, l: "SIP UPDATE (SDP O2)", tm: "A 0.59 → B 0.66 s", t: 593 },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (SDP A2 - UPDATE)", tm: "B 0.68 → A 0.73 s", t: 676 },
+      { k: "note", side: "B", t: 677, lines: ["SDP ok, start to ring"] },
+      { k: "e2e", f: 8, to: 0, l: "180 Ringing", tm: "B 0.68 → A 0.76 s  ·  CST 0.76 s", t: 679, cls: "cst" },
+      { k: "note", side: "B", t: 2334, lines: ["call accepted"] },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (INVITE)", tm: "B 2.34 → A 2.45 s", t: 2335 },
+      { k: "e2e", f: 0, to: 8, l: "SIP ACK", tm: "A 2.47 → B 2.52 s", t: 2466 },
       { k: "rtp", t: 2600 },
-      { k: "brk", l: "talk time ≈ 88 s" },
-      { k: "note", side: "A", t: 90869, lines: ["call finished"] },
-      { k: "e2e", f: 0, to: 8, l: "SIP BYE", tm: "A 90.87 → B 90.93 s", t: 90870 },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (BYE)", tm: "B 90.95 → A 91.00 s", t: 90952 }
+      { k: "note", side: "mid", t: 3000, lines: ["No BYE for this call in the log"] }
     ]
   },
   {
-    id: "gp", name: "Grameenphone", color: "#1f4e9a", cst: 2204,
-    meta: "Log 6.txt · RSRP UE-A −84 to −87 dBm, UE-B −80 to −87 dBm · CST 2.20 s",
+    id: "gp", name: "Grameenphone", color: "#1f4e9a", cst: 2732,
+    meta: "Log 8.txt · strongest call in the drive · RSRP UE-A −63 to −60 dBm, UE-B −69 to −63 dBm · CST 2.73 s",
     steps: [
       { k: "msg", f: 0, to: 1, l: "SIP INVITE (SDP O1)", tm: "0.00 s", t: 0 },
-      { k: "msg", f: 1, to: 0, l: "100 Trying", tm: "0.16 s", t: 164 },
-      { k: "bearer", f: 1, to: 0, l: "QCI 1 voice bearer (A)", tm: "0.24 s", t: 238, cls: "good" },
-      { k: "note", side: "A", cls: "good", t: 239, lines: ["A bearer right after INVITE"] },
+      { k: "msg", f: 1, to: 0, l: "100 Trying", tm: "0.20 s", t: 200 },
+      { k: "bearer", f: 1, to: 0, l: "QCI 1 voice bearer (A)", tm: "0.35 s", t: 352, cls: "good" },
+      { k: "note", side: "A", cls: "good", t: 353, lines: ["A bearer right after INVITE", "UE-A RRC up at 0.09 s"] },
       ...CORE,
-      { k: "note", side: "mid", cls: "warn", t: 1133, lines: ["INVITE needs 1.33 s to reach UE-B (Banglalink 0.33 s)", "UE-B idle: paged at 1.13 s"] },
-      { k: "note", side: "B", cls: "warn", t: 1134, lines: ["UE-B idle → paged 1.13 s", "Service Request, RRC 1.21 s"] },
-      { k: "msg", f: 7, to: 8, l: "SIP INVITE (SDP O1)", tm: "B 1.33 s", t: 1328, cls: "warn" },
-      { k: "msg", f: 8, to: 7, l: "183 In Progress (SDP A1)", tm: "B 1.37 s", t: 1366 },
-      { k: "bearer", f: 7, to: 8, l: "QCI 1 voice bearer (B)", tm: "1.52 s", t: 1517 },
-      { k: "e2e", f: 7, to: 0, l: "183 In Progress (SDP A1)", tm: "B 1.37 → A 1.93 s", t: 1928, cls: "warn" },
-      { k: "note", side: "A", cls: "warn", t: 1929, lines: ["183 needs 0.56 s B → A", "(Banglalink 0.09 s)"] },
-      { k: "e2e", f: 0, to: 8, l: "SIP PRACK", tm: "A 1.95 → B 2.08 s", t: 1945 },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (PRACK)", tm: "B 2.11 → A 2.20 s", t: 2107 },
-      { k: "note", side: "B", t: 2110, lines: ["SDP ok, start to ring"] },
-      { k: "e2e", f: 8, to: 0, l: "180 Ringing", tm: "B 2.11 → A 2.20 s  ·  CST 2.20 s", t: 2113, cls: "cst" },
-      { k: "note", side: "B", t: 3784, lines: ["call accepted"] },
-      { k: "e2e", f: 8, to: 0, l: "200 OK (INVITE)", tm: "B 3.79 → A 4.01 s", t: 3785 },
-      { k: "e2e", f: 0, to: 8, l: "SIP ACK", tm: "A 4.03 → B 4.17 s", t: 4028 },
-      { k: "rtp", t: 4200 },
-      { k: "note", side: "mid", t: 23000, lines: ["Log ends 23 s after INVITE; no BYE captured for this call"] }
+      { k: "note", side: "mid", cls: "warn", t: 1670, lines: ["INVITE needs 1.84 s to reach UE-B (Banglalink 0.34 s)", "UE-B idle: paged at 1.67 s, answers immediately"] },
+      { k: "note", side: "B", cls: "warn", t: 1671, lines: ["UE-B idle → paged 1.67 s", "Service Request same ms, RRC 1.74 s"] },
+      { k: "msg", f: 7, to: 8, l: "SIP INVITE (SDP O1)", tm: "B 1.84 s", t: 1840, cls: "warn" },
+      { k: "msg", f: 8, to: 7, l: "183 In Progress (SDP A1)", tm: "B 1.90 s", t: 1900 },
+      { k: "bearer", f: 7, to: 8, l: "QCI 1 voice bearer (B)", tm: "2.03 s", t: 2034 },
+      { k: "e2e", f: 7, to: 0, l: "183 In Progress (SDP A1)", tm: "B 1.90 → A 2.33 s", t: 2333, cls: "warn" },
+      { k: "note", side: "A", cls: "warn", t: 2334, lines: ["183 needs 0.43 s B → A", "(Banglalink 0.09 s)"] },
+      { k: "e2e", f: 0, to: 8, l: "SIP PRACK", tm: "A 2.34 → B 2.61 s", t: 2344 },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (PRACK)", tm: "B 2.63 → A 2.73 s", t: 2629 },
+      { k: "note", side: "B", t: 2630, lines: ["SDP ok, start to ring"] },
+      { k: "e2e", f: 8, to: 0, l: "180 Ringing", tm: "B 2.63 → A 2.73 s  ·  CST 2.73 s", t: 2630, cls: "cst" },
+      { k: "note", side: "B", t: 4317, lines: ["call accepted"] },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (INVITE)", tm: "B 4.32 → A 4.57 s", t: 4318 },
+      { k: "e2e", f: 0, to: 8, l: "SIP ACK", tm: "A 4.59 → B 4.68 s", t: 4590 },
+      { k: "rtp", t: 4800 },
+      { k: "brk", l: "talk time ≈ 86 s" },
+      { k: "note", side: "A", t: 90787, lines: ["call finished"] },
+      { k: "e2e", f: 0, to: 8, l: "SIP BYE", tm: "A 90.79 → B 91.08 s", t: 90788 },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (BYE)", tm: "B 91.11 → A 91.21 s", t: 91108 }
     ]
   }
 ];
