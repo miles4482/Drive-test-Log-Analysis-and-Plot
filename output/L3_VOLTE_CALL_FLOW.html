@@ -3,201 +3,150 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>4G/LTE VoLTE call flow</title>
+  <title>4G/LTE Call flow steps</title>
   <style>
     * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      padding: 28px 16px 48px;
-      background: #fff;
-      color: #1a1a1a;
-      font-family: Arial, Helvetica, sans-serif;
-    }
-    h1 {
-      margin: 0 0 18px;
-      text-align: center;
-      font-size: 28px;
-      font-weight: 800;
-    }
-    .ops {
-      display: flex;
-      gap: 28px;
-      justify-content: center;
-      align-items: flex-start;
-      flex-wrap: wrap;
-    }
-    .op { width: 460px; }
-    .op h2 {
-      margin: 0 0 8px;
-      text-align: center;
-      font-size: 22px;
-    }
-    .op h2 span { display: block; font-size: 14px; font-weight: 600; color: #444; }
-    .robi h2 { color: #9a3412; }
-    .gp h2 { color: #1f4e78; }
-    .bl h2 { color: #0f6b3c; }
-    .chart { position: relative; padding: 8px 0 8px 8px; }
-    .rail {
-      position: absolute;
-      top: 28px;
-      bottom: 36px;
-      right: 78px;
-      width: 2px;
-      background: #222;
-    }
-    .core {
-      position: absolute;
-      right: 8px;
-      top: 0;
-      width: 140px;
-      min-height: 54px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      text-align: center;
-      background: #d7bde2;
-      border: 2px solid #6c3483;
-      border-radius: 8px;
-      font-weight: 700;
-      font-size: 14px;
-      line-height: 1.25;
-      z-index: 2;
-    }
-    .core.bottom { top: auto; bottom: 0; }
-    .row {
-      display: grid;
-      grid-template-columns: 128px 1fr;
-      align-items: center;
-      min-height: 62px;
-      margin-right: 148px;
-      position: relative;
-    }
-    .box {
-      min-height: 46px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      text-align: center;
-      border-radius: 8px;
-      border: 2px solid #566573;
-      font-weight: 700;
-      font-size: 14px;
-      padding: 6px 8px;
-      line-height: 1.2;
-      z-index: 2;
-      background: #fff;
-    }
-    .ue { background: #d6eaf8; border-color: #2e86c1; }
-    .enb { background: #d5f5e3; border-color: #1e8449; }
-    .mme { background: #fdebd0; border-color: #ca6f1e; }
-    .pgw { background: #f5cba7; border-color: #b9770e; }
-    .ims { background: #d7bde2; border-color: #6c3483; }
-    .bue { background: #d4e6f1; border-color: #1a5276; }
-    .msg {
-      position: relative;
-      height: 28px;
-      margin-left: 8px;
-      margin-right: 6px;
-    }
-    .msg i {
-      position: absolute;
-      left: 0;
-      right: 10px;
-      top: 13px;
-      height: 0;
-      border-top: 1.5px solid #222;
-    }
-    .msg.back i { border-top-style: solid; }
-    .msg b {
-      position: absolute;
-      left: 0;
-      right: 0;
-      top: -2px;
-      text-align: center;
-      font-size: 12px;
-      font-weight: 700;
-      background: #fff;
-      padding: 0 4px;
-      line-height: 1.1;
-    }
-    .msg em {
-      position: absolute;
-      right: -2px;
-      top: 8px;
-      width: 0;
-      height: 0;
-      border-top: 6px solid transparent;
-      border-bottom: 6px solid transparent;
-      border-left: 9px solid #222;
-    }
-    .msg.back em {
-      right: auto;
-      left: -2px;
-      border-left: 0;
-      border-right: 9px solid #222;
-    }
-    .slow b { color: #9a3412; }
-    .slow i { border-top-color: #9a3412; border-top-width: 2.5px; }
-    .slow em { border-left-color: #9a3412; }
-    .slow.back em { border-left-color: transparent; border-right-color: #9a3412; }
-    .fast b { color: #0f6b3c; }
+    html, body { margin: 0; background: #fff; color: #1a1a1a; }
+    body { font-family: Arial, Helvetica, sans-serif; padding: 12px 8px 28px; }
+    h1 { margin: 4px 0 2px; text-align: center; font-size: 30px; font-weight: 800; letter-spacing: -0.3px; }
+    .note { margin: 0 0 8px; text-align: center; font-size: 13px; color: #333; }
+    .wrap { display: flex; justify-content: center; align-items: flex-start; gap: 8px; flex-wrap: nowrap; }
+    figure { margin: 0; }
+    figcaption { text-align: center; font-weight: 800; font-size: 18px; margin: 0 0 2px; }
+    figcaption span { display: block; font-size: 12px; font-weight: 600; color: #333; }
+    svg { display: block; width: 500px; height: auto; }
   </style>
 </head>
 <body>
-  <h1>4G/LTE VoLTE call flow</h1>
-  <div class="ops">
+  <h1>4G/LTE Call flow steps</h1>
+  <p class="note">VoLTE setup on a good-RSRP sample call. Time is seconds after SIP INVITE.</p>
+  <div class="wrap" id="wrap"></div>
+  <script>
+    const ops = [
+      {
+        name: "Robi",
+        sub: "RSRP −76 dBm · rings at 3.27 s",
+        hue: "#9a3412",
+        rows: [
+          ["UE", "IMS Core", "SIP INVITE · 0.00 s", 1],
+          ["", "", "100 Trying · 0.08 s", -1],
+          ["eNodeB", "", "B-party RRC · 2.09 s", 1, 1],
+          ["MME", "", "Paging · 2.01 s", 1, 1],
+          ["PCRF", "", "Caller voice bearer · 2.75 s", 1, 1],
+          ["", "", "INVITE to B-party · 2.02 s", 1, 1],
+          ["PGW/SGW", "", "183 Session Progress · 2.07 s", -1],
+          ["", "", "Called voice bearer · 2.39 s", 1, 1],
+          ["", "", "180 Ringing · 3.27 s", "voice"],
+          ["IMS", "IMS Core\nP/I/S-CSCF", "Call setup · 3.27 s", 1, 1]
+        ]
+      },
+      {
+        name: "Grameenphone",
+        sub: "RSRP −85 dBm · rings at 2.20 s",
+        hue: "#1a5276",
+        rows: [
+          ["UE", "IMS Core", "SIP INVITE · 0.00 s", 1],
+          ["", "", "100 Trying · 0.16 s", -1],
+          ["eNodeB", "", "B-party RRC · 1.21 s", 1],
+          ["MME", "", "Paging · 1.13 s", 1],
+          ["PCRF", "", "Caller voice bearer · 0.24 s", 1],
+          ["", "", "INVITE to B-party · 1.33 s", 1],
+          ["PGW/SGW", "", "183 Session Progress · 1.37 s", -1],
+          ["", "", "Called voice bearer · 1.52 s", 1],
+          ["", "", "180 Ringing · 2.20 s", "voice"],
+          ["IMS", "IMS Core\nP/I/S-CSCF", "Call setup · 2.20 s", 1]
+        ]
+      },
+      {
+        name: "Banglalink",
+        sub: "RSRP −77 dBm · rings at 0.75 s",
+        hue: "#0e6655",
+        rows: [
+          ["UE", "IMS Core", "SIP INVITE · 0.00 s", 1],
+          ["", "", "100 Trying · 0.04 s", -1],
+          ["eNodeB", "", "Already connected", 1],
+          ["MME", "", "No paging", 1],
+          ["PCRF", "", "Caller voice bearer · 0.08 s", 1],
+          ["", "", "INVITE to B-party · 0.33 s", 1],
+          ["PGW/SGW", "", "183 Session Progress · 0.37 s", -1],
+          ["", "", "Called voice bearer · 0.46 s", 1],
+          ["", "", "180 Ringing · 0.75 s", "voice"],
+          ["IMS", "IMS Core\nP/I/S-CSCF", "Call setup · 0.75 s", 1]
+        ]
+      }
+    ];
 
-    <section class="op robi">
-      <h2>Robi <span>rings at 3.27 s · RSRP −76 dBm</span></h2>
-      <div class="chart">
-        <div class="rail"></div>
-        <div class="core">IMS Core<br>P/I/S-CSCF</div>
-        <div class="row"><div class="box ue">A-party<br>UE</div><div class="msg slow"><b>SIP INVITE · 0.00 s</b><i></i><em></em></div></div>
-        <div class="row"><div class="box ue">A-party<br>UE</div><div class="msg back"><b>100 Trying · 0.08 s</b><i></i><em></em></div></div>
-        <div class="row"><div class="box pgw">PGW / SGW</div><div class="msg back slow"><b>Caller voice bearer · 2.75 s</b><i></i><em></em></div></div>
-        <div class="row"><div class="box mme">MME</div><div class="msg slow"><b>Paging B-party · 2.01 s</b><i></i><em></em></div></div>
-        <div class="row"><div class="box enb">eNodeB</div><div class="msg back"><b>B-party RRC · 2.09 s</b><i></i><em></em></div></div>
-        <div class="row"><div class="box bue">B-party<br>UE</div><div class="msg slow"><b>SIP INVITE · 2.02 s</b><i></i><em></em></div></div>
-        <div class="row"><div class="box bue">B-party<br>UE</div><div class="msg back"><b>183 Session Progress · 2.07 s</b><i></i><em></em></div></div>
-        <div class="row"><div class="box pgw">PGW / SGW</div><div class="msg"><b>Called voice bearer · 2.39 s</b><i></i><em></em></div></div>
-        <div class="row"><div class="box ims">IMS</div><div class="msg back slow"><b>180 Ringing · 3.27 s</b><i></i><em></em></div></div>
-      </div>
-    </section>
+    const fill = {
+      "UE": ["#d6eaf8", "#2e86c1"],
+      "eNodeB": ["#d5f5e3", "#1e8449"],
+      "MME": ["#fdebd0", "#ca6f1e"],
+      "PCRF": ["#e5e8e8", "#7f8c8d"],
+      "PGW/SGW": ["#f5cba7", "#b9770e"],
+      "IMS": ["#d7bde2", "#6c3483"],
+      "IMS Core": ["#d7bde2", "#6c3483"],
+      "IMS Core\nP/I/S-CSCF": ["#d7bde2", "#6c3483"]
+    };
 
-    <section class="op gp">
-      <h2>Grameenphone <span>rings at 2.20 s · RSRP −85 dBm</span></h2>
-      <div class="chart">
-        <div class="rail"></div>
-        <div class="core">IMS Core<br>P/I/S-CSCF</div>
-        <div class="row"><div class="box ue">A-party<br>UE</div><div class="msg"><b>SIP INVITE · 0.00 s</b><i></i><em></em></div></div>
-        <div class="row"><div class="box ue">A-party<br>UE</div><div class="msg back"><b>100 Trying · 0.16 s</b><i></i><em></em></div></div>
-        <div class="row"><div class="box pgw">PGW / SGW</div><div class="msg back fast"><b>Caller voice bearer · 0.24 s</b><i></i><em></em></div></div>
-        <div class="row"><div class="box mme">MME</div><div class="msg slow"><b>Paging B-party · 1.13 s</b><i></i><em></em></div></div>
-        <div class="row"><div class="box enb">eNodeB</div><div class="msg back"><b>B-party RRC · 1.21 s</b><i></i><em></em></div></div>
-        <div class="row"><div class="box bue">B-party<br>UE</div><div class="msg slow"><b>SIP INVITE · 1.33 s</b><i></i><em></em></div></div>
-        <div class="row"><div class="box bue">B-party<br>UE</div><div class="msg back"><b>183 Session Progress · 1.37 s</b><i></i><em></em></div></div>
-        <div class="row"><div class="box pgw">PGW / SGW</div><div class="msg"><b>Called voice bearer · 1.52 s</b><i></i><em></em></div></div>
-        <div class="row"><div class="box ims">IMS</div><div class="msg back"><b>180 Ringing · 2.20 s</b><i></i><em></em></div></div>
-      </div>
-    </section>
+    function esc(s) {
+      return s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    }
 
-    <section class="op bl">
-      <h2>Banglalink <span>rings at 0.75 s · RSRP −77 dBm</span></h2>
-      <div class="chart">
-        <div class="rail"></div>
-        <div class="core">IMS Core<br>P/I/S-CSCF</div>
-        <div class="row"><div class="box ue">A-party<br>UE</div><div class="msg"><b>SIP INVITE · 0.00 s</b><i></i><em></em></div></div>
-        <div class="row"><div class="box ue">A-party<br>UE</div><div class="msg back"><b>100 Trying · 0.04 s</b><i></i><em></em></div></div>
-        <div class="row"><div class="box pgw">PGW / SGW</div><div class="msg back fast"><b>Caller voice bearer · 0.08 s</b><i></i><em></em></div></div>
-        <div class="row"><div class="box mme">MME</div><div class="msg fast"><b>No paging · already connected</b><i></i><em></em></div></div>
-        <div class="row"><div class="box enb">eNodeB</div><div class="msg back fast"><b>No new RRC setup</b><i></i><em></em></div></div>
-        <div class="row"><div class="box bue">B-party<br>UE</div><div class="msg fast"><b>SIP INVITE · 0.33 s</b><i></i><em></em></div></div>
-        <div class="row"><div class="box bue">B-party<br>UE</div><div class="msg back"><b>183 Session Progress · 0.37 s</b><i></i><em></em></div></div>
-        <div class="row"><div class="box pgw">PGW / SGW</div><div class="msg fast"><b>Called voice bearer · 0.46 s</b><i></i><em></em></div></div>
-        <div class="row"><div class="box ims">IMS</div><div class="msg back fast"><b>180 Ringing · 0.75 s</b><i></i><em></em></div></div>
-      </div>
-    </section>
+    function box(x, y, w, h, label) {
+      const [bg, stroke] = fill[label];
+      const lines = label.split("\n");
+      const start = y + h / 2 - (lines.length - 1) * 8 + 5;
+      const text = lines.map((line, i) =>
+        `<tspan x="${x + w / 2}" y="${start + i * 16}">${esc(line)}</tspan>`
+      ).join("");
+      return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="7" fill="${bg}" stroke="${stroke}" stroke-width="1.7"/>
+        <text text-anchor="middle" font-family="Arial" font-size="14" font-weight="700" fill="#1a1a1a">${text}</text>`;
+    }
 
-  </div>
+    function arrow(y, dir, label, slow, gid) {
+      const x1 = 168, x2 = 372;
+      const color = slow ? "#9a3412" : "#222";
+      const head = dir === "voice" || dir === 1
+        ? `<polygon points="${x2},${y} ${x2 - 11},${y - 5} ${x2 - 11},${y + 5}" fill="${dir === "voice" ? "#e67e22" : color}"/>`
+        : `<polygon points="${x1},${y} ${x1 + 11},${y - 5} ${x1 + 11},${y + 5}" fill="${color}"/>`;
+      const lineColor = dir === "voice" ? "#e67e22" : color;
+      const xStart = dir === -1 ? x2 : x1;
+      const xEnd = dir === -1 ? x1 + 12 : x2 - 12;
+      let extra = "";
+      if (dir === "voice") {
+        extra = `<rect x="232" y="${y - 10}" width="76" height="20" rx="3" fill="#fdebd0"/>
+          <text x="270" y="${y + 4}" text-anchor="middle" font-family="Arial" font-size="12" font-weight="800" fill="#d35400">VOICE</text>
+          <text x="270" y="${y - 16}" text-anchor="middle" font-family="Arial" font-size="12" font-weight="700" fill="${color}">${esc(label)}</text>`;
+      } else {
+        extra = `<text x="270" y="${y - 7}" text-anchor="middle" font-family="Arial" font-size="12.5" font-weight="700" fill="${color}">${esc(label)}</text>`;
+      }
+      return `<line x1="${xStart}" y1="${y}" x2="${xEnd}" y2="${y}" stroke="${lineColor}" stroke-width="${slow || dir === "voice" ? 2.2 : 1.5}"/>${head}${extra}`;
+    }
+
+    function chart(op) {
+      const lx = 168;
+      const parts = [];
+      parts.push(`<line x1="${lx}" y1="62" x2="${lx}" y2="668" stroke="#222" stroke-width="1.7"/>`);
+      parts.push(`<line x1="372" y1="62" x2="372" y2="668" stroke="#222" stroke-width="1.7"/>`);
+      const yAt = [8, 78, 118, 196, 274, 352, 412, 478, 548, 668];
+      const hAt = [52, 0, 46, 46, 46, 0, 52, 0, 0, 56];
+      op.rows.forEach((row, i) => {
+        const [left, right, label, dir, slow] = row;
+        const y = yAt[i];
+        if (left) parts.push(box(lx - 132, y, 132, hAt[i], left));
+        if (right) parts.push(box(372, y, 148, hAt[i], right));
+        const ay = left ? y + hAt[i] / 2 : y;
+        if (label) parts.push(arrow(ay, dir, label, slow, op.name));
+      });
+      return `<figure>
+        <figcaption style="color:${op.hue}">${esc(op.name)}<span>${esc(op.sub)}</span></figcaption>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 740" width="500" height="685">
+          <rect width="540" height="740" fill="#fff"/>
+          ${parts.join("")}
+        </svg>
+      </figure>`;
+    }
+
+    document.getElementById("wrap").innerHTML = ops.map(chart).join("");
+  </script>
 </body>
 </html>
