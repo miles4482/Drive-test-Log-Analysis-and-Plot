@@ -92,7 +92,7 @@ from merge_and_analyze import (
 
 # Raise this on every report write. The versioned filename is the name that
 # gets downloaded, so a new Excel or web report must not reuse the previous number.
-REPORT_VERSION = "2.05"
+REPORT_VERSION = "2.06"
 SVG_DIR = PLOTS_DIR / "svg"
 SVG_FALLBACK_SCALE = 3.0
 SVG_BLIP_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
@@ -351,6 +351,7 @@ def embed_circle_shapes(path: Path) -> int:
                 next_shape += 1
                 placed += 1
         if extras:
+            drawing = _bind_drawing_prefixes(drawing)
             drawing = drawing.replace("</wsDr>", "".join(extras) + "</wsDr>")
             parts[drawing_name] = drawing.encode("utf-8")
     if placed:
@@ -361,6 +362,33 @@ def embed_circle_shapes(path: Path) -> int:
         tmp.replace(path)
     spread_circle_anchors(path)
     return placed
+
+
+def _bind_root_prefixes(xml: str, root_tag: str, prefixes: dict[str, str]) -> str:
+    """Declare prefixes on the root element when a fragment added below uses them.
+
+    Fresh openpyxl parts declare a: / r: only on the elements that use them, so
+    an appended fragment with a: or r: is unbound and Excel calls the file corrupt.
+    """
+    match = re.match(rf"(<{root_tag}\b)([^>]*?)(/?>)", xml)
+    if match is None:
+        raise SystemExit(f"<{root_tag}> root not found")
+    attrs = match.group(2)
+    extra = "".join(
+        f' xmlns:{prefix}="{uri}"' for prefix, uri in prefixes.items() if f"xmlns:{prefix}=" not in attrs
+    )
+    return xml[: match.end(2)] + extra + xml[match.end(2):]
+
+
+def _bind_drawing_prefixes(drawing: str) -> str:
+    return _bind_root_prefixes(
+        drawing,
+        "wsDr",
+        {
+            "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+            "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+        },
+    )
 
 
 def _circle_anchor(circle, shape_id, col, col_off, row, row_off, pic_cx, pic_cy, img_w, img_h) -> str:
@@ -4896,8 +4924,8 @@ def _add_solution_columns(xml: str, plans: list[dict]) -> str:
         body = match.group(3)
         lines = str(plan.get("final") or "").count("\n") + 1
         height = max(52, min(16 * lines + 8, 120))
-        if "ht=" in attrs:
-            attrs = re.sub(r'ht="[\d.]+"', f'ht="{height}"', attrs)
+        if re.search(r'\bht="', attrs):
+            attrs = re.sub(r'\bht="[\d.]+"', f'ht="{height}"', attrs)
         else:
             attrs += f' ht="{height}" customHeight="1"'
         pieces.append(xml[last:match.start()])
@@ -4907,7 +4935,7 @@ def _add_solution_columns(xml: str, plans: list[dict]) -> str:
             (f"Q{row_n}", 37, str(plan.get("final", ""))),
         )
         if f'r="Q{row_n}"' not in body:
-            if "ht=" not in attrs:
+            if not re.search(r'\bht="', attrs):
                 attrs += ' ht="52" customHeight="1"'
             body += "".join(_inline_cell(ref, style, text) for ref, style, text in updates)
         else:
@@ -5427,7 +5455,13 @@ def _ep_sheet_xml(actions: list[dict]) -> bytes:
 def _ensure_ep_sheet(parts: dict[str, bytes]) -> None:
     workbook = parts["xl/workbook.xml"].decode("utf-8")
     if 'name="EP Details"' not in workbook:
-        # Fresh openpyxl sheets carry xmlns:r on the tag; match on name only.
+        # Fresh openpyxl sheets carry xmlns:r on each tag, not on <workbook>; bind
+        # r: on the root so the inserted r:id is not an unbound prefix.
+        workbook = _bind_root_prefixes(
+            workbook,
+            "workbook",
+            {"r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"},
+        )
         chart = re.search(r'<sheet\b[^>]*\bname="_ChartData"[^>]*/>', workbook)
         if chart is None:
             raise SystemExit("Could not find _ChartData sheet to insert EP Details before it")
