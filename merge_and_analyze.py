@@ -6412,23 +6412,34 @@ def _cluster_cover_points(
 
 
 def _outline_from_points(
-    template: pd.Series, points: list[tuple[float, float]], *, dotted: bool,
+    template: pd.Series, points: list[tuple[float, float]], *, dotted: bool, contain: bool = False,
 ) -> pd.Series:
-    """Tight oval around a pocket of cover points (red road or blank)."""
+    """Tight oval around a pocket of cover points (red road or blank).
+
+    contain=True draws a real circle that holds every point. A fitted ellipse
+    leaves the ends of a diagonal blank outside the oval.
+    """
     lats = [p[0] for p in points]
     lons = [p[1] for p in points]
     lat0 = float((min(lats) + max(lats)) / 2.0)
     lon0 = float((min(lons) + max(lons)) / 2.0)
     pad = POCKET_CIRCLE_PAD_KM
-    height = max((max(lats) - min(lats)) * 111.32 + 2.0 * pad, POCKET_CIRCLE_MIN_KM)
-    width = max(
-        (max(lons) - min(lons)) * _km_per_deg_lon(lat0) + 2.0 * pad,
-        POCKET_CIRCLE_MIN_KM,
-    )
-    # Cap only at the pocket max — blanks outside the tight red oval still need
-    # a full-size circle of their own.
-    height = min(height, POCKET_CIRCLE_MAX_KM + 0.4)
-    width = min(width, POCKET_CIRCLE_MAX_KM + 0.4)
+    if contain:
+        km_lon = _km_per_deg_lon(lat0)
+        rad = max(
+            math.hypot((lat - lat0) * 111.32, (lon - lon0) * km_lon)
+            for lat, lon in points
+        )
+        rad = max(rad + pad, POCKET_CIRCLE_MIN_KM / 2.0)
+        width = height = 2.0 * rad
+    else:
+        height = max((max(lats) - min(lats)) * 111.32 + 2.0 * pad, POCKET_CIRCLE_MIN_KM)
+        width = max(
+            (max(lons) - min(lons)) * _km_per_deg_lon(lat0) + 2.0 * pad,
+            POCKET_CIRCLE_MIN_KM,
+        )
+        height = min(height, POCKET_CIRCLE_MAX_KM + 0.4)
+        width = min(width, POCKET_CIRCLE_MAX_KM + 0.4)
     row = template.copy()
     row["outline_lat"] = lat0
     row["outline_lon"] = lon0
@@ -6521,7 +6532,43 @@ def satellite_circle_spots(
             line = _blank_polyline(piece)
             if all(_covered_by_rows(lat, lon, rows) for lat, lon in line):
                 continue
-            rows.append(_outline_from_points(template, line, dotted=True))
+            rows.append(_outline_from_points(template, line, dotted=True, contain=True))
+
+    # The red oval is an ellipse, so a few poor samples on a diagonal can sit
+    # just outside it. Grow the red circle until every poor sample is inside.
+    threshold = float(BAD_SPOT_RULES[column]["threshold"])
+    poor_points: list[tuple[float, float]] = []
+    if inside is not None and not inside.empty and column in inside.columns:
+        poor_values = pd.to_numeric(inside[column], errors="coerce")
+        poor = inside.loc[poor_values < threshold].dropna(subset=["Latitude", "Longitude"])
+        poor_points = list(zip(poor["Latitude"].astype(float), poor["Longitude"].astype(float)))
+    red_index = [i for i, row in enumerate(rows) if i == 0 or str(row.get("kind")) != "discrete"]
+    if not red_index:
+        red_index = [0]
+    for _ in range(6):
+        stuck = [
+            (lat, lon) for lat, lon in poor_points
+            if not _covered_by_rows(lat, lon, rows, 0.98)
+        ]
+        if not stuck:
+            break
+        grow: set[int] = set()
+        for lat, lon in stuck:
+            best = min(
+                red_index,
+                key=lambda index: _outline_radius(lat, lon, {
+                    "outline_lat": float(rows[index]["outline_lat"]),
+                    "outline_lon": float(rows[index]["outline_lon"]),
+                    "outline_width_km": float(rows[index]["outline_width_km"]),
+                    "outline_height_km": float(rows[index]["outline_height_km"]),
+                }),
+            )
+            grow.add(best)
+        for index in grow:
+            grown = rows[index].copy()
+            grown["outline_width_km"] = float(grown["outline_width_km"]) * 1.2
+            grown["outline_height_km"] = float(grown["outline_height_km"]) * 1.2
+            rows[index] = grown
     return pd.DataFrame(rows)
 
 
