@@ -66,13 +66,14 @@ Current file is **v16**. Previous charts stay in the repo. `output/L3_VOLTE_CALL
 
 ## VoLTE call flow — Dhaka
 
-Source: `Layer 3 Dhaka.7z` (Robi / Banglalink / Grameenphone, 21 A+B pairs). Current chart: **v1**.
+Source: `Layer 3 Dhaka.7z` (Robi / Banglalink / Grameenphone, 21 A+B pairs). Current chart: **v2**.
 
 | Version | File | Contents |
 | --- | --- | --- |
-| v1 | `output/L3_VOLTE_CALL_FLOW_DHAKA_v1.html` | All 21 calls listed. Session ID A/B and RSRP A/B on every ladder header. Idle then connected, session pickers. |
+| v1 | `output/L3_VOLTE_CALL_FLOW_DHAKA_v1.html` | Idle / connected sections with session pickers. |
+| v2 | `output/L3_VOLTE_CALL_FLOW_DHAKA_v2.html` | All 21 calls one after another. Header per call: Session ID + RSRP for A and B. |
 
-`output/L3_VOLTE_CALL_FLOW_DHAKA.html` is a copy of v1.
+`output/L3_VOLTE_CALL_FLOW_DHAKA.html` is a copy of v2.
 
 ```bash
 python3 -c "import py7zr; py7zr.SevenZipFile('Layer 3_Active Mode_Data_Robi_v1.7z').extractall('extracted/l3')"
