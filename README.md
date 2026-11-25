@@ -66,15 +66,16 @@ Current file is **v16**. Previous charts stay in the repo. `output/L3_VOLTE_CALL
 
 ## VoLTE call flow — Dhaka
 
-Source: `Layer 3 Dhaka.7z` (Robi / Banglalink / Grameenphone, 21 A+B pairs). Current chart: **v3**.
+Source: `Layer 3 Dhaka.7z` (Robi / Banglalink / Grameenphone, 21 A+B pairs). Current chart: **v4**.
 
 | Version | File | Contents |
 | --- | --- | --- |
 | v1 | `output/L3_VOLTE_CALL_FLOW_DHAKA_v1.html` | Idle / connected sections with session pickers. |
 | v2 | `output/L3_VOLTE_CALL_FLOW_DHAKA_v2.html` | All 21 calls one after another. Header per call: Session ID + RSRP for A and B. |
-| v3 | `output/L3_VOLTE_CALL_FLOW_DHAKA_v3.html` | 8 simultaneous dial rounds, stacked like Bogura v15. Side-by-side Robi/BL/GP per round. No idle/connected split. |
+| v3 | `output/L3_VOLTE_CALL_FLOW_DHAKA_v3.html` | 8 wall-clock dial rounds (GP missing R1; Robi/BL missing R8). |
+| v4 | `output/L3_VOLTE_CALL_FLOW_DHAKA_v4.html` | 7 paired rounds: every round has Robi+BL+GP by call order (GP ~125 s later OK). v15 format. |
 
-`output/L3_VOLTE_CALL_FLOW_DHAKA.html` is a copy of v3.
+`output/L3_VOLTE_CALL_FLOW_DHAKA.html` is a copy of v4.
 
 ```bash
 python3 -c "import py7zr; py7zr.SevenZipFile('Layer 3_Active Mode_Data_Robi_v1.7z').extractall('extracted/l3')"
