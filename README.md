@@ -138,15 +138,21 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
-## Download Excel report (v2.10)
+## Download Excel report (v2.11)
 
-**v2.10 (current — Excel / PPT / Web same version):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.10.xlsx
+**v2.11 (current — Excel / PPT / Web same version):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.11.xlsx
+
+Summary PPT **v2.11:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.11.pptx
+
+Web **v2.11:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.11.zip
+
+Excel / PPT / Web share version **v2.11**. All 97 Active bad spots were scanned again. A circle sits on the poor road or on a blank with a weak end. A gap in good RSRP is not circled. Holes on one straight road share one circle. Spot 1's north road is one circle. Spot 2's centre hole is circled and the good-RSRP gap is not. Spot 6's circles sit on the plotted road. Check with `python3 validate_xlsx_package.py output/Bogura_DriveTest_Report_v2.11.xlsx`.
+
+**v2.10:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.10.xlsx
 
 Summary PPT **v2.10:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.10.pptx
 
 Web **v2.10:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.10.zip
-
-Excel / PPT / Web share version **v2.10**. All 97 Active bad spots were checked one by one. Every poor-RSRP sample and every driven blank sits inside a circle. 25 spots whose oval missed a blank end or a few red samples were redrawn (spots 6, 8, 9, 14, 16, 18, 19, 27, 28, 29, 30, 31, 40, 42, 43, 58, 60, 65, 79, 81, 82, 84, 90, 93, 95). Check with `python3 validate_xlsx_package.py output/Bogura_DriveTest_Report_v2.10.xlsx`.
 
 **v2.09:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.09.xlsx
 

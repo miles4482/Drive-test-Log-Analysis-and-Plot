@@ -719,20 +719,23 @@ def _blank_gaps_from_track(
     mid_lat = (lat[:-1] + lat[1:]) / 2.0
     mid_lon = (lon[:-1] + lon[1:]) / 2.0
     inside = ((mid_lon - lon0) / half_w) ** 2 + ((mid_lat - lat0) / half_h) ** 2 <= 1.0
-    # A blank is a driven hole with no RSRP. 5–30 min still counts: the holes
-    # on the Active maps are often 1–3 km at ~20 km/h, which takes 5–15 min.
-    # Overnight jumps fail the speed check.
+    # A blank is a hole on the driven road. Slow traffic (~5 km/h) still counts.
+    # Gaps longer than 2.8 km are a jump off the road, not a blank to circle.
     keep = (
         same
         & (dt >= 5.0)
         & (dt <= 1800.0)
         & (dist_m >= 80.0)
-        & (dist_m <= 6000.0)
-        & (speed >= 10.0)
+        & (dist_m <= 2800.0)
+        & (speed >= 4.0)
         & (speed <= 130.0)
         & inside
     )
     idx = np.flatnonzero(keep)
+    rsrp = (
+        pd.to_numeric(work["RSRP"], errors="coerce").to_numpy(dtype=float)
+        if "RSRP" in work.columns else np.full(len(work), np.nan)
+    )
     return [
         {
             "lat": float(mid_lat[i]),
@@ -742,6 +745,8 @@ def _blank_gaps_from_track(
             "lat2": float(lat[i + 1]),
             "lon2": float(lon[i + 1]),
             "length_m": float(dist_m[i]),
+            "rsrp1": None if not np.isfinite(rsrp[i]) else float(rsrp[i]),
+            "rsrp2": None if not np.isfinite(rsrp[i + 1]) else float(rsrp[i + 1]),
         }
         for i in idx
     ]
@@ -2163,7 +2168,7 @@ def _offbeam_pockets(samples: pd.DataFrame, column: str, spot: pd.Series, beams:
             "red": _run_length_m(run),
             "blank": 0.0,
         })
-    for gap in _blank_segments(samples, spot):
+    for gap in _report_blanks(samples, spot, column):
         points.append({
             "lat": (float(gap["lat1"]) + float(gap["lat2"])) / 2.0,
             "lon": (float(gap["lon1"]) + float(gap["lon2"])) / 2.0,
@@ -2654,7 +2659,7 @@ def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series, mode: s
     at the bad spot. A new 3-sector site is kept only past that. The side table
     shows all four steps. The final one is marked.
     """
-    blanks = _blank_segments(samples, spot)
+    blanks = _report_blanks(samples, spot, column)
     blank_m = sum(item["length_m"] for item in blanks)
     bins = _red_bins_inside(samples, column, spot)
     runs = _red_runs(bins) if bins else []
@@ -5373,7 +5378,7 @@ def _bad_road_segments(samples: pd.DataFrame, spot: pd.Series) -> list[tuple[tup
     for left, right in zip(points, points[1:]):
         if float(_equirect_km(left[0], left[1], right[0], right[1])) * 1000.0 <= 450.0:
             segments.append((left, right))
-    for gap in _blank_segments(samples, spot):
+    for gap in _report_blanks(samples, spot, "RSRP"):
         segments.append(((gap["lat1"], gap["lon1"]), (gap["lat2"], gap["lon2"])))
     extended = []
     for start, end in segments:
@@ -6472,103 +6477,247 @@ def _covered_by_rows(lat: float, lon: float, rows: list[pd.Series], limit: float
     return False
 
 
+def _near_poor(lat: float, lon: float, poor_points: list[tuple[float, float]], km: float = 0.75) -> bool:
+    if not poor_points:
+        return False
+    step = max(1, len(poor_points) // 40)
+    return any(
+        _equirect_km(lat, lon, plat, plon) <= km
+        for plat, plon in poor_points[::step]
+    )
+
+
+def _actionable_blanks(blanks: list[dict], poor_points: list[tuple[float, float]]) -> list[dict]:
+    """Keep a hole that is actually bad: a weak end, or a gap beside the poor run.
+
+    A short gap in good RSRP, away from the red road, is not a bad spot.
+    """
+    kept = []
+    for gap in blanks:
+        if float(gap.get("length_m") or 0) < 80:
+            continue
+        ends = [gap.get("rsrp1"), gap.get("rsrp2")]
+        weak = any(value is not None and float(value) < -112.0 for value in ends)
+        if weak or _near_poor(float(gap["lat"]), float(gap["lon"]), poor_points):
+            kept.append(gap)
+    return kept
+
+
+def _report_blanks(samples: pd.DataFrame, spot: pd.Series, column: str = "RSRP") -> list[dict]:
+    """Blanks that count on this bad spot: a weak end, or a hole beside the poor run."""
+    gaps = _blank_segments(samples, spot)
+    poor: list[tuple[float, float]] = []
+    inside = _samples_inside_outline(samples, spot)
+    if inside is not None and not inside.empty and column in getattr(inside, "columns", []):
+        values = pd.to_numeric(inside[column], errors="coerce")
+        hit = inside.loc[values < float(BAD_SPOT_RULES[column]["threshold"])]
+        hit = hit.dropna(subset=["Latitude", "Longitude"])
+        poor = list(zip(hit["Latitude"].astype(float), hit["Longitude"].astype(float)))
+    return _actionable_blanks(gaps, poor)
+
+
+def _chain_straight_blanks(blanks: list[dict]) -> list[list[dict]]:
+    """Join gaps that sit on one straight road so they share one circle."""
+    if not blanks:
+        return []
+    parent = list(range(len(blanks)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def link(left: int, right: int) -> None:
+        parent[find(left)] = find(right)
+
+    for i, left in enumerate(blanks):
+        for j in range(i + 1, len(blanks)):
+            right = blanks[j]
+            # Closest ends within 0.5 km, and the two gaps point the same way.
+            ends_l = ((left["lat1"], left["lon1"]), (left["lat2"], left["lon2"]))
+            ends_r = ((right["lat1"], right["lon1"]), (right["lat2"], right["lon2"]))
+            near = min(
+                _equirect_km(a[0], a[1], b[0], b[1])
+                for a in ends_l for b in ends_r
+            )
+            if near > 0.70:
+                continue
+            bear_l = _bearing_deg(left["lat1"], left["lon1"], left["lat2"], left["lon2"])
+            bear_r = _bearing_deg(right["lat1"], right["lon1"], right["lat2"], right["lon2"])
+            turn = min(
+                _azimuth_gap(bear_l, bear_r),
+                _azimuth_gap(bear_l, (bear_r + 180) % 360),
+            )
+            # A few hundred metres on the same straight road still joins when
+            # a short gap's bearing wobbles.
+            if near > 0.40 and turn > 55.0:
+                continue
+            link(i, j)
+    groups: dict[int, list[dict]] = {}
+    for index, gap in enumerate(blanks):
+        groups.setdefault(find(index), []).append(gap)
+    return list(groups.values())
+
+
+def _merge_close_circles(
+    template: pd.Series, groups: list[list[tuple[float, float]]],
+) -> list[list[tuple[float, float]]]:
+    """One circle on a straight road. Centres within 0.9 km join, up to 2.4 km."""
+    if len(groups) < 2:
+        return groups
+    parent = list(range(len(groups)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def center(points: list[tuple[float, float]]) -> tuple[float, float]:
+        return (
+            float(np.mean([p[0] for p in points])),
+            float(np.mean([p[1] for p in points])),
+        )
+
+    for i in range(len(groups)):
+        ci = center(groups[i])
+        for j in range(i + 1, len(groups)):
+            cj = center(groups[j])
+            if _equirect_km(ci[0], ci[1], cj[0], cj[1]) <= 0.90:
+                parent[find(i)] = find(j)
+    merged: dict[int, list[tuple[float, float]]] = {}
+    for index, points in enumerate(groups):
+        merged.setdefault(find(index), []).extend(points)
+    out = []
+    for points in merged.values():
+        lat0 = float(np.mean([p[0] for p in points]))
+        lon0 = float(np.mean([p[1] for p in points]))
+        km_lon = _km_per_deg_lon(lat0)
+        span = max(
+            math.hypot((lat - lat0) * 111.32, (lon - lon0) * km_lon)
+            for lat, lon in points
+        )
+        if span * 2.0 <= 2.4:
+            out.append(points)
+            continue
+        # Too long for one circle: keep the original pieces that were joined.
+        # Fall back to one contain-circle per 2 km chunk along the long axis.
+        xy = np.array([((lon - lon0) * km_lon, (lat - lat0) * 111.32) for lat, lon in points])
+        order = np.argsort(xy[:, 0] if np.ptp(xy[:, 0]) >= np.ptp(xy[:, 1]) else xy[:, 1])
+        chunk: list[tuple[float, float]] = []
+        anchor = None
+        for index in order.tolist():
+            point = points[index]
+            if anchor is None:
+                anchor = point
+            if chunk and _equirect_km(anchor[0], anchor[1], point[0], point[1]) > 1.6:
+                out.append(chunk)
+                chunk = [point]
+                anchor = point
+            else:
+                chunk.append(point)
+        if chunk:
+            out.append(chunk)
+    # Chunking runs after the first join, so a short gap beside a long hole
+    # is still its own circle. Join those neighbours once the long hole is split.
+    return _union_circle_groups(out, max_km=0.90, max_span_km=1.20)
+
+
+def _union_circle_groups(
+    groups: list[list[tuple[float, float]]], max_km: float, max_span_km: float,
+) -> list[list[tuple[float, float]]]:
+    """Join groups whose centres are close and whose combined reach stays small."""
+    if len(groups) < 2:
+        return groups
+    parent = list(range(len(groups)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def center(points: list[tuple[float, float]]) -> tuple[float, float]:
+        return (
+            float(np.mean([p[0] for p in points])),
+            float(np.mean([p[1] for p in points])),
+        )
+
+    def span(points: list[tuple[float, float]]) -> float:
+        lat0 = float(np.mean([p[0] for p in points]))
+        lon0 = float(np.mean([p[1] for p in points]))
+        km_lon = _km_per_deg_lon(lat0)
+        return max(
+            math.hypot((lat - lat0) * 111.32, (lon - lon0) * km_lon)
+            for lat, lon in points
+        )
+
+    for i in range(len(groups)):
+        ci = center(groups[i])
+        for j in range(i + 1, len(groups)):
+            cj = center(groups[j])
+            if _equirect_km(ci[0], ci[1], cj[0], cj[1]) > max_km:
+                continue
+            if span(groups[i] + groups[j]) <= max_span_km:
+                parent[find(i)] = find(j)
+    merged: dict[int, list[tuple[float, float]]] = {}
+    for index, points in enumerate(groups):
+        merged.setdefault(find(index), []).extend(points)
+    return list(merged.values())
+
+
 def satellite_circle_spots(
     samples: pd.DataFrame, spot: pd.Series, column: str = "RSRP",
 ) -> pd.DataFrame:
-    """Red-road circles plus one circle on every blank that is not already inside them.
+    """Circles on the poor road and on bad blanks. One circle per straight stretch.
 
-    A blank has no RSRP. It is still a bad spot, so it gets its own oval even
-    when it sits off the red road. Long blanks are split so both ends stay
-    inside a circle. There is no one-circle limit.
+    A circle sits on plotted poor samples or on a blank whose end is weak.
+    Gaps in good RSRP, and empty land between distant pockets, are not circled.
+    Several holes on one straight road share one circle.
     """
     template = with_tight_outline(samples, spot, column, cover_blanks=False)
-    red_points = []
+    threshold = float(BAD_SPOT_RULES[column]["threshold"])
+    poor_points: list[tuple[float, float]] = []
     inside = _samples_inside_outline(samples, spot)
     if inside is not None and not inside.empty and column in inside.columns:
         values = pd.to_numeric(inside[column], errors="coerce")
-        cut = (
-            min(float(BAD_SPOT_RULES[column]["threshold"]), -115.0)
-            if column == "RSRP"
-            else float(BAD_SPOT_RULES[column]["threshold"])
-        )
-        red = inside.loc[values < cut].dropna(subset=["Latitude", "Longitude"])
-        red_points = list(zip(red["Latitude"].astype(float), red["Longitude"].astype(float)))
-
-    if len(red_points) <= 1:
-        rows = [template]
-    else:
-        lat0 = float(np.mean([p[0] for p in red_points]))
-        lon0 = float(np.mean([p[1] for p in red_points]))
-        km_lon = _km_per_deg_lon(lat0)
-        span = max(
-            math.hypot((lat - lat0) * 111.32, (lon - lon0) * km_lon) * 2.0
-            for lat, lon in red_points
-        )
-        clusters = _cluster_cover_points(red_points, POCKET_CIRCLE_MAX_KM)
-        if span <= POCKET_CIRCLE_MAX_KM or len(clusters) <= 1:
-            rows = [template]
-        else:
-            clusters = sorted(clusters, key=len, reverse=True)
-            rows = [
-                _outline_from_points(template, cluster, dotted=(index > 0))
-                for index, cluster in enumerate(clusters)
-            ]
-
-    blanks = [gap for gap in _blank_segments(samples, spot) if float(gap.get("length_m") or 0) >= 80]
-    for gap in blanks:
-        length = float(gap["length_m"])
-        # Split a long hole so the cap on one oval cannot leave an end outside.
-        pieces = [gap]
-        if length > 2800.0:
-            mid_lat = float(gap["lat"])
-            mid_lon = float(gap["lon"])
-            pieces = [
-                {**gap, "lat2": mid_lat, "lon2": mid_lon, "lat": (float(gap["lat1"]) + mid_lat) / 2.0,
-                 "lon": (float(gap["lon1"]) + mid_lon) / 2.0, "length_m": length / 2.0},
-                {**gap, "lat1": mid_lat, "lon1": mid_lon, "lat": (mid_lat + float(gap["lat2"])) / 2.0,
-                 "lon": (mid_lon + float(gap["lon2"])) / 2.0, "length_m": length / 2.0},
-            ]
-        for piece in pieces:
-            line = _blank_polyline(piece)
-            if all(_covered_by_rows(lat, lon, rows) for lat, lon in line):
-                continue
-            rows.append(_outline_from_points(template, line, dotted=True, contain=True))
-
-    # The red oval is an ellipse, so a few poor samples on a diagonal can sit
-    # just outside it. Grow the red circle until every poor sample is inside.
-    threshold = float(BAD_SPOT_RULES[column]["threshold"])
-    poor_points: list[tuple[float, float]] = []
-    if inside is not None and not inside.empty and column in inside.columns:
-        poor_values = pd.to_numeric(inside[column], errors="coerce")
-        poor = inside.loc[poor_values < threshold].dropna(subset=["Latitude", "Longitude"])
+        poor = inside.loc[values < threshold].dropna(subset=["Latitude", "Longitude"])
         poor_points = list(zip(poor["Latitude"].astype(float), poor["Longitude"].astype(float)))
-    red_index = [i for i, row in enumerate(rows) if i == 0 or str(row.get("kind")) != "discrete"]
-    if not red_index:
-        red_index = [0]
-    for _ in range(6):
-        stuck = [
-            (lat, lon) for lat, lon in poor_points
-            if not _covered_by_rows(lat, lon, rows, 0.98)
+
+    groups: list[list[tuple[float, float]]] = []
+    if len(poor_points) <= 1:
+        groups.append([(float(template["outline_lat"]), float(template["outline_lon"]))])
+    else:
+        # 1.5 km pockets: a straight poor run stays one circle, a far pocket does not
+        # pull one oval across empty fields.
+        clusters = _cluster_cover_points(poor_points, 1.5)
+        clusters = sorted(clusters, key=len, reverse=True) or [poor_points]
+        groups.extend(clusters)
+
+    blanks = _actionable_blanks(_blank_segments(samples, spot), poor_points)
+    for chain in _chain_straight_blanks(blanks):
+        points: list[tuple[float, float]] = []
+        for gap in chain:
+            points.extend(_blank_polyline(gap, steps=7))
+        outlines = [
+            _outline_from_points(template, group, dotted=False, contain=True) for group in groups
         ]
-        if not stuck:
-            break
-        grow: set[int] = set()
-        for lat, lon in stuck:
-            best = min(
-                red_index,
-                key=lambda index: _outline_radius(lat, lon, {
-                    "outline_lat": float(rows[index]["outline_lat"]),
-                    "outline_lon": float(rows[index]["outline_lon"]),
-                    "outline_width_km": float(rows[index]["outline_width_km"]),
-                    "outline_height_km": float(rows[index]["outline_height_km"]),
-                }),
-            )
-            grow.add(best)
-        for index in grow:
-            grown = rows[index].copy()
-            grown["outline_width_km"] = float(grown["outline_width_km"]) * 1.2
-            grown["outline_height_km"] = float(grown["outline_height_km"]) * 1.2
-            rows[index] = grown
+        # Every point, including both ends. Sampling every other point hid a
+        # blank whose ends sat just outside the poor-run circle.
+        if points and all(_covered_by_rows(lat, lon, outlines, 0.98) for lat, lon in points):
+            continue
+        groups.append(points)
+
+    groups = _merge_close_circles(template, groups)
+    rows = []
+    for index, points in enumerate(groups):
+        if len(points) == 1 and index == 0 and len(poor_points) <= 1:
+            rows.append(template)
+            continue
+        rows.append(_outline_from_points(template, points, dotted=(index > 0), contain=True))
+    if not rows:
+        rows = [template]
     return pd.DataFrame(rows)
 
 
@@ -6790,7 +6939,7 @@ def plot_bad_spot_serial_maps(
         ax.set_ylim(zext[2], zext[3])
         ax.set_aspect("equal", adjustable="box")
         kind = str(spot.get("kind", "consecutive"))
-        blanks = _blank_segments(df, spot)
+        blanks = _report_blanks(df, spot, column)
         blank_m = sum(gap["length_m"] for gap in blanks)
         if kind == "discrete":
             caption = f"Discrete {float(spot['area_km2']):.1f} km²"
