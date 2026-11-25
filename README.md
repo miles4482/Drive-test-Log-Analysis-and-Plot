@@ -138,15 +138,21 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
-## Download Excel report (v2.08)
+## Download Excel report (v2.09)
 
-**v2.08 (current — Excel / PPT / Web same version):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.08.xlsx
+**v2.09 (current — Excel / PPT / Web same version):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.09.xlsx
+
+Summary PPT **v2.09:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.09.pptx
+
+Web **v2.09:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.09.zip
+
+Excel / PPT / Web share version **v2.09**. Every driven blank (no RSRP, up to 6 km / 30 min) is a bad spot and gets its own circle beside the red-road circle. Active Spot 1 (Poor run 638 m) now circles the 1.8 km and 2.1 km holes as well (blank 5,340 m, 6 circles). Check with `python3 validate_xlsx_package.py output/Bogura_DriveTest_Report_v2.09.xlsx`.
+
+**v2.08:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.08.xlsx
 
 Summary PPT **v2.08:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.08.pptx
 
 Web **v2.08:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.08.zip
-
-Excel / PPT / Web share version **v2.08**. Blank stretches are bad spots and get their own circles (as many ovals as needed). New-site azimuths put two sectors on the blank/road first, then population. PPT Parameter tables wrap Site text. Built from openable v2.06. Check with `python3 validate_xlsx_package.py output/Bogura_DriveTest_Report_v2.08.xlsx`.
 
 **v2.07:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.07.xlsx
 

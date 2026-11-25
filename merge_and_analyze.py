@@ -719,12 +719,15 @@ def _blank_gaps_from_track(
     mid_lat = (lat[:-1] + lat[1:]) / 2.0
     mid_lon = (lon[:-1] + lon[1:]) / 2.0
     inside = ((mid_lon - lon0) / half_w) ** 2 + ((mid_lat - lat0) / half_h) ** 2 <= 1.0
+    # A blank is a driven hole with no RSRP. 5–30 min still counts: the holes
+    # on the Active maps are often 1–3 km at ~20 km/h, which takes 5–15 min.
+    # Overnight jumps fail the speed check.
     keep = (
         same
         & (dt >= 5.0)
-        & (dt <= 300.0)
+        & (dt <= 1800.0)
         & (dist_m >= 80.0)
-        & (dist_m <= 2500.0)
+        & (dist_m <= 6000.0)
         & (speed >= 10.0)
         & (speed <= 130.0)
         & inside
@@ -747,8 +750,9 @@ def _blank_gaps_from_track(
 def _blank_segments(samples: pd.DataFrame, spot: pd.Series) -> list[dict]:
     """Driven stretches near the bad spot where the map has no plot.
 
-    A jump of 80 m to 2.5 km at driving speed on the same log is a blank. Those
-    metres are part of this bad spot and must be circled. Two passes run:
+    A jump of 80 m to 6 km at driving speed on the same log is a blank, including
+    holes that take up to 30 minutes. Those metres are part of this bad spot and
+    must be circled. Two passes run:
 
     1. Full-track consecutive samples whose midpoint sits in the search box.
     2. Map-neighbourhood samples only (points inside the search box, then sorted
@@ -6434,67 +6438,90 @@ def _outline_from_points(
     return row
 
 
+def _blank_polyline(gap: dict, steps: int = 9) -> list[tuple[float, float]]:
+    """Points along a blank from one driven end to the other."""
+    lat1, lon1 = float(gap["lat1"]), float(gap["lon1"])
+    lat2, lon2 = float(gap["lat2"]), float(gap["lon2"])
+    return [
+        (lat1 + t * (lat2 - lat1), lon1 + t * (lon2 - lon1))
+        for t in np.linspace(0.0, 1.0, steps)
+    ]
+
+
+def _covered_by_rows(lat: float, lon: float, rows: list[pd.Series], limit: float = 1.0) -> bool:
+    for row in rows:
+        box = {
+            "outline_lat": float(row["outline_lat"]),
+            "outline_lon": float(row["outline_lon"]),
+            "outline_width_km": float(row["outline_width_km"]),
+            "outline_height_km": float(row["outline_height_km"]),
+        }
+        if _outline_radius(lat, lon, box) <= limit:
+            return True
+    return False
+
+
 def satellite_circle_spots(
     samples: pd.DataFrame, spot: pd.Series, column: str = "RSRP",
 ) -> pd.DataFrame:
-    """One or more movable circles that together cover every poor sample and blank.
+    """Red-road circles plus one circle on every blank that is not already inside them.
 
-    When red road and blanks sit in one compact pocket, a single oval is enough.
-    When they stretch farther than POCKET_CIRCLE_MAX_KM, or a blank sits off the
-    red oval, the map gets two, three, four, or more circles — no hard cap.
+    A blank has no RSRP. It is still a bad spot, so it gets its own oval even
+    when it sits off the red road. Long blanks are split so both ends stay
+    inside a circle. There is no one-circle limit.
     """
     template = with_tight_outline(samples, spot, column, cover_blanks=False)
-    points = _cover_points_for_circles(samples, spot, column)
-    blanks = [gap for gap in _blank_segments(samples, spot) if float(gap.get("length_m") or 0) >= 80]
-    if len(points) == 1 and not blanks:
-        return pd.DataFrame([with_tight_outline(samples, spot, column)])
+    red_points = []
+    inside = _samples_inside_outline(samples, spot)
+    if inside is not None and not inside.empty and column in inside.columns:
+        values = pd.to_numeric(inside[column], errors="coerce")
+        cut = (
+            min(float(BAD_SPOT_RULES[column]["threshold"]), -115.0)
+            if column == "RSRP"
+            else float(BAD_SPOT_RULES[column]["threshold"])
+        )
+        red = inside.loc[values < cut].dropna(subset=["Latitude", "Longitude"])
+        red_points = list(zip(red["Latitude"].astype(float), red["Longitude"].astype(float)))
 
-    lat0 = float(np.mean([p[0] for p in points]))
-    lon0 = float(np.mean([p[1] for p in points]))
-    km_lon = _km_per_deg_lon(lat0)
-    span = max(
-        math.hypot((lat - lat0) * 111.32, (lon - lon0) * km_lon) * 2.0
-        for lat, lon in points
-    )
-    # Any blank off the main red oval forces a split, even when the red span is small.
-    main_box = {
-        "outline_lat": float(template["outline_lat"]),
-        "outline_lon": float(template["outline_lon"]),
-        "outline_width_km": float(template["outline_width_km"]),
-        "outline_height_km": float(template["outline_height_km"]),
-    }
-    blank_off = any(
-        _outline_radius(float(gap["lat"]), float(gap["lon"]), main_box) > 1.05
-        for gap in blanks
-    )
-    if span <= POCKET_CIRCLE_MAX_KM and not blank_off:
-        return pd.DataFrame([with_tight_outline(samples, spot, column)])
-
-    clusters = _cluster_cover_points(points, POCKET_CIRCLE_MAX_KM)
-    if len(clusters) <= 1 and not blank_off:
-        return pd.DataFrame([with_tight_outline(samples, spot, column)])
-    if len(clusters) <= 1:
-        # Red is compact but a blank sits off it — keep the red oval and add
-        # one circle per blank pocket.
+    if len(red_points) <= 1:
         rows = [template]
-        for gap in blanks:
-            if _outline_radius(float(gap["lat"]), float(gap["lon"]), main_box) <= 1.05:
-                continue
-            pocket = [
-                (float(gap["lat1"]), float(gap["lon1"])),
-                (float(gap["lat2"]), float(gap["lon2"])),
-                (float(gap["lat"]), float(gap["lon"])),
+    else:
+        lat0 = float(np.mean([p[0] for p in red_points]))
+        lon0 = float(np.mean([p[1] for p in red_points]))
+        km_lon = _km_per_deg_lon(lat0)
+        span = max(
+            math.hypot((lat - lat0) * 111.32, (lon - lon0) * km_lon) * 2.0
+            for lat, lon in red_points
+        )
+        clusters = _cluster_cover_points(red_points, POCKET_CIRCLE_MAX_KM)
+        if span <= POCKET_CIRCLE_MAX_KM or len(clusters) <= 1:
+            rows = [template]
+        else:
+            clusters = sorted(clusters, key=len, reverse=True)
+            rows = [
+                _outline_from_points(template, cluster, dotted=(index > 0))
+                for index, cluster in enumerate(clusters)
             ]
-            rows.append(_outline_from_points(template, pocket, dotted=True))
-        return pd.DataFrame(rows)
 
-    # Largest pocket (by point count) keeps the solid style; extras are dotted
-    # so discrete holes read as separate shapes on the same map.
-    clusters = sorted(clusters, key=len, reverse=True)
-    rows = [
-        _outline_from_points(template, cluster, dotted=(index > 0))
-        for index, cluster in enumerate(clusters)
-    ]
+    blanks = [gap for gap in _blank_segments(samples, spot) if float(gap.get("length_m") or 0) >= 80]
+    for gap in blanks:
+        length = float(gap["length_m"])
+        # Split a long hole so the cap on one oval cannot leave an end outside.
+        pieces = [gap]
+        if length > 2800.0:
+            mid_lat = float(gap["lat"])
+            mid_lon = float(gap["lon"])
+            pieces = [
+                {**gap, "lat2": mid_lat, "lon2": mid_lon, "lat": (float(gap["lat1"]) + mid_lat) / 2.0,
+                 "lon": (float(gap["lon1"]) + mid_lon) / 2.0, "length_m": length / 2.0},
+                {**gap, "lat1": mid_lat, "lon1": mid_lon, "lat": (mid_lat + float(gap["lat2"])) / 2.0,
+                 "lon": (mid_lon + float(gap["lon2"])) / 2.0, "length_m": length / 2.0},
+            ]
+        for piece in pieces:
+            line = _blank_polyline(piece)
+            if all(_covered_by_rows(lat, lon, rows) for lat, lon in line):
+                continue
+            rows.append(_outline_from_points(template, line, dotted=True))
     return pd.DataFrame(rows)
 
 
