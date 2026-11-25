@@ -138,15 +138,21 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
-## Download Excel report (v2.13)
+## Download Excel report (v2.14)
 
-**v2.13 (current — Excel / PPT / Web same version):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.13.xlsx
+**v2.14 (current — Excel / PPT / Web same version):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.14.xlsx
+
+Summary PPT **v2.14:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.14.pptx
+
+Web **v2.14:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.14.zip
+
+Excel / PPT / Web share version **v2.14**. All 97 Active bad spots were scanned again. Circles sit on the poor road or on a blank beside it, capped at about 1 km across. Neighbours shrink so ovals never overlap. Circles whose centre drifts off the road pocket are dropped. Check with `python3 validate_xlsx_package.py output/Bogura_DriveTest_Report_v2.14.xlsx`.
+
+**v2.13:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.13.xlsx
 
 Summary PPT **v2.13:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.13.pptx
 
 Web **v2.13:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.13.zip
-
-Excel / PPT / Web share version **v2.13**. Circles that sat in the top-left of the map are moved onto the poor road and the blank. The 12 new-site maps redrawn in v2.12 had kept a large Excel offset, so every oval stacked on the first cell of the picture. All Active circles are re-anchored. Check with `python3 validate_xlsx_package.py output/Bogura_DriveTest_Report_v2.13.xlsx`.
 
 **v2.12:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.12.xlsx
 

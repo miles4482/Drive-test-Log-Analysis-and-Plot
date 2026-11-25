@@ -6459,8 +6459,13 @@ def with_tight_outline(
 # One pocket circle stays under this diameter. Wider poor+blank road is split
 # into as many circles as needed so every red sample and blank is covered.
 POCKET_CIRCLE_MAX_KM = 3.2
-POCKET_CIRCLE_PAD_KM = 0.28
-POCKET_CIRCLE_MIN_KM = 0.45
+POCKET_CIRCLE_PAD_KM = 0.12
+POCKET_CIRCLE_MIN_KM = 0.40
+# Drawn bad-spot circles stay ~1 km across so they hug the road and do not
+# spill across empty fields or stack on a neighbour.
+CIRCLE_MAX_RAD_KM = 0.48
+CIRCLE_SEED_SPACING_KM = 1.05
+CIRCLE_OVERLAP_MARGIN = 1.05
 
 
 def _cover_points_for_circles(
@@ -6565,7 +6570,8 @@ def _outline_from_points(
             math.hypot((lat - lat0) * 111.32, (lon - lon0) * km_lon)
             for lat, lon in points
         )
-        rad = max(rad + pad, POCKET_CIRCLE_MIN_KM / 2.0)
+        # Cap at ~1 km across so a long blank does not paint empty fields.
+        rad = min(max(rad + pad, POCKET_CIRCLE_MIN_KM / 2.0), CIRCLE_MAX_RAD_KM)
         width = height = 2.0 * rad
     else:
         height = max((max(lats) - min(lats)) * 111.32 + 2.0 * pad, POCKET_CIRCLE_MIN_KM)
@@ -6621,14 +6627,22 @@ def _actionable_blanks(blanks: list[dict], poor_points: list[tuple[float, float]
     """Keep a hole that is actually bad: a weak end, or a gap beside the poor run.
 
     A short gap in good RSRP, away from the red road, is not a bad spot.
+    A short hole far from every poor sample is also dropped, even if one end
+    is a little weak — that is what put a circle on empty land.
     """
     kept = []
     for gap in blanks:
-        if float(gap.get("length_m") or 0) < 80:
+        length = float(gap.get("length_m") or 0)
+        if length < 80:
             continue
         ends = [gap.get("rsrp1"), gap.get("rsrp2")]
-        weak = any(value is not None and float(value) < -112.0 for value in ends)
-        if weak or _near_poor(float(gap["lat"]), float(gap["lon"]), poor_points):
+        weak = any(value is not None and float(value) < -115.0 for value in ends)
+        beside = _near_poor(float(gap["lat"]), float(gap["lon"]), poor_points, km=0.80)
+        if beside:
+            kept.append(gap)
+            continue
+        # Far from the poor road: a clearly weak hole of 200 m or more still counts.
+        if weak and length >= 200:
             kept.append(gap)
     return kept
 
@@ -6693,7 +6707,7 @@ def _chain_straight_blanks(blanks: list[dict]) -> list[list[dict]]:
 def _merge_close_circles(
     template: pd.Series, groups: list[list[tuple[float, float]]],
 ) -> list[list[tuple[float, float]]]:
-    """One circle on a straight road. Centres within 0.9 km join, up to 2.4 km."""
+    """One circle on a short straight pocket. Centres within 0.45 km join."""
     if len(groups) < 2:
         return groups
     parent = list(range(len(groups)))
@@ -6714,12 +6728,13 @@ def _merge_close_circles(
         ci = center(groups[i])
         for j in range(i + 1, len(groups)):
             cj = center(groups[j])
-            if _equirect_km(ci[0], ci[1], cj[0], cj[1]) <= 0.90:
+            if _equirect_km(ci[0], ci[1], cj[0], cj[1]) <= 0.45:
                 parent[find(i)] = find(j)
     merged: dict[int, list[tuple[float, float]]] = {}
     for index, points in enumerate(groups):
         merged.setdefault(find(index), []).extend(points)
     out = []
+    max_diam = 2.0 * CIRCLE_MAX_RAD_KM
     for points in merged.values():
         lat0 = float(np.mean([p[0] for p in points]))
         lon0 = float(np.mean([p[1] for p in points]))
@@ -6728,30 +6743,11 @@ def _merge_close_circles(
             math.hypot((lat - lat0) * 111.32, (lon - lon0) * km_lon)
             for lat, lon in points
         )
-        if span * 2.0 <= 2.4:
+        if span * 2.0 <= max_diam:
             out.append(points)
             continue
-        # Too long for one circle: keep the original pieces that were joined.
-        # Fall back to one contain-circle per 2 km chunk along the long axis.
-        xy = np.array([((lon - lon0) * km_lon, (lat - lat0) * 111.32) for lat, lon in points])
-        order = np.argsort(xy[:, 0] if np.ptp(xy[:, 0]) >= np.ptp(xy[:, 1]) else xy[:, 1])
-        chunk: list[tuple[float, float]] = []
-        anchor = None
-        for index in order.tolist():
-            point = points[index]
-            if anchor is None:
-                anchor = point
-            if chunk and _equirect_km(anchor[0], anchor[1], point[0], point[1]) > 1.6:
-                out.append(chunk)
-                chunk = [point]
-                anchor = point
-            else:
-                chunk.append(point)
-        if chunk:
-            out.append(chunk)
-    # Chunking runs after the first join, so a short gap beside a long hole
-    # is still its own circle. Join those neighbours once the long hole is split.
-    return _union_circle_groups(out, max_km=0.90, max_span_km=1.20)
+        out.extend(_chunk_along_road(points, max_span_km=max_diam * 0.90))
+    return _union_circle_groups(out, max_km=0.45, max_span_km=CIRCLE_MAX_RAD_KM)
 
 
 def _union_circle_groups(
@@ -6797,14 +6793,124 @@ def _union_circle_groups(
     return list(merged.values())
 
 
+def _chunk_along_road(
+    points: list[tuple[float, float]], max_span_km: float = 1.40,
+) -> list[list[tuple[float, float]]]:
+    """Split a long road pocket into pieces that each fit in one circle."""
+    if len(points) <= 1:
+        return [points] if points else []
+    lat0 = float(np.mean([p[0] for p in points]))
+    lon0 = float(np.mean([p[1] for p in points]))
+    km_lon = _km_per_deg_lon(lat0)
+    xy = np.array([((lon - lon0) * km_lon, (lat - lat0) * 111.32) for lat, lon in points])
+    axis = 0 if float(np.ptp(xy[:, 0])) >= float(np.ptp(xy[:, 1])) else 1
+    order = np.argsort(xy[:, axis])
+    chunks: list[list[tuple[float, float]]] = []
+    chunk: list[tuple[float, float]] = []
+    anchor = None
+    for index in order.tolist():
+        point = points[index]
+        if anchor is None:
+            anchor = point
+        if chunk and _equirect_km(anchor[0], anchor[1], point[0], point[1]) > max_span_km:
+            chunks.append(chunk)
+            chunk = [point]
+            anchor = point
+        else:
+            chunk.append(point)
+    if chunk:
+        chunks.append(chunk)
+    return chunks
+
+
+def _pack_non_overlapping(
+    groups: list[list[tuple[float, float]]],
+) -> list[list[tuple[float, float]]]:
+    """Pack cover points into circles that do not sit on top of each other.
+
+    Seeds are placed about 1 km apart along the road. Every point joins the
+    nearest seed. Drawn circles stay about 1 km across, so neighbours touch
+    at most lightly and do not stack.
+    """
+    points: list[tuple[float, float]] = []
+    seen: set[tuple[float, float]] = set()
+    for group in groups:
+        for point in group:
+            key = (round(point[0], 5), round(point[1], 5))
+            if key in seen:
+                continue
+            seen.add(key)
+            points.append(point)
+    if not points:
+        return []
+    if len(points) == 1:
+        return [points]
+    lat0 = float(np.mean([p[0] for p in points]))
+    lon0 = float(np.mean([p[1] for p in points]))
+    km_lon = _km_per_deg_lon(lat0)
+    xy = np.array([((lon - lon0) * km_lon, (lat - lat0) * 111.32) for lat, lon in points])
+    axis = 0 if float(np.ptp(xy[:, 0])) >= float(np.ptp(xy[:, 1])) else 1
+    order = np.argsort(xy[:, axis]).tolist()
+    seeds: list[int] = []
+    last_pt = None
+    for index in order:
+        point = points[index]
+        if last_pt is None or _equirect_km(last_pt[0], last_pt[1], point[0], point[1]) >= CIRCLE_SEED_SPACING_KM:
+            seeds.append(index)
+            last_pt = point
+    if not seeds:
+        seeds = [order[0]]
+    buckets: list[list[tuple[float, float]]] = [[] for _ in seeds]
+    seed_pts = [points[i] for i in seeds]
+    for point in points:
+        near_i = min(
+            range(len(seed_pts)),
+            key=lambda i: _equirect_km(point[0], point[1], seed_pts[i][0], seed_pts[i][1]),
+        )
+        buckets[near_i].append(point)
+    return [bucket for bucket in buckets if bucket]
+
+
+def _shrink_non_overlapping(rows: list[pd.Series]) -> list[pd.Series]:
+    """Keep every circle on its pocket; shrink so neighbours never overlap."""
+    if len(rows) < 2:
+        return rows
+    # North-to-south first so a long road gets a stable sequence.
+    ordered = sorted(rows, key=lambda row: (-float(row["outline_lat"]), float(row["outline_lon"])))
+    kept: list[pd.Series] = []
+    min_rad = POCKET_CIRCLE_MIN_KM / 2.0
+    for row in ordered:
+        lat = float(row["outline_lat"])
+        lon = float(row["outline_lon"])
+        rad = float(row["outline_width_km"]) / 2.0
+        skip = False
+        for other in kept:
+            d = _equirect_km(lat, lon, float(other["outline_lat"]), float(other["outline_lon"]))
+            need = (rad + float(other["outline_width_km"]) / 2.0) * CIRCLE_OVERLAP_MARGIN
+            if d >= need:
+                continue
+            # Shrink this circle so it just clears the neighbour.
+            max_rad = d / CIRCLE_OVERLAP_MARGIN - float(other["outline_width_km"]) / 2.0
+            if max_rad < min_rad:
+                skip = True
+                break
+            rad = min(rad, max_rad)
+        if skip:
+            continue
+        out = row.copy()
+        out["outline_width_km"] = float(2.0 * rad)
+        out["outline_height_km"] = float(2.0 * rad)
+        kept.append(out)
+    return kept
+
+
 def satellite_circle_spots(
     samples: pd.DataFrame, spot: pd.Series, column: str = "RSRP",
 ) -> pd.DataFrame:
     """Circles on the poor road and on bad blanks. One circle per straight stretch.
 
-    A circle sits on plotted poor samples or on a blank whose end is weak.
-    Gaps in good RSRP, and empty land between distant pockets, are not circled.
-    Several holes on one straight road share one circle.
+    A circle sits on plotted poor samples or on a blank beside that road.
+    Gaps in good RSRP, empty land, and overlapping ovals are not kept.
     """
     template = with_tight_outline(samples, spot, column, cover_blanks=False)
     threshold = float(BAD_SPOT_RULES[column]["threshold"])
@@ -6815,15 +6921,16 @@ def satellite_circle_spots(
         poor = inside.loc[values < threshold].dropna(subset=["Latitude", "Longitude"])
         poor_points = list(zip(poor["Latitude"].astype(float), poor["Longitude"].astype(float)))
 
+    chunk_km = 2.0 * CIRCLE_MAX_RAD_KM * 0.90
     groups: list[list[tuple[float, float]]] = []
     if len(poor_points) <= 1:
         groups.append([(float(template["outline_lat"]), float(template["outline_lon"]))])
     else:
-        # 1.5 km pockets: a straight poor run stays one circle, a far pocket does not
-        # pull one oval across empty fields.
-        clusters = _cluster_cover_points(poor_points, 1.5)
+        # Short pockets keep one oval on a poor run without crossing fields.
+        clusters = _cluster_cover_points(poor_points, 0.85)
         clusters = sorted(clusters, key=len, reverse=True) or [poor_points]
-        groups.extend(clusters)
+        for cluster in clusters:
+            groups.extend(_chunk_along_road(cluster, max_span_km=chunk_km))
 
     blanks = _actionable_blanks(_blank_segments(samples, spot), poor_points)
     for chain in _chain_straight_blanks(blanks):
@@ -6833,19 +6940,42 @@ def satellite_circle_spots(
         outlines = [
             _outline_from_points(template, group, dotted=False, contain=True) for group in groups
         ]
-        # Every point, including both ends. Sampling every other point hid a
-        # blank whose ends sat just outside the poor-run circle.
-        if points and all(_covered_by_rows(lat, lon, outlines, 0.98) for lat, lon in points):
+        uncovered = [
+            point for point in points
+            if not _covered_by_rows(point[0], point[1], outlines, 0.98)
+        ]
+        if not uncovered:
             continue
-        groups.append(points)
+        groups.extend(_chunk_along_road(uncovered, max_span_km=chunk_km))
 
     groups = _merge_close_circles(template, groups)
-    rows = []
+    groups = _pack_non_overlapping(groups)
+
+    # Drop a circle that sits on empty land: no poor sample and no blank point inside.
+    # Also require the centre itself to sit near a cover point (not mid-field).
+    blank_pts = [pt for gap in blanks for pt in _blank_polyline(gap, steps=5)]
+    cover_pts = poor_points + blank_pts
+    candidates = []
     for index, points in enumerate(groups):
         if len(points) == 1 and index == 0 and len(poor_points) <= 1:
-            rows.append(template)
+            candidates.append(template)
             continue
-        rows.append(_outline_from_points(template, points, dotted=(index > 0), contain=True))
+        row = _outline_from_points(template, points, dotted=(index > 0), contain=True)
+        has_poor = any(_covered_by_rows(lat, lon, [row], 1.0) for lat, lon in poor_points)
+        has_blank = any(_covered_by_rows(lat, lon, [row], 1.0) for lat, lon in blank_pts)
+        if not has_poor and not has_blank:
+            continue
+        clat = float(row["outline_lat"])
+        clon = float(row["outline_lon"])
+        # Centre must sit on the road pocket — reject mid-field drift.
+        if cover_pts:
+            near = min(_equirect_km(clat, clon, plat, plon) for plat, plon in cover_pts)
+            if near > 0.35:
+                continue
+        candidates.append(row)
+    rows = _shrink_non_overlapping(candidates)
+    for index, row in enumerate(rows):
+        row["kind"] = "discrete" if index > 0 else str(template.get("kind") or "consecutive")
     if not rows:
         rows = [template]
     return pd.DataFrame(rows)
