@@ -64,6 +64,16 @@ Current file is **v16**. Previous charts stay in the repo. `output/L3_VOLTE_CALL
 | v15 | `output/L3_VOLTE_CALL_FLOW_v15.html` | V6 step table with Robi−BL gaps in red, Gap 1 / Gap 2 notes, and the same notes on the Robi flow chart. Idle then connected toolbars kept. |
 | v16 | `output/L3_VOLTE_CALL_FLOW_v16.html` | Title: VoLTE Call Setup Benchmark with Competitor. Short summary notes only. |
 
+## VoLTE call flow — Dhaka
+
+Source: `Layer 3 Dhaka.7z` (Robi / Banglalink / Grameenphone, 21 A+B pairs). Current chart: **v1**.
+
+| Version | File | Contents |
+| --- | --- | --- |
+| v1 | `output/L3_VOLTE_CALL_FLOW_DHAKA_v1.html` | All 21 calls listed. Session ID A/B and RSRP A/B on every ladder header. Idle then connected, session pickers. |
+
+`output/L3_VOLTE_CALL_FLOW_DHAKA.html` is a copy of v1.
+
 ```bash
 python3 -c "import py7zr; py7zr.SevenZipFile('Layer 3_Active Mode_Data_Robi_v1.7z').extractall('extracted/l3')"
 python3 build_l3_report_bogra.py
