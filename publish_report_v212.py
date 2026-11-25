@@ -174,6 +174,10 @@ def main() -> None:
             zf.writestr(name, parts[name])
     tmp.replace(DEST)
     CIRCLES.write_text(json.dumps(index))
+    # Large from-offsets stay on the picture's first cell in Excel and stack
+    # every oval in the top-left. Spread each circle onto the cell under it.
+    moved = ger.spread_circle_anchors(DEST)
+    print(f"spread {moved} circle anchors", flush=True)
     print("Rewriting Active advice", flush=True)
     ger.write_bad_spot_advice(src=DEST, sheets=("Bad Spot RSRP_Active",))
 
@@ -188,6 +192,10 @@ def main() -> None:
         for name in names:
             zf.writestr(name, parts[name])
     tmp.replace(DEST)
+    # Advice rewrite can leave drawings as-is, but re-spread in case a later
+    # step re-introduces stacked offsets.
+    moved = ger.spread_circle_anchors(DEST)
+    print(f"spread {moved} circle anchors after advice", flush=True)
     shutil.copy2(DEST, LATEST)
     print(f"Wrote {DEST} ({DEST.stat().st_size / 1e6:.1f} MB)", flush=True)
 

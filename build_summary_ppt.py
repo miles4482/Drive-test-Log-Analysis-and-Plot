@@ -26,13 +26,13 @@ from pptx.util import Emu, Inches, Pt
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
-REPORT = OUTPUT / "Bogura_DriveTest_Report_v2.12.xlsx"
+REPORT = OUTPUT / "Bogura_DriveTest_Report_v2.13.xlsx"
 IDLE_NOTES = OUTPUT / "idle_vs_active_notes.json"
 PLOTS = OUTPUT / "plots"
 DESCRIPTIONS = OUTPUT / "bad_spot_descriptions.json"
-SUMMARY_VERSION = "2.12"
+SUMMARY_VERSION = "2.13"
 DEST = OUTPUT / f"Bogura_DriveTest_Summary_v{SUMMARY_VERSION}.pptx"
-EXCEL_VERSION = "2.12"
+EXCEL_VERSION = "2.13"
 EXEC_HIST_DIR = PLOTS / "ppt_exec_v198"
 EXEC_HIST = {
     "RSRP": EXEC_HIST_DIR / "active_rsrp_hist.png",
