@@ -66,7 +66,7 @@ Current file is **v16**. Previous charts stay in the repo. `output/L3_VOLTE_CALL
 
 ## VoLTE call flow — Dhaka
 
-Source: `Layer 3 Dhaka.7z` (Robi / Banglalink / Grameenphone, 21 A+B pairs). Current chart: **v6**.
+Source: `Layer 3 Dhaka.7z` (Robi / Banglalink / Grameenphone, 21 A+B pairs). Current chart: **v7**.
 
 | Version | File | Contents |
 | --- | --- | --- |
@@ -76,8 +76,9 @@ Source: `Layer 3 Dhaka.7z` (Robi / Banglalink / Grameenphone, 21 A+B pairs). Cur
 | v4 | `output/L3_VOLTE_CALL_FLOW_DHAKA_v4.html` | 7 paired rounds: every round has Robi+BL+GP by call order (GP ~125 s later OK). v15 format. |
 | v5 | `output/L3_VOLTE_CALL_FLOW_DHAKA_v5.html` | Overall tab = v4. Category tab = idle/connected with all close-RSRP pairs (Δ≤8 dB). |
 | v6 | `output/L3_VOLTE_CALL_FLOW_DHAKA_v6.html` | Same as v5 plus Notes (RCA) on each pair: which step/domain raised Robi CST. |
+| v7 | `output/L3_VOLTE_CALL_FLOW_DHAKA_v7.html` | RCA notes as bullet points (Main / also / QCI1 / Domain). |
 
-`output/L3_VOLTE_CALL_FLOW_DHAKA.html` is a copy of v6.
+`output/L3_VOLTE_CALL_FLOW_DHAKA.html` is a copy of v7.
 
 ```bash
 python3 -c "import py7zr; py7zr.SevenZipFile('Layer 3_Active Mode_Data_Robi_v1.7z').extractall('extracted/l3')"

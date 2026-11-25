@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VoLTE Call Setup Benchmark with Competitor — Dhaka v6</title>
+<title>VoLTE Call Setup Benchmark with Competitor — Dhaka v7</title>
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; background: #fff; color: #1d1d1d; font-family: Arial, Helvetica, sans-serif; }
@@ -18,16 +18,19 @@
   .gap { padding: 6px 20px 4px; overflow-x: auto; }
   table { border-collapse: collapse; font-size: 13px; min-width: 860px; }
   table.wide { min-width: 1200px; }
-  th, td { border: 1px solid #cfd6e0; padding: 5px 9px; text-align: right; white-space: nowrap; }
+  th, td { border: 1px solid #cfd6e0; padding: 5px 9px; text-align: right; white-space: nowrap; vertical-align: top; }
   th { background: #4f7fd1; color: #fff; font-weight: 700; }
   td:first-child, th:first-child { text-align: left; }
-  td.note, th:last-child { text-align: left; white-space: normal; min-width: 280px; max-width: 420px; font-size: 12px; line-height: 1.35; }
+  td.note, th:last-child { text-align: left; white-space: normal; min-width: 300px; max-width: 460px; font-size: 12px; line-height: 1.35; }
+  ul.rca { margin: 0; padding-left: 18px; }
+  ul.rca li { margin: 0 0 3px; }
   tr.sub td { color: #555; font-style: italic; background: #fafafa; }
   tr.total td { font-weight: 700; background: #eef3fb; }
   td.bad { color: #c0392b; font-weight: 700; background: #fdecea; }
   td.ok { color: #1e8449; }
   .find b.bad { color: #c0392b; }
   .find { padding: 6px 20px 2px; font-size: 13px; line-height: 1.45; max-width: 1200px; }
+  .find ul.rca { margin-top: 4px; }
   .stage { border-top: 3px solid #4f7fd1; margin-top: 8px; }
   .stage-title { margin: 0; padding: 14px 20px 4px; font-size: 18px; }
   .bar { position: sticky; top: 0; z-index: 5; background: #fff; border-bottom: 1px solid #e3e3e3;
@@ -57,7 +60,7 @@
 <body>
 <header>
   <h1>VoLTE Call Setup Benchmark with Competitor — Dhaka</h1>
-  <p class="sub">Version v6. Overall + Category (as v5), plus <b>Notes (RCA)</b> on each pair: which step/domain made Robi CST higher (IMS/paging vs 183 return / late QCI1).</p>
+  <p class="sub">Version v7. Same as v6, with <b>Notes (RCA)</b> as bullet points (Main / also / QCI1 / Domain).</p>
 </header>
 <nav class="tabs">
   <button data-tab="overall" class="on">Overall</button>
@@ -73,10 +76,10 @@
       <th>Round</th><th>Robi INVITE</th><th>BL INVITE</th><th>GP INVITE</th>
       <th>Robi CST</th><th>Banglalink CST</th><th>Grameenphone CST</th><th>Robi − BL</th><th>Notes (RCA)</th>
     </tr></thead>
-    <tbody><tr><td>Round 1</td><td>12:47:25.689</td><td>12:47:25.627</td><td>12:49:30.603</td><td class="bad">2.10 s</td><td class="ok">1.91 s</td><td>1.54 s</td><td class="bad">+0.20 s</td><td class="note">Main: 183 return B→A (+0.61 s; Robi 0.71s vs BL 0.10s). QCI1 A-bearer late at 1.75s (after B 183); BL early at 0.26s. Domain: 183/IMS return + late QCI1. Total CST gap +0.20 s.</td></tr><tr><td>Round 2</td><td>12:49:30.778</td><td>12:49:30.643</td><td>12:51:35.581</td><td class="bad">6.37 s</td><td class="ok">2.15 s</td><td>1.71 s</td><td class="bad">+4.22 s</td><td class="note">Main: INVITE→B / IMS+paging (+3.57 s; Robi 5.24s vs BL 1.66s). also 183 return B→A (+0.74 s). QCI1 A-bearer late at 5.95s (after B 183); BL early at 0.33s. Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +4.22 s.</td></tr><tr><td>Round 3</td><td>12:51:35.913</td><td>12:51:35.687</td><td>12:53:40.651</td><td class="bad">2.91 s</td><td class="ok">1.47 s</td><td>1.64 s</td><td class="bad">+1.45 s</td><td class="note">Main: INVITE→B / IMS+paging (+1.20 s; Robi 1.70s vs BL 0.50s). also 183 return B→A (+0.66 s). QCI1 A-bearer late at 2.39s (after B 183); BL early at 0.27s. Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +1.45 s.</td></tr><tr><td>Round 4</td><td>12:53:40.881</td><td>12:53:40.831</td><td>12:55:45.520</td><td>2.03 s</td><td>2.06 s</td><td>1.84 s</td><td>−0.03 s</td><td class="note">CST almost equal (-0.03 s). No material Robi gap.</td></tr><tr><td>Round 5</td><td>12:55:45.794</td><td>12:55:45.550</td><td>12:57:50.556</td><td class="bad">2.50 s</td><td class="ok">0.87 s</td><td>1.84 s</td><td class="bad">+1.62 s</td><td class="note">Main: INVITE→B / IMS+paging (+1.01 s; Robi 1.46s vs BL 0.45s). also 183 return B→A (+0.61 s). QCI1 A-bearer late at 2.07s (after B 183); BL early at 0.20s. Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +1.62 s.</td></tr><tr><td>Round 6</td><td>12:57:50.812</td><td>12:57:50.590</td><td>12:59:55.500</td><td class="bad">2.90 s</td><td class="ok">2.09 s</td><td>1.78 s</td><td class="bad">+0.81 s</td><td class="note">Main: 183 return B→A (+0.66 s; Robi 0.75s vs BL 0.09s). also INVITE→B (+0.20 s). QCI1 A-bearer late at 2.53s (after B 183); BL early at 0.20s. Domain: 183/IMS return + late QCI1. Total CST gap +0.81 s.</td></tr><tr><td>Round 7</td><td>12:59:55.720</td><td>12:59:55.771</td><td>13:02:00.619</td><td class="bad">2.31 s</td><td class="ok">1.67 s</td><td>2.81 s</td><td class="bad">+0.64 s</td><td class="note">Main: 183 return B→A (+0.67 s; Robi 0.77s vs BL 0.09s). QCI1 A-bearer late at 1.80s (after B 183); BL early at 0.12s. Domain: 183/IMS return + late QCI1. Total CST gap +0.64 s.</td></tr></tbody>
+    <tbody><tr><td>Round 1</td><td>12:47:25.689</td><td>12:47:25.627</td><td>12:49:30.603</td><td class="bad">2.10 s</td><td class="ok">1.91 s</td><td>1.54 s</td><td class="bad">+0.20 s</td><td class="note"><ul class="rca"><li>Main: 183 return B→A (+0.61 s; Robi 0.71s vs BL 0.10s).</li><li>QCI1 A-bearer late at 1.75s (after B 183); BL early at 0.26s.</li><li>Domain: 183/IMS return + late QCI1. Total CST gap +0.20 s.</li></ul></td></tr><tr><td>Round 2</td><td>12:49:30.778</td><td>12:49:30.643</td><td>12:51:35.581</td><td class="bad">6.37 s</td><td class="ok">2.15 s</td><td>1.71 s</td><td class="bad">+4.22 s</td><td class="note"><ul class="rca"><li>Main: INVITE→B / IMS+paging (+3.57 s; Robi 5.24s vs BL 1.66s).</li><li>also 183 return B→A (+0.74 s).</li><li>QCI1 A-bearer late at 5.95s (after B 183); BL early at 0.33s.</li><li>Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +4.22 s.</li></ul></td></tr><tr><td>Round 3</td><td>12:51:35.913</td><td>12:51:35.687</td><td>12:53:40.651</td><td class="bad">2.91 s</td><td class="ok">1.47 s</td><td>1.64 s</td><td class="bad">+1.45 s</td><td class="note"><ul class="rca"><li>Main: INVITE→B / IMS+paging (+1.20 s; Robi 1.70s vs BL 0.50s).</li><li>also 183 return B→A (+0.66 s).</li><li>QCI1 A-bearer late at 2.39s (after B 183); BL early at 0.27s.</li><li>Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +1.45 s.</li></ul></td></tr><tr><td>Round 4</td><td>12:53:40.881</td><td>12:53:40.831</td><td>12:55:45.520</td><td>2.03 s</td><td>2.06 s</td><td>1.84 s</td><td>−0.03 s</td><td class="note"><ul class="rca"><li>CST almost equal (-0.03 s). No material Robi gap.</li></ul></td></tr><tr><td>Round 5</td><td>12:55:45.794</td><td>12:55:45.550</td><td>12:57:50.556</td><td class="bad">2.50 s</td><td class="ok">0.87 s</td><td>1.84 s</td><td class="bad">+1.62 s</td><td class="note"><ul class="rca"><li>Main: INVITE→B / IMS+paging (+1.01 s; Robi 1.46s vs BL 0.45s).</li><li>also 183 return B→A (+0.61 s).</li><li>QCI1 A-bearer late at 2.07s (after B 183); BL early at 0.20s.</li><li>Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +1.62 s.</li></ul></td></tr><tr><td>Round 6</td><td>12:57:50.812</td><td>12:57:50.590</td><td>12:59:55.500</td><td class="bad">2.90 s</td><td class="ok">2.09 s</td><td>1.78 s</td><td class="bad">+0.81 s</td><td class="note"><ul class="rca"><li>Main: 183 return B→A (+0.66 s; Robi 0.75s vs BL 0.09s).</li><li>also INVITE→B (+0.20 s).</li><li>QCI1 A-bearer late at 2.53s (after B 183); BL early at 0.20s.</li><li>Domain: 183/IMS return + late QCI1. Total CST gap +0.81 s.</li></ul></td></tr><tr><td>Round 7</td><td>12:59:55.720</td><td>12:59:55.771</td><td>13:02:00.619</td><td class="bad">2.31 s</td><td class="ok">1.67 s</td><td>2.81 s</td><td class="bad">+0.64 s</td><td class="note"><ul class="rca"><li>Main: 183 return B→A (+0.67 s; Robi 0.77s vs BL 0.09s).</li><li>QCI1 A-bearer late at 1.80s (after B 183); BL early at 0.12s.</li><li>Domain: 183/IMS return + late QCI1. Total CST gap +0.64 s.</li></ul></td></tr></tbody>
   </table>
 </section>
-<p class="find">Paired by call order. Notes show where Robi CST is higher vs BL (IMS/paging path vs 183 return / late QCI1).</p>
+<p class="find">Paired by call order. Notes show where Robi CST is higher vs BL (bullet points).</p>
 
   
 <section class="stage" id="r1">
@@ -90,7 +93,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td class="ok">0.23 s</td><td>0.40 s</td><td>0.24 s</td><td>−0.17 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td class="bad">2.10 s</td><td class="ok">1.91 s</td><td>1.54 s</td><td class="bad">+0.20 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> Main: 183 return B→A (+0.61 s; Robi 0.71s vs BL 0.10s). QCI1 A-bearer late at 1.75s (after B 183); BL early at 0.26s. Domain: 183/IMS return + late QCI1. Total CST gap +0.20 s.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>Main: 183 return B→A (+0.61 s; Robi 0.71s vs BL 0.10s).</li><li>QCI1 A-bearer late at 1.75s (after B 183); BL early at 0.26s.</li><li>Domain: 183/IMS return + late QCI1. Total CST gap +0.20 s.</li></ul></div>
   <div class="bar" id="bar-r1" data-stage="r1">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp">Grameenphone</button>
     <span class="sep"></span>
@@ -115,7 +118,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td class="ok">0.25 s</td><td>0.36 s</td><td>0.29 s</td><td>−0.11 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td class="bad">6.37 s</td><td class="ok">2.15 s</td><td>1.71 s</td><td class="bad">+4.22 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> Main: INVITE→B / IMS+paging (+3.57 s; Robi 5.24s vs BL 1.66s). also 183 return B→A (+0.74 s). QCI1 A-bearer late at 5.95s (after B 183); BL early at 0.33s. Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +4.22 s.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>Main: INVITE→B / IMS+paging (+3.57 s; Robi 5.24s vs BL 1.66s).</li><li>also 183 return B→A (+0.74 s).</li><li>QCI1 A-bearer late at 5.95s (after B 183); BL early at 0.33s.</li><li>Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +4.22 s.</li></ul></div>
   <div class="bar" id="bar-r2" data-stage="r2">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp">Grameenphone</button>
     <span class="sep"></span>
@@ -140,7 +143,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td class="ok">0.35 s</td><td>0.79 s</td><td>0.30 s</td><td>−0.44 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td class="bad">2.91 s</td><td class="ok">1.47 s</td><td>1.64 s</td><td class="bad">+1.45 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> Main: INVITE→B / IMS+paging (+1.20 s; Robi 1.70s vs BL 0.50s). also 183 return B→A (+0.66 s). QCI1 A-bearer late at 2.39s (after B 183); BL early at 0.27s. Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +1.45 s.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>Main: INVITE→B / IMS+paging (+1.20 s; Robi 1.70s vs BL 0.50s).</li><li>also 183 return B→A (+0.66 s).</li><li>QCI1 A-bearer late at 2.39s (after B 183); BL early at 0.27s.</li><li>Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +1.45 s.</li></ul></div>
   <div class="bar" id="bar-r3" data-stage="r3">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp">Grameenphone</button>
     <span class="sep"></span>
@@ -165,7 +168,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td>0.30 s</td><td>0.30 s</td><td>0.26 s</td><td>−0.00 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td>2.03 s</td><td>2.06 s</td><td>1.84 s</td><td>−0.03 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> CST almost equal (-0.03 s). No material Robi gap.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>CST almost equal (-0.03 s). No material Robi gap.</li></ul></div>
   <div class="bar" id="bar-r4" data-stage="r4">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp">Grameenphone</button>
     <span class="sep"></span>
@@ -190,7 +193,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td>0.28 s</td><td>0.28 s</td><td>0.26 s</td><td>+0.00 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td class="bad">2.50 s</td><td class="ok">0.87 s</td><td>1.84 s</td><td class="bad">+1.62 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> Main: INVITE→B / IMS+paging (+1.01 s; Robi 1.46s vs BL 0.45s). also 183 return B→A (+0.61 s). QCI1 A-bearer late at 2.07s (after B 183); BL early at 0.20s. Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +1.62 s.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>Main: INVITE→B / IMS+paging (+1.01 s; Robi 1.46s vs BL 0.45s).</li><li>also 183 return B→A (+0.61 s).</li><li>QCI1 A-bearer late at 2.07s (after B 183); BL early at 0.20s.</li><li>Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +1.62 s.</li></ul></div>
   <div class="bar" id="bar-r5" data-stage="r5">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp">Grameenphone</button>
     <span class="sep"></span>
@@ -215,7 +218,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td>0.23 s</td><td>0.28 s</td><td>0.23 s</td><td>−0.05 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td class="bad">2.90 s</td><td class="ok">2.09 s</td><td>1.78 s</td><td class="bad">+0.81 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> Main: 183 return B→A (+0.66 s; Robi 0.75s vs BL 0.09s). also INVITE→B (+0.20 s). QCI1 A-bearer late at 2.53s (after B 183); BL early at 0.20s. Domain: 183/IMS return + late QCI1. Total CST gap +0.81 s.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>Main: 183 return B→A (+0.66 s; Robi 0.75s vs BL 0.09s).</li><li>also INVITE→B (+0.20 s).</li><li>QCI1 A-bearer late at 2.53s (after B 183); BL early at 0.20s.</li><li>Domain: 183/IMS return + late QCI1. Total CST gap +0.81 s.</li></ul></div>
   <div class="bar" id="bar-r6" data-stage="r6">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp">Grameenphone</button>
     <span class="sep"></span>
@@ -240,7 +243,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td class="ok">0.33 s</td><td>0.40 s</td><td>0.21 s</td><td>−0.07 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td class="bad">2.31 s</td><td class="ok">1.67 s</td><td>2.81 s</td><td class="bad">+0.64 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> Main: 183 return B→A (+0.67 s; Robi 0.77s vs BL 0.09s). QCI1 A-bearer late at 1.80s (after B 183); BL early at 0.12s. Domain: 183/IMS return + late QCI1. Total CST gap +0.64 s.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>Main: 183 return B→A (+0.67 s; Robi 0.77s vs BL 0.09s).</li><li>QCI1 A-bearer late at 1.80s (after B 183); BL early at 0.12s.</li><li>Domain: 183/IMS return + late QCI1. Total CST gap +0.64 s.</li></ul></div>
   <div class="bar" id="bar-r7" data-stage="r7">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp">Grameenphone</button>
     <span class="sep"></span>
@@ -263,13 +266,13 @@
   
 <section class="gap">
   <h2 class="stage-title" style="padding-left:0">UE-B idle, paged — all close-RSRP pairs (Δ ≤ 8 dB on weaker phone)</h2>
-  <p class="find">Dhaka idle inventory: Robi 7, Banglalink 5, Grameenphone 0 (none). Showing all Robi↔BL pairs with close RSRP (18 pairs). <b>Notes (RCA)</b> = which step/domain made Robi CST higher.</p>
+  <p class="find">Dhaka idle inventory: Robi 7, Banglalink 5, Grameenphone 0 (none). Showing all Robi↔BL pairs with close RSRP (18 pairs). <b>Notes (RCA)</b> as bullet points: which step/domain made Robi CST higher.</p>
   <table class="wide">
     <thead><tr>
       <th>Pair</th><th>Robi pair</th><th>Robi weaker</th><th>Robi CST</th>
       <th>BL pair</th><th>BL weaker</th><th>BL CST</th><th>RSRP Δ</th><th>Robi − BL</th><th>Notes (RCA)</th>
     </tr></thead>
-    <tbody><tr><td>Pair 1</td><td>17179869212</td><td>−89.3 dBm</td><td>6.37 s</td><td>8589934622</td><td>−89.5 dBm</td><td>2.15 s</td><td>0.2 dB</td><td class="bad">+4.22 s</td><td class="note">Main: INVITE→B / IMS+paging (+3.57 s; Robi 5.24s vs BL 1.66s). also 183 return B→A (+0.74 s). QCI1 A-bearer late at 5.95s (after B 183); BL early at 0.33s. Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +4.22 s.</td></tr><tr><td>Pair 2</td><td>17179869220</td><td>−86.3 dBm</td><td>2.90 s</td><td>8589934632</td><td>−87 dBm</td><td>1.67 s</td><td>0.7 dB</td><td class="bad">+1.23 s</td><td class="note">Main: INVITE→B / IMS+paging (+0.74 s; Robi 1.86s vs BL 1.12s). also 183 return B→A (+0.66 s). QCI1 A-bearer late at 2.53s (after B 183); BL early at 0.12s. Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +1.23 s.</td></tr><tr><td>Pair 3</td><td>17179869216</td><td>−85.6 dBm</td><td>2.03 s</td><td>8589934626</td><td>−84.5 dBm</td><td>2.06 s</td><td>1.1 dB</td><td>−0.03 s</td><td class="note">CST almost equal (-0.03 s). No material Robi gap.</td></tr><tr><td>Pair 4</td><td>17179869216</td><td>−85.6 dBm</td><td>2.03 s</td><td>8589934632</td><td>−87 dBm</td><td>1.67 s</td><td>1.4 dB</td><td class="bad">+0.36 s</td><td class="note">Main: 183 return B→A (+0.50 s; Robi 0.60s vs BL 0.09s). QCI1 A-bearer late at 1.62s (after B 183); BL early at 0.12s. Domain: 183/IMS return + late QCI1. Total CST gap +0.36 s.</td></tr><tr><td>Pair 5</td><td>17179869212</td><td>−89.3 dBm</td><td>6.37 s</td><td>8589934630</td><td>−87.8 dBm</td><td>2.09 s</td><td>1.5 dB</td><td class="bad">+4.28 s</td><td class="note">Main: INVITE→B / IMS+paging (+3.57 s; Robi 5.24s vs BL 1.67s). also 183 return B→A (+0.71 s). QCI1 A-bearer late at 5.95s (after B 183); BL early at 0.20s. Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +4.28 s.</td></tr><tr><td>Pair 6</td><td>17179869220</td><td>−86.3 dBm</td><td>2.90 s</td><td>8589934630</td><td>−87.8 dBm</td><td>2.09 s</td><td>1.5 dB</td><td class="bad">+0.81 s</td><td class="note">Main: 183 return B→A (+0.66 s; Robi 0.75s vs BL 0.09s). also INVITE→B (+0.20 s). QCI1 A-bearer late at 2.53s (after B 183); BL early at 0.20s. Domain: 183/IMS return + late QCI1. Total CST gap +0.81 s.</td></tr><tr><td>Pair 7</td><td>17179869220</td><td>−86.3 dBm</td><td>2.90 s</td><td>8589934626</td><td>−84.5 dBm</td><td>2.06 s</td><td>1.8 dB</td><td class="bad">+0.84 s</td><td class="note">Main: 183 return B→A (+0.67 s; Robi 0.75s vs BL 0.08s). also INVITE→B (+0.24 s). QCI1 A-bearer late at 2.53s (after B 183); BL early at 0.06s. Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +0.84 s.</td></tr><tr><td>Pair 8</td><td>17179869216</td><td>−85.6 dBm</td><td>2.03 s</td><td>8589934630</td><td>−87.8 dBm</td><td>2.09 s</td><td>2.2 dB</td><td>−0.06 s</td><td class="note">Robi CST better (-0.06 s). No Robi loss.</td></tr><tr><td>Pair 9</td><td>17179869222</td><td>−73.9 dBm</td><td>2.31 s</td><td>8589934620</td><td>−71.7 dBm</td><td>1.91 s</td><td>2.2 dB</td><td class="bad">+0.41 s</td><td class="note">Main: 183 return B→A (+0.66 s; Robi 0.77s vs BL 0.10s). QCI1 A-bearer late at 1.80s (after B 183); BL early at 0.26s. Domain: 183/IMS return + late QCI1. Total CST gap +0.41 s.</td></tr><tr><td>Pair 10</td><td>17179869212</td><td>−89.3 dBm</td><td>6.37 s</td><td>8589934632</td><td>−87 dBm</td><td>1.67 s</td><td>2.3 dB</td><td class="bad">+4.69 s</td><td class="note">Main: INVITE→B / IMS+paging (+4.11 s; Robi 5.24s vs BL 1.12s). also 183 return B→A (+0.71 s). QCI1 A-bearer late at 5.95s (after B 183); BL early at 0.12s. Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +4.69 s.</td></tr><tr><td>Pair 11</td><td>17179869210</td><td>−81.8 dBm</td><td>2.10 s</td><td>8589934626</td><td>−84.5 dBm</td><td>2.06 s</td><td>2.7 dB</td><td>+0.04 s</td><td class="note">CST almost equal (+0.04 s). No material Robi gap.</td></tr><tr><td>Pair 12</td><td>17179869220</td><td>−86.3 dBm</td><td>2.90 s</td><td>8589934622</td><td>−89.5 dBm</td><td>2.15 s</td><td>3.2 dB</td><td class="bad">+0.75 s</td><td class="note">Main: 183 return B→A (+0.69 s; Robi 0.75s vs BL 0.06s). also INVITE→B (+0.20 s). QCI1 A-bearer late at 2.53s (after B 183); BL early at 0.33s. Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +0.75 s.</td></tr><tr><td>Pair 13</td><td>17179869216</td><td>−85.6 dBm</td><td>2.03 s</td><td>8589934622</td><td>−89.5 dBm</td><td>2.15 s</td><td>3.9 dB</td><td>−0.12 s</td><td class="note">Robi CST better (-0.12 s). No Robi loss.</td></tr><tr><td>Pair 14</td><td>17179869212</td><td>−89.3 dBm</td><td>6.37 s</td><td>8589934626</td><td>−84.5 dBm</td><td>2.06 s</td><td>4.8 dB</td><td class="bad">+4.30 s</td><td class="note">Main: INVITE→B / IMS+paging (+3.61 s; Robi 5.24s vs BL 1.63s). also 183 return B→A (+0.72 s). QCI1 A-bearer late at 5.95s (after B 183); BL early at 0.06s. Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +4.30 s.</td></tr><tr><td>Pair 15</td><td>17179869210</td><td>−81.8 dBm</td><td>2.10 s</td><td>8589934632</td><td>−87 dBm</td><td>1.67 s</td><td>5.2 dB</td><td class="bad">+0.43 s</td><td class="note">Main: 183 return B→A (+0.62 s; Robi 0.71s vs BL 0.09s). QCI1 A-bearer late at 1.75s (after B 183); BL early at 0.12s. Domain: 183/IMS return + late QCI1. Total CST gap +0.43 s.</td></tr><tr><td>Pair 16</td><td>17179869210</td><td>−81.8 dBm</td><td>2.10 s</td><td>8589934630</td><td>−87.8 dBm</td><td>2.09 s</td><td>6.0 dB</td><td>+0.01 s</td><td class="note">CST almost equal (+0.01 s). No material Robi gap.</td></tr><tr><td>Pair 17</td><td>17179869218</td><td>−64.9 dBm</td><td>2.50 s</td><td>8589934620</td><td>−71.7 dBm</td><td>1.91 s</td><td>6.8 dB</td><td class="bad">+0.59 s</td><td class="note">Main: 183 return B→A (+0.59 s; Robi 0.69s vs BL 0.10s). QCI1 A-bearer late at 2.07s (after B 183); BL early at 0.26s. Domain: 183/IMS return + late QCI1. Total CST gap +0.59 s.</td></tr><tr><td>Pair 18</td><td>17179869210</td><td>−81.8 dBm</td><td>2.10 s</td><td>8589934622</td><td>−89.5 dBm</td><td>2.15 s</td><td>7.7 dB</td><td>−0.04 s</td><td class="note">CST almost equal (-0.04 s). No material Robi gap.</td></tr></tbody>
+    <tbody><tr><td>Pair 1</td><td>17179869212</td><td>−89.3 dBm</td><td>6.37 s</td><td>8589934622</td><td>−89.5 dBm</td><td>2.15 s</td><td>0.2 dB</td><td class="bad">+4.22 s</td><td class="note"><ul class="rca"><li>Main: INVITE→B / IMS+paging (+3.57 s; Robi 5.24s vs BL 1.66s).</li><li>also 183 return B→A (+0.74 s).</li><li>QCI1 A-bearer late at 5.95s (after B 183); BL early at 0.33s.</li><li>Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +4.22 s.</li></ul></td></tr><tr><td>Pair 2</td><td>17179869220</td><td>−86.3 dBm</td><td>2.90 s</td><td>8589934632</td><td>−87 dBm</td><td>1.67 s</td><td>0.7 dB</td><td class="bad">+1.23 s</td><td class="note"><ul class="rca"><li>Main: INVITE→B / IMS+paging (+0.74 s; Robi 1.86s vs BL 1.12s).</li><li>also 183 return B→A (+0.66 s).</li><li>QCI1 A-bearer late at 2.53s (after B 183); BL early at 0.12s.</li><li>Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +1.23 s.</li></ul></td></tr><tr><td>Pair 3</td><td>17179869216</td><td>−85.6 dBm</td><td>2.03 s</td><td>8589934626</td><td>−84.5 dBm</td><td>2.06 s</td><td>1.1 dB</td><td>−0.03 s</td><td class="note"><ul class="rca"><li>CST almost equal (-0.03 s). No material Robi gap.</li></ul></td></tr><tr><td>Pair 4</td><td>17179869216</td><td>−85.6 dBm</td><td>2.03 s</td><td>8589934632</td><td>−87 dBm</td><td>1.67 s</td><td>1.4 dB</td><td class="bad">+0.36 s</td><td class="note"><ul class="rca"><li>Main: 183 return B→A (+0.50 s; Robi 0.60s vs BL 0.09s).</li><li>QCI1 A-bearer late at 1.62s (after B 183); BL early at 0.12s.</li><li>Domain: 183/IMS return + late QCI1. Total CST gap +0.36 s.</li></ul></td></tr><tr><td>Pair 5</td><td>17179869212</td><td>−89.3 dBm</td><td>6.37 s</td><td>8589934630</td><td>−87.8 dBm</td><td>2.09 s</td><td>1.5 dB</td><td class="bad">+4.28 s</td><td class="note"><ul class="rca"><li>Main: INVITE→B / IMS+paging (+3.57 s; Robi 5.24s vs BL 1.67s).</li><li>also 183 return B→A (+0.71 s).</li><li>QCI1 A-bearer late at 5.95s (after B 183); BL early at 0.20s.</li><li>Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +4.28 s.</li></ul></td></tr><tr><td>Pair 6</td><td>17179869220</td><td>−86.3 dBm</td><td>2.90 s</td><td>8589934630</td><td>−87.8 dBm</td><td>2.09 s</td><td>1.5 dB</td><td class="bad">+0.81 s</td><td class="note"><ul class="rca"><li>Main: 183 return B→A (+0.66 s; Robi 0.75s vs BL 0.09s).</li><li>also INVITE→B (+0.20 s).</li><li>QCI1 A-bearer late at 2.53s (after B 183); BL early at 0.20s.</li><li>Domain: 183/IMS return + late QCI1. Total CST gap +0.81 s.</li></ul></td></tr><tr><td>Pair 7</td><td>17179869220</td><td>−86.3 dBm</td><td>2.90 s</td><td>8589934626</td><td>−84.5 dBm</td><td>2.06 s</td><td>1.8 dB</td><td class="bad">+0.84 s</td><td class="note"><ul class="rca"><li>Main: 183 return B→A (+0.67 s; Robi 0.75s vs BL 0.08s).</li><li>also INVITE→B (+0.24 s).</li><li>QCI1 A-bearer late at 2.53s (after B 183); BL early at 0.06s.</li><li>Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +0.84 s.</li></ul></td></tr><tr><td>Pair 8</td><td>17179869216</td><td>−85.6 dBm</td><td>2.03 s</td><td>8589934630</td><td>−87.8 dBm</td><td>2.09 s</td><td>2.2 dB</td><td>−0.06 s</td><td class="note"><ul class="rca"><li>Robi CST better (-0.06 s). No Robi loss.</li></ul></td></tr><tr><td>Pair 9</td><td>17179869222</td><td>−73.9 dBm</td><td>2.31 s</td><td>8589934620</td><td>−71.7 dBm</td><td>1.91 s</td><td>2.2 dB</td><td class="bad">+0.41 s</td><td class="note"><ul class="rca"><li>Main: 183 return B→A (+0.66 s; Robi 0.77s vs BL 0.10s).</li><li>QCI1 A-bearer late at 1.80s (after B 183); BL early at 0.26s.</li><li>Domain: 183/IMS return + late QCI1. Total CST gap +0.41 s.</li></ul></td></tr><tr><td>Pair 10</td><td>17179869212</td><td>−89.3 dBm</td><td>6.37 s</td><td>8589934632</td><td>−87 dBm</td><td>1.67 s</td><td>2.3 dB</td><td class="bad">+4.69 s</td><td class="note"><ul class="rca"><li>Main: INVITE→B / IMS+paging (+4.11 s; Robi 5.24s vs BL 1.12s).</li><li>also 183 return B→A (+0.71 s).</li><li>QCI1 A-bearer late at 5.95s (after B 183); BL early at 0.12s.</li><li>Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +4.69 s.</li></ul></td></tr><tr><td>Pair 11</td><td>17179869210</td><td>−81.8 dBm</td><td>2.10 s</td><td>8589934626</td><td>−84.5 dBm</td><td>2.06 s</td><td>2.7 dB</td><td>+0.04 s</td><td class="note"><ul class="rca"><li>CST almost equal (+0.04 s). No material Robi gap.</li></ul></td></tr><tr><td>Pair 12</td><td>17179869220</td><td>−86.3 dBm</td><td>2.90 s</td><td>8589934622</td><td>−89.5 dBm</td><td>2.15 s</td><td>3.2 dB</td><td class="bad">+0.75 s</td><td class="note"><ul class="rca"><li>Main: 183 return B→A (+0.69 s; Robi 0.75s vs BL 0.06s).</li><li>also INVITE→B (+0.20 s).</li><li>QCI1 A-bearer late at 2.53s (after B 183); BL early at 0.33s.</li><li>Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +0.75 s.</li></ul></td></tr><tr><td>Pair 13</td><td>17179869216</td><td>−85.6 dBm</td><td>2.03 s</td><td>8589934622</td><td>−89.5 dBm</td><td>2.15 s</td><td>3.9 dB</td><td>−0.12 s</td><td class="note"><ul class="rca"><li>Robi CST better (-0.12 s). No Robi loss.</li></ul></td></tr><tr><td>Pair 14</td><td>17179869212</td><td>−89.3 dBm</td><td>6.37 s</td><td>8589934626</td><td>−84.5 dBm</td><td>2.06 s</td><td>4.8 dB</td><td class="bad">+4.30 s</td><td class="note"><ul class="rca"><li>Main: INVITE→B / IMS+paging (+3.61 s; Robi 5.24s vs BL 1.63s).</li><li>also 183 return B→A (+0.72 s).</li><li>QCI1 A-bearer late at 5.95s (after B 183); BL early at 0.06s.</li><li>Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +4.30 s.</li></ul></td></tr><tr><td>Pair 15</td><td>17179869210</td><td>−81.8 dBm</td><td>2.10 s</td><td>8589934632</td><td>−87 dBm</td><td>1.67 s</td><td>5.2 dB</td><td class="bad">+0.43 s</td><td class="note"><ul class="rca"><li>Main: 183 return B→A (+0.62 s; Robi 0.71s vs BL 0.09s).</li><li>QCI1 A-bearer late at 1.75s (after B 183); BL early at 0.12s.</li><li>Domain: 183/IMS return + late QCI1. Total CST gap +0.43 s.</li></ul></td></tr><tr><td>Pair 16</td><td>17179869210</td><td>−81.8 dBm</td><td>2.10 s</td><td>8589934630</td><td>−87.8 dBm</td><td>2.09 s</td><td>6.0 dB</td><td>+0.01 s</td><td class="note"><ul class="rca"><li>CST almost equal (+0.01 s). No material Robi gap.</li></ul></td></tr><tr><td>Pair 17</td><td>17179869218</td><td>−64.9 dBm</td><td>2.50 s</td><td>8589934620</td><td>−71.7 dBm</td><td>1.91 s</td><td>6.8 dB</td><td class="bad">+0.59 s</td><td class="note"><ul class="rca"><li>Main: 183 return B→A (+0.59 s; Robi 0.69s vs BL 0.10s).</li><li>QCI1 A-bearer late at 2.07s (after B 183); BL early at 0.26s.</li><li>Domain: 183/IMS return + late QCI1. Total CST gap +0.59 s.</li></ul></td></tr><tr><td>Pair 18</td><td>17179869210</td><td>−81.8 dBm</td><td>2.10 s</td><td>8589934622</td><td>−89.5 dBm</td><td>2.15 s</td><td>7.7 dB</td><td>−0.04 s</td><td class="note"><ul class="rca"><li>CST almost equal (-0.04 s). No material Robi gap.</li></ul></td></tr></tbody>
   </table>
 </section>
 
@@ -285,7 +288,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td class="ok">0.25 s</td><td>0.36 s</td><td>—</td><td>−0.11 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td class="bad">6.37 s</td><td class="ok">2.15 s</td><td>—</td><td class="bad">+4.22 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> Main: INVITE→B / IMS+paging (+3.57 s; Robi 5.24s vs BL 1.66s). also 183 return B→A (+0.74 s). QCI1 A-bearer late at 5.95s (after B 183); BL early at 0.33s. Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +4.22 s.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>Main: INVITE→B / IMS+paging (+3.57 s; Robi 5.24s vs BL 1.66s).</li><li>also 183 return B→A (+0.74 s).</li><li>QCI1 A-bearer late at 5.95s (after B 183); BL early at 0.33s.</li><li>Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +4.22 s.</li></ul></div>
   <div class="bar" id="bar-idle1" data-stage="idle1">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp" disabled title="Not in this pair">Grameenphone</button>
     <span class="sep"></span>
@@ -310,7 +313,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td class="ok">0.23 s</td><td>0.40 s</td><td>—</td><td>−0.18 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td class="bad">2.90 s</td><td class="ok">1.67 s</td><td>—</td><td class="bad">+1.23 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> Main: INVITE→B / IMS+paging (+0.74 s; Robi 1.86s vs BL 1.12s). also 183 return B→A (+0.66 s). QCI1 A-bearer late at 2.53s (after B 183); BL early at 0.12s. Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +1.23 s.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>Main: INVITE→B / IMS+paging (+0.74 s; Robi 1.86s vs BL 1.12s).</li><li>also 183 return B→A (+0.66 s).</li><li>QCI1 A-bearer late at 2.53s (after B 183); BL early at 0.12s.</li><li>Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +1.23 s.</li></ul></div>
   <div class="bar" id="bar-idle2" data-stage="idle2">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp" disabled title="Not in this pair">Grameenphone</button>
     <span class="sep"></span>
@@ -335,7 +338,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td>0.30 s</td><td>0.30 s</td><td>—</td><td>−0.00 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td>2.03 s</td><td>2.06 s</td><td>—</td><td>−0.03 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> CST almost equal (-0.03 s). No material Robi gap.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>CST almost equal (-0.03 s). No material Robi gap.</li></ul></div>
   <div class="bar" id="bar-idle3" data-stage="idle3">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp" disabled title="Not in this pair">Grameenphone</button>
     <span class="sep"></span>
@@ -360,7 +363,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td class="ok">0.30 s</td><td>0.40 s</td><td>—</td><td>−0.10 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td class="bad">2.03 s</td><td class="ok">1.67 s</td><td>—</td><td class="bad">+0.36 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> Main: 183 return B→A (+0.50 s; Robi 0.60s vs BL 0.09s). QCI1 A-bearer late at 1.62s (after B 183); BL early at 0.12s. Domain: 183/IMS return + late QCI1. Total CST gap +0.36 s.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>Main: 183 return B→A (+0.50 s; Robi 0.60s vs BL 0.09s).</li><li>QCI1 A-bearer late at 1.62s (after B 183); BL early at 0.12s.</li><li>Domain: 183/IMS return + late QCI1. Total CST gap +0.36 s.</li></ul></div>
   <div class="bar" id="bar-idle4" data-stage="idle4">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp" disabled title="Not in this pair">Grameenphone</button>
     <span class="sep"></span>
@@ -385,7 +388,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td>0.25 s</td><td>0.28 s</td><td>—</td><td>−0.03 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td class="bad">6.37 s</td><td class="ok">2.09 s</td><td>—</td><td class="bad">+4.28 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> Main: INVITE→B / IMS+paging (+3.57 s; Robi 5.24s vs BL 1.67s). also 183 return B→A (+0.71 s). QCI1 A-bearer late at 5.95s (after B 183); BL early at 0.20s. Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +4.28 s.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>Main: INVITE→B / IMS+paging (+3.57 s; Robi 5.24s vs BL 1.67s).</li><li>also 183 return B→A (+0.71 s).</li><li>QCI1 A-bearer late at 5.95s (after B 183); BL early at 0.20s.</li><li>Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +4.28 s.</li></ul></div>
   <div class="bar" id="bar-idle5" data-stage="idle5">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp" disabled title="Not in this pair">Grameenphone</button>
     <span class="sep"></span>
@@ -410,7 +413,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td>0.23 s</td><td>0.28 s</td><td>—</td><td>−0.05 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td class="bad">2.90 s</td><td class="ok">2.09 s</td><td>—</td><td class="bad">+0.81 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> Main: 183 return B→A (+0.66 s; Robi 0.75s vs BL 0.09s). also INVITE→B (+0.20 s). QCI1 A-bearer late at 2.53s (after B 183); BL early at 0.20s. Domain: 183/IMS return + late QCI1. Total CST gap +0.81 s.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>Main: 183 return B→A (+0.66 s; Robi 0.75s vs BL 0.09s).</li><li>also INVITE→B (+0.20 s).</li><li>QCI1 A-bearer late at 2.53s (after B 183); BL early at 0.20s.</li><li>Domain: 183/IMS return + late QCI1. Total CST gap +0.81 s.</li></ul></div>
   <div class="bar" id="bar-idle6" data-stage="idle6">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp" disabled title="Not in this pair">Grameenphone</button>
     <span class="sep"></span>
@@ -435,7 +438,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td class="ok">0.23 s</td><td>0.30 s</td><td>—</td><td>−0.08 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td class="bad">2.90 s</td><td class="ok">2.06 s</td><td>—</td><td class="bad">+0.84 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> Main: 183 return B→A (+0.67 s; Robi 0.75s vs BL 0.08s). also INVITE→B (+0.24 s). QCI1 A-bearer late at 2.53s (after B 183); BL early at 0.06s. Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +0.84 s.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>Main: 183 return B→A (+0.67 s; Robi 0.75s vs BL 0.08s).</li><li>also INVITE→B (+0.24 s).</li><li>QCI1 A-bearer late at 2.53s (after B 183); BL early at 0.06s.</li><li>Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +0.84 s.</li></ul></div>
   <div class="bar" id="bar-idle7" data-stage="idle7">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp" disabled title="Not in this pair">Grameenphone</button>
     <span class="sep"></span>
@@ -460,7 +463,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td>0.30 s</td><td>0.28 s</td><td>—</td><td>+0.02 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td class="ok">2.03 s</td><td>2.09 s</td><td>—</td><td>−0.06 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> Robi CST better (-0.06 s). No Robi loss.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>Robi CST better (-0.06 s). No Robi loss.</li></ul></div>
   <div class="bar" id="bar-idle8" data-stage="idle8">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp" disabled title="Not in this pair">Grameenphone</button>
     <span class="sep"></span>
@@ -485,7 +488,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td class="ok">0.33 s</td><td>0.40 s</td><td>—</td><td>−0.07 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td class="bad">2.31 s</td><td class="ok">1.91 s</td><td>—</td><td class="bad">+0.41 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> Main: 183 return B→A (+0.66 s; Robi 0.77s vs BL 0.10s). QCI1 A-bearer late at 1.80s (after B 183); BL early at 0.26s. Domain: 183/IMS return + late QCI1. Total CST gap +0.41 s.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>Main: 183 return B→A (+0.66 s; Robi 0.77s vs BL 0.10s).</li><li>QCI1 A-bearer late at 1.80s (after B 183); BL early at 0.26s.</li><li>Domain: 183/IMS return + late QCI1. Total CST gap +0.41 s.</li></ul></div>
   <div class="bar" id="bar-idle9" data-stage="idle9">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp" disabled title="Not in this pair">Grameenphone</button>
     <span class="sep"></span>
@@ -510,7 +513,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td class="ok">0.25 s</td><td>0.40 s</td><td>—</td><td>−0.15 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td class="bad">6.37 s</td><td class="ok">1.67 s</td><td>—</td><td class="bad">+4.69 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> Main: INVITE→B / IMS+paging (+4.11 s; Robi 5.24s vs BL 1.12s). also 183 return B→A (+0.71 s). QCI1 A-bearer late at 5.95s (after B 183); BL early at 0.12s. Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +4.69 s.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>Main: INVITE→B / IMS+paging (+4.11 s; Robi 5.24s vs BL 1.12s).</li><li>also 183 return B→A (+0.71 s).</li><li>QCI1 A-bearer late at 5.95s (after B 183); BL early at 0.12s.</li><li>Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +4.69 s.</li></ul></div>
   <div class="bar" id="bar-idle10" data-stage="idle10">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp" disabled title="Not in this pair">Grameenphone</button>
     <span class="sep"></span>
@@ -535,7 +538,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td class="ok">0.23 s</td><td>0.30 s</td><td>—</td><td>−0.07 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td>2.10 s</td><td>2.06 s</td><td>—</td><td>+0.04 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> CST almost equal (+0.04 s). No material Robi gap.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>CST almost equal (+0.04 s). No material Robi gap.</li></ul></div>
   <div class="bar" id="bar-idle11" data-stage="idle11">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp" disabled title="Not in this pair">Grameenphone</button>
     <span class="sep"></span>
@@ -560,7 +563,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td class="ok">0.23 s</td><td>0.36 s</td><td>—</td><td>−0.13 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td class="bad">2.90 s</td><td class="ok">2.15 s</td><td>—</td><td class="bad">+0.75 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> Main: 183 return B→A (+0.69 s; Robi 0.75s vs BL 0.06s). also INVITE→B (+0.20 s). QCI1 A-bearer late at 2.53s (after B 183); BL early at 0.33s. Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +0.75 s.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>Main: 183 return B→A (+0.69 s; Robi 0.75s vs BL 0.06s).</li><li>also INVITE→B (+0.20 s).</li><li>QCI1 A-bearer late at 2.53s (after B 183); BL early at 0.33s.</li><li>Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +0.75 s.</li></ul></div>
   <div class="bar" id="bar-idle12" data-stage="idle12">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp" disabled title="Not in this pair">Grameenphone</button>
     <span class="sep"></span>
@@ -585,7 +588,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td class="ok">0.30 s</td><td>0.36 s</td><td>—</td><td>−0.06 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td class="ok">2.03 s</td><td>2.15 s</td><td>—</td><td>−0.12 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> Robi CST better (-0.12 s). No Robi loss.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>Robi CST better (-0.12 s). No Robi loss.</li></ul></div>
   <div class="bar" id="bar-idle13" data-stage="idle13">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp" disabled title="Not in this pair">Grameenphone</button>
     <span class="sep"></span>
@@ -610,7 +613,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td class="ok">0.25 s</td><td>0.30 s</td><td>—</td><td>−0.05 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td class="bad">6.37 s</td><td class="ok">2.06 s</td><td>—</td><td class="bad">+4.30 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> Main: INVITE→B / IMS+paging (+3.61 s; Robi 5.24s vs BL 1.63s). also 183 return B→A (+0.72 s). QCI1 A-bearer late at 5.95s (after B 183); BL early at 0.06s. Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +4.30 s.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>Main: INVITE→B / IMS+paging (+3.61 s; Robi 5.24s vs BL 1.63s).</li><li>also 183 return B→A (+0.72 s).</li><li>QCI1 A-bearer late at 5.95s (after B 183); BL early at 0.06s.</li><li>Domain: IMS/core or paging + 183/IMS return + late QCI1. Total CST gap +4.30 s.</li></ul></div>
   <div class="bar" id="bar-idle14" data-stage="idle14">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp" disabled title="Not in this pair">Grameenphone</button>
     <span class="sep"></span>
@@ -635,7 +638,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td class="ok">0.23 s</td><td>0.40 s</td><td>—</td><td>−0.17 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td class="bad">2.10 s</td><td class="ok">1.67 s</td><td>—</td><td class="bad">+0.43 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> Main: 183 return B→A (+0.62 s; Robi 0.71s vs BL 0.09s). QCI1 A-bearer late at 1.75s (after B 183); BL early at 0.12s. Domain: 183/IMS return + late QCI1. Total CST gap +0.43 s.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>Main: 183 return B→A (+0.62 s; Robi 0.71s vs BL 0.09s).</li><li>QCI1 A-bearer late at 1.75s (after B 183); BL early at 0.12s.</li><li>Domain: 183/IMS return + late QCI1. Total CST gap +0.43 s.</li></ul></div>
   <div class="bar" id="bar-idle15" data-stage="idle15">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp" disabled title="Not in this pair">Grameenphone</button>
     <span class="sep"></span>
@@ -660,7 +663,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td>0.23 s</td><td>0.28 s</td><td>—</td><td>−0.04 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td>2.10 s</td><td>2.09 s</td><td>—</td><td>+0.01 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> CST almost equal (+0.01 s). No material Robi gap.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>CST almost equal (+0.01 s). No material Robi gap.</li></ul></div>
   <div class="bar" id="bar-idle16" data-stage="idle16">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp" disabled title="Not in this pair">Grameenphone</button>
     <span class="sep"></span>
@@ -685,7 +688,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td class="ok">0.28 s</td><td>0.40 s</td><td>—</td><td>−0.11 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td class="bad">2.50 s</td><td class="ok">1.91 s</td><td>—</td><td class="bad">+0.59 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> Main: 183 return B→A (+0.59 s; Robi 0.69s vs BL 0.10s). QCI1 A-bearer late at 2.07s (after B 183); BL early at 0.26s. Domain: 183/IMS return + late QCI1. Total CST gap +0.59 s.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>Main: 183 return B→A (+0.59 s; Robi 0.69s vs BL 0.10s).</li><li>QCI1 A-bearer late at 2.07s (after B 183); BL early at 0.26s.</li><li>Domain: 183/IMS return + late QCI1. Total CST gap +0.59 s.</li></ul></div>
   <div class="bar" id="bar-idle17" data-stage="idle17">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp" disabled title="Not in this pair">Grameenphone</button>
     <span class="sep"></span>
@@ -710,7 +713,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td class="ok">0.23 s</td><td>0.36 s</td><td>—</td><td>−0.12 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td>2.10 s</td><td>2.15 s</td><td>—</td><td>−0.04 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> CST almost equal (-0.04 s). No material Robi gap.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>CST almost equal (-0.04 s). No material Robi gap.</li></ul></div>
   <div class="bar" id="bar-idle18" data-stage="idle18">
     <button data-view="all" class="on">All side by side</button><button data-view="robi">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp" disabled title="Not in this pair">Grameenphone</button>
     <span class="sep"></span>
@@ -733,7 +736,7 @@
       <th>Pair</th><th>BL pair</th><th>BL weaker</th><th>BL CST</th>
       <th>GP pair</th><th>GP weaker</th><th>GP CST</th><th>RSRP Δ</th><th>BL − GP</th><th>Notes (RCA)</th>
     </tr></thead>
-    <tbody><tr><td>Pair 1</td><td>8589934624</td><td>−102 dBm</td><td>1.47 s</td><td>25769803808</td><td>−104.8 dBm</td><td>1.64 s</td><td>2.8 dB</td><td>−0.18 s</td><td class="note">GP slower by 0.18 s. INVITE→B gap -0.34 s. 183 return gap -0.34 s.</td></tr><tr><td>Pair 2</td><td>8589934624</td><td>−102 dBm</td><td>1.47 s</td><td>25769803806</td><td>−98.8 dBm</td><td>1.71 s</td><td>3.2 dB</td><td>−0.24 s</td><td class="note">GP slower by 0.24 s. INVITE→B gap -0.43 s. 183 return gap -0.31 s.</td></tr></tbody>
+    <tbody><tr><td>Pair 1</td><td>8589934624</td><td>−102 dBm</td><td>1.47 s</td><td>25769803808</td><td>−104.8 dBm</td><td>1.64 s</td><td>2.8 dB</td><td>−0.18 s</td><td class="note"><ul class="rca"><li>GP slower by 0.18 s.</li><li>INVITE→B gap -0.34 s.</li><li>183 return gap -0.34 s.</li></ul></td></tr><tr><td>Pair 2</td><td>8589934624</td><td>−102 dBm</td><td>1.47 s</td><td>25769803806</td><td>−98.8 dBm</td><td>1.71 s</td><td>3.2 dB</td><td>−0.24 s</td><td class="note"><ul class="rca"><li>GP slower by 0.24 s.</li><li>INVITE→B gap -0.43 s.</li><li>183 return gap -0.31 s.</li></ul></td></tr></tbody>
   </table>
 </section>
 
@@ -749,7 +752,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td>—</td><td class="bad">0.79 s</td><td class="ok">0.30 s</td><td class="bad">+0.49 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td>—</td><td class="ok">1.47 s</td><td>1.64 s</td><td>−0.18 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> GP slower by 0.18 s. INVITE→B gap -0.34 s. 183 return gap -0.34 s.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>GP slower by 0.18 s.</li><li>INVITE→B gap -0.34 s.</li><li>183 return gap -0.34 s.</li></ul></div>
   <div class="bar" id="bar-conn1" data-stage="conn1">
     <button data-view="all" class="on">All side by side</button><button data-view="robi" disabled title="Not in this pair">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp">Grameenphone</button>
     <span class="sep"></span>
@@ -774,7 +777,7 @@
 <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td>—</td><td class="bad">0.79 s</td><td class="ok">0.29 s</td><td class="bad">+0.50 s</td></tr>
 <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td>—</td><td class="ok">1.47 s</td><td>1.71 s</td><td>−0.24 s</td></tr>
 </tbody></table></section>
-  <p class="find"><b>Notes (RCA):</b> GP slower by 0.24 s. INVITE→B gap -0.43 s. 183 return gap -0.31 s.</p>
+  <div class="find"><b>Notes (RCA):</b><ul class="rca"><li>GP slower by 0.24 s.</li><li>INVITE→B gap -0.43 s.</li><li>183 return gap -0.31 s.</li></ul></div>
   <div class="bar" id="bar-conn2" data-stage="conn2">
     <button data-view="all" class="on">All side by side</button><button data-view="robi" disabled title="Not in this pair">Robi</button><button data-view="bl">Banglalink</button><button data-view="gp">Grameenphone</button>
     <span class="sep"></span>
