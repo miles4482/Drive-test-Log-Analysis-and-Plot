@@ -6,22 +6,19 @@ Please find below a short summary of the Dhaka Layer-3 VoLTE drive-test comparis
 
 **Bottom line:** Under the same dial campaign and matched RF (18 idle pairs with weaker-phone RSRP within 8 dB), Robi’s call setup is slower than BL in **12 of 18** cases. The typical gap is about **+0.6 s**, and the worst case reaches about **+4.7 s**. Because coverage was aligned, this is **not** an RF story — it points to **IMS / core timing** (late QCI 1 + slow 183 on every pair, plus a paging/INVITE outlier on one bad session).
 
-**Where the gap comes from**
+**Bottom line — Late QCI 1 (every call)**  
+Robi starts the voice bearer only **after** B’s 183 (mean ~**2.85 s**); BL starts it right after INVITE (mean ~**0.19 s**). The same pattern shows up as a slow **183 return** (~**+0.65 s** vs BL on every idle pair). This is the **systematic** CST loss — fix IMS/PCRF bearer timing first; it will help all calls, not one session.
 
-1. **Persistent gap on every idle pair — 183 return + late QCI 1 (main focus)**  
-   Robi’s 183 Session Progress takes about **+0.65 s** longer to reach UE-A than BL on every pair. Robi also starts the QCI 1 voice bearer late (mean ~**2.85 s**, after B’s 183), while BL starts it early (mean ~**0.19 s**). This looks like a systematic IMS / PCRF timing issue, not RF.
+**Bottom line — Paging / INVITE (outlier)**  
+On the worst call (`17179869212`), CST is **6.37 s** vs BL **2.15 s**. Almost all of that is **waiting for the page** (Robi page at **5.10 s**, BL at **1.52 s**). After paging, RRC→INVITE is the same (~0.13 s). So radio is fine; the page is triggered late in **IMS/core/MME**. Other Robi calls page in ~0.8–1.7 s — treat this as a **session-level core fault**, not a coverage issue.
 
-2. **Outlier gap — INVITE / paging path**  
-   On the worst session (Robi pair `17179869212`, CST **6.37 s** vs BL **2.15 s**), almost all delay is **before paging**: page arrives at **5.10 s** on Robi vs **1.52 s** on BL. After the page, radio is similar (~0.13–0.15 s). So the outlier is late paging trigger in IMS/core/MME, not slow RRC after the page.
-
-3. **Not the main driver — PRACK / UPDATE**  
-   The step from 183 to 180 Ringing (PRACK/UPDATE) is **not** where Robi loses time; Robi is often slightly faster than BL here. Please do not prioritize SDP renegotiation for this CST gap.
+**Not the main driver — PRACK / UPDATE**  
+183 → 180 is not where Robi loses time (often slightly faster than BL). Do not prioritize SDP renegotiation for this CST gap.
 
 **Recommended focus**
-
-- Fix **late QCI 1 + slow 183 return** (present on all idle pairs).  
-- Investigate **INVITE/paging delay** on outlier session `17179869212`.  
-- De-prioritize PRACK/UPDATE for CST improvement.
+- Fix **late QCI 1 + slow 183 return** (all idle pairs).  
+- Investigate **late paging** on outlier `17179869212`.  
+- De-prioritize PRACK/UPDATE.
 
 Detailed ladders, pair table, and RCA notes are in the Dhaka call-flow chart (Category tab).
 
