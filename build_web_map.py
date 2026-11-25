@@ -14,6 +14,8 @@ rounded down. Cell Name is the dump EUtranCellId for that pair.
 from __future__ import annotations
 
 import json
+import math
+import re
 import sys
 import zipfile
 from pathlib import Path
@@ -173,6 +175,78 @@ def _records(frame: pd.DataFrame, names: dict[str, int]) -> dict:
     }
 
 
+def _load_coverage_payload() -> dict:
+    if not DATA_JS.exists():
+        raise SystemExit(f"Missing {DATA_JS.name}; run a full web build first")
+    text = DATA_JS.read_text().strip()
+    if not text.startswith("const COVERAGE = ") or not text.endswith(";"):
+        raise SystemExit(f"{DATA_JS.name} is not a coverage page")
+    return json.loads(text[len("const COVERAGE = "):-1])
+
+
+def _names_dict_from_payload(payload: dict) -> dict[str, int]:
+    """Keep existing Idle name indices stable when only Active is rebuilt."""
+    names: dict[str, int] = {"": 0}
+    for index, value in enumerate(payload.get("names") or [""]):
+        if index == 0:
+            continue
+        if value and value not in names:
+            names[value] = index
+    return names
+
+
+def _write_coverage_payload(payload: dict) -> None:
+    WEB_DIR.mkdir(parents=True, exist_ok=True)
+    text = "const COVERAGE = " + json.dumps(payload, separators=(",", ":")) + ";\n"
+    DATA_JS.write_text(text)
+    print(f"Wrote {DATA_JS} ({DATA_JS.stat().st_size / 1e6:.1f} MB)", flush=True)
+
+
+def build_active_only() -> None:
+    """Refresh Active coverage sets only. Idle maps, feeder, and site pies stay as published.
+
+    Standing rule: when Active Mode logs change, bump the web version and call this
+    path so Idle layers are not regenerated.
+    """
+    if not ACTIVE_MERGED.exists():
+        raise SystemExit("Merged Active drive log is missing.")
+    if not SITE_DB_PATH.exists():
+        raise SystemExit(f"Missing {SITE_DB_PATH.name}")
+    payload = _load_coverage_payload()
+    idle_keys = [key for key in payload.get("sets", {}) if key.startswith("idle|")]
+    if not idle_keys:
+        raise SystemExit("Existing coverage has no Idle sets to preserve")
+    print("Loading system dump", flush=True)
+    exact, pair = load_cell_directory()
+    print(f"  names by EARFCN {len(exact):,}  unique pairs {len(pair):,}", flush=True)
+    print("Loading Active drive log only", flush=True)
+    active = select_active_report(load_active_merged())
+    active_all = strongest_location(active)
+    print(f"Active plotted {len(active_all):,} (Idle sets left unchanged)", flush=True)
+
+    tracks: dict[str, pd.DataFrame] = {"active|all": active_all}
+    for layer in REPORT_LAYERS:
+        tracks[f"active|{layer}"] = filter_by_layer(active_all, layer)
+
+    names = _names_dict_from_payload(payload)
+    for key, frame in tracks.items():
+        print(f"Binning {key} ({len(frame):,} rows)", flush=True)
+        identified = attach_identity(frame, "active", exact, pair)
+        binned = bin_track(identified)
+        named = int((binned["cell_name"].astype(str).str.len() > 0).sum()) if not binned.empty else 0
+        print(f"  {len(binned):,} spots, {named:,} with a Cell Name", flush=True)
+        payload["sets"][key] = _records(binned, names)
+
+    ordered = [""] * len(names)
+    for value, index in names.items():
+        ordered[index] = value
+    payload["names"] = ordered
+    _write_coverage_payload(payload)
+    # Cell RF params must cover any new Active names; site pies stay dump-based.
+    add_cell_params()
+    package_web()
+
+
 def build() -> None:
     if not MERGED_CSV.exists() or not ACTIVE_MERGED.exists():
         raise SystemExit("Merged drive logs are missing.")
@@ -213,17 +287,17 @@ def build() -> None:
     for value, index in names.items():
         ordered[index] = value
     payload = {"names": ordered, "sets": sets}
-    WEB_DIR.mkdir(parents=True, exist_ok=True)
-    text = "const COVERAGE = " + json.dumps(payload, separators=(",", ":")) + ";\n"
-    DATA_JS.write_text(text)
-    print(f"Wrote {DATA_JS} ({DATA_JS.stat().st_size / 1e6:.1f} MB)", flush=True)
+    _write_coverage_payload(payload)
     add_cell_params()
     add_site_pies()
     package_web()
 
 
-RF_COLUMNS = ("Azimuth", "Height", "E_tilt", "M_tilt", "RS Power(dBm)")
-RF_DIGITS = (1, 1, 1, 1, 2)
+RF_COLUMNS = (
+    "Azimuth", "Height", "E_tilt", "M_tilt", "RS Power(dBm)",
+    "dlChannelBandwidth", "noOfTxAntennas", "noOfRxAntennas",
+)
+RF_DIGITS = (1, 1, 1, 1, 2, 0, 0, 0)
 
 
 def _rf_number(value, digits: int):
@@ -281,38 +355,125 @@ def add_cell_params() -> int:
     return filled
 
 
-def add_site_pies(radius_km: float = 3.0) -> int:
-    """Sites along the drive, one centre and every sector arm, for the web pies."""
-    from merge_and_analyze import _sites_near_drive, load_site_sectors
+_SECTOR_CELLS: dict[tuple[str, str], list] | None = None
 
+
+def _grab(value, digits: int):
+    if value is None:
+        return None
+    try:
+        if math.isnan(value):
+            return None
+    except TypeError:
+        return None
+    if digits == 0:
+        return int(value)
+    return float(value)
+
+
+def _sector_cell_index() -> dict[tuple[str, str], list]:
+    """Cell parameters for each site and sector, from the system dump."""
+    global _SECTOR_CELLS
+    if _SECTOR_CELLS is not None:
+        return _SECTOR_CELLS
+    from merge_and_analyze import _SITE_CELLS
+
+    buckets: dict[tuple[str, str], list] = {}
+    frame = _SITE_CELLS
+    if frame is None or frame.empty:
+        _SECTOR_CELLS = buckets
+        return buckets
+    work = frame.loc[:, [
+        "SiteName", "Sector", "EUtranCellId", "cellId",
+        "Azimuth", "Height", "E_tilt", "M_tilt", "RS Power(dBm)",
+        "dlChannelBandwidth", "noOfTxAntennas", "noOfRxAntennas",
+    ]].copy()
+    for col in ("SiteName", "Sector", "EUtranCellId"):
+        work[col] = work[col].map(lambda value: "" if value is None else str(value).strip())
+    work = work[
+        work["SiteName"].ne("")
+        & work["Sector"].ne("")
+        & work["EUtranCellId"].ne("")
+        & work["EUtranCellId"].str.lower().ne("nan")
+    ]
+    work = work.drop_duplicates(["SiteName", "Sector", "EUtranCellId"], keep="first")
+    work = work.rename(columns={
+        "SiteName": "site",
+        "Sector": "sector",
+        "EUtranCellId": "name",
+        "cellId": "cid",
+        "Azimuth": "az",
+        "Height": "ht",
+        "E_tilt": "et",
+        "M_tilt": "mt",
+        "RS Power(dBm)": "pwr",
+        "dlChannelBandwidth": "bw",
+        "noOfTxAntennas": "tx",
+        "noOfRxAntennas": "rx",
+    })
+    for col, digits in (
+        ("cid", 0), ("az", 1), ("ht", 1), ("et", 1), ("mt", 1),
+        ("pwr", 2), ("bw", 0), ("tx", 0), ("rx", 0),
+    ):
+        work[col] = pd.to_numeric(work[col], errors="coerce").round(digits)
+    for row in work.itertuples(index=False):
+        key = (row.site, row.sector)
+        buckets.setdefault(key, []).append([
+            row.name,
+            _grab(row.cid, 0),
+            _grab(row.az, 1),
+            _grab(row.ht, 1),
+            _grab(row.et, 1),
+            _grab(row.mt, 1),
+            _grab(row.pwr, 2),
+            _grab(row.bw, 0),
+            _grab(row.tx, 0),
+            _grab(row.rx, 0),
+        ])
+    for rows in buckets.values():
+        rows.sort(key=lambda item: item[0])
+    _SECTOR_CELLS = buckets
+    return buckets
+
+
+def _cells_for_sector(site: str, sector: str) -> list:
+    return _sector_cell_index().get((site, sector), [])
+
+
+def add_site_pies(radius_km: float = 3.0) -> int:
+    """Every site in the system dump, one centre and every sector arm.
+
+    The page draws a site only while its centre is inside the chart. radius_km
+    is unused; it remains so older calls keep working.
+    """
+    from merge_and_analyze import load_site_sectors
+
+    del radius_km
     text = DATA_JS.read_text().strip()
     if not text.startswith("const COVERAGE = "):
         raise SystemExit(f"{DATA_JS.name} is not a coverage page")
     payload = json.loads(text[len("const COVERAGE = "):-1])
-    lat: list[float] = []
-    lon: list[float] = []
-    for key in ("idle|all", "active|all"):
-        pack = payload["sets"][key]
-        lat.extend(pack["lat"])
-        lon.extend(pack["lon"])
-    drive = pd.DataFrame({"Latitude": lat, "Longitude": lon})
-    near = _sites_near_drive(load_site_sectors(), drive, radius_km=radius_km)
+    sectors = load_site_sectors()
     sites: list[list] = []
-    for _site, part in near.groupby("SiteName", sort=False):
+    for _site, part in sectors.groupby("SiteName", sort=False):
         part = part.drop_duplicates(subset=["Sector"]).dropna(subset=["azimuth"])
         if part.empty:
             continue
         arms = []
+        site_name = str(_site).strip()
+        if site_name.lower() == "nan":
+            site_name = ""
         for _, row in part.iterrows():
             name = str(row["Sector"]).strip()
             if not name or name.lower() == "nan":
                 continue
-            arms.append([name, round(float(row["azimuth"]) % 360.0, 1)])
+            arms.append([
+                name,
+                round(float(row["azimuth"]) % 360.0, 1),
+                _cells_for_sector(site_name, name),
+            ])
         if not arms:
             continue
-        site_name = str(_site).strip()
-        if site_name.lower() == "nan":
-            site_name = ""
         sites.append([
             round(float(part["lat"].median()), 5),
             round(float(part["lon"].median()), 5),
@@ -321,27 +482,47 @@ def add_site_pies(radius_km: float = 3.0) -> int:
         ])
     payload["sites"] = sites
     DATA_JS.write_text("const COVERAGE = " + json.dumps(payload, separators=(",", ":")) + ";\n")
-    print(f"Site pies {len(sites):,} along the drive", flush=True)
+    print(f"Site pies {len(sites):,} from the system dump", flush=True)
     return len(sites)
 
 
+def _web_version(html_text: str) -> str:
+    match = re.search(r"<h1>Bogura coverage v(\d+(?:\.\d+)+)</h1>", html_text)
+    if not match:
+        raise SystemExit("web/index.html has no Bogura coverage version")
+    return match.group(1)
+
+
 def package_web() -> Path:
-    """One download named with the same version as the Excel report."""
-    from generate_excel_report import OUTPUT_DIR, REPORT_VERSION
+    """One download named with the version in the page title."""
+    from generate_excel_report import OUTPUT_DIR
 
     html_text = (WEB_DIR / "index.html").read_text()
-    marker = f"v{REPORT_VERSION}"
+    version = _web_version(html_text)
+    marker = f"v{version}"
     if marker not in html_text:
-        raise SystemExit(f"web/index.html is not labelled {marker}, which is the Excel report version")
+        raise SystemExit(f"web/index.html is not labelled {marker}")
     if not DATA_JS.exists():
         raise SystemExit(f"Missing {DATA_JS.name}; build the coverage data first")
     page = html_text.replace(
         '<script src="coverage_data.js"></script>',
         "<script>\n" + DATA_JS.read_text() + "</script>",
     )
+    descriptions = WEB_DIR / "bad_spot_descriptions.js"
+    if descriptions.exists():
+        page = page.replace(
+            '<script src="bad_spot_descriptions.js"></script>',
+            "<script>\n" + descriptions.read_text() + "</script>",
+        )
+    feeder = WEB_DIR / "feeder_swaps.js"
+    if feeder.exists():
+        page = page.replace(
+            '<script src="feeder_swaps.js"></script>',
+            "<script>\n" + feeder.read_text() + "</script>",
+        )
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    dest = OUTPUT_DIR / f"Bogura_DriveTest_Web_v{REPORT_VERSION}.zip"
-    inner = f"Bogura_DriveTest_Web_v{REPORT_VERSION}.html"
+    dest = OUTPUT_DIR / f"Bogura_DriveTest_Web_v{version}.zip"
+    inner = f"Bogura_DriveTest_Web_v{version}.html"
     with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(inner, page)
     print(f"Wrote {dest} ({dest.stat().st_size / 1e6:.1f} MB) containing {inner}", flush=True)
@@ -353,5 +534,7 @@ if __name__ == "__main__":
         add_cell_params()
         add_site_pies()
         package_web()
+    elif "--active-only" in sys.argv:
+        build_active_only()
     else:
         build()
