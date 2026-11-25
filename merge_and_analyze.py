@@ -6924,7 +6924,13 @@ def satellite_circle_spots(
     chunk_km = 2.0 * CIRCLE_MAX_RAD_KM * 0.90
     groups: list[list[tuple[float, float]]] = []
     if len(poor_points) <= 1:
-        groups.append([(float(template["outline_lat"]), float(template["outline_lon"]))])
+        # Cap the fallback oval the same way as every other pocket.
+        fallback = template.copy()
+        rad = min(float(fallback["outline_width_km"]) / 2.0, CIRCLE_MAX_RAD_KM)
+        fallback["outline_width_km"] = float(2.0 * rad)
+        fallback["outline_height_km"] = float(2.0 * rad)
+        groups.append([(float(fallback["outline_lat"]), float(fallback["outline_lon"]))])
+        template = fallback
     else:
         # Short pockets keep one oval on a poor run without crossing fields.
         clusters = _cluster_cover_points(poor_points, 0.85)
