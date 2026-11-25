@@ -4,7 +4,7 @@ Dear Team,
 
 Please find below a short summary of the Dhaka Layer-3 VoLTE drive-test comparison between **Robi** and **Banglalink (BL)** only.
 
-We analyzed the same dial campaign (7 Robi + 7 BL calls). For apple-to-apple idle comparison we used **18 close-RSRP pairs** (weaker-phone Δ ≤ 8 dB). Under matched coverage, **Robi CST is behind BL in 12 of 18 pairs** (median gap about **+0.6 s**; worst about **+4.7 s**).
+**Bottom line:** Under the same dial campaign and matched RF (18 idle pairs with weaker-phone RSRP within 8 dB), Robi’s call setup is slower than BL in **12 of 18** cases. The typical gap is about **+0.6 s**, and the worst case reaches about **+4.7 s**. Because coverage was aligned, this is **not** an RF story — it points to **IMS / core timing** (late QCI 1 + slow 183 on every pair, plus a paging/INVITE outlier on one bad session).
 
 **Where the gap comes from**
 
