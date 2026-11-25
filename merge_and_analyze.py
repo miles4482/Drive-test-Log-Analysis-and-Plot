@@ -683,33 +683,35 @@ def _sectors_near(lat: float, lon: float, km: float = 8.5) -> list[dict]:
     return list(best.values())
 
 
-def _blank_segments(samples: pd.DataFrame, spot: pd.Series) -> list[dict]:
-    """Driven stretches inside the circle where the map has no plot.
+def _blank_search_box(spot: pd.Series) -> tuple[float, float, float, float, float, float]:
+    """Lat/lon centre and half-axes for blank search around a bad spot.
 
-    A normal sample is a few metres from the next one. A jump of 80 m to 1.6 km
-    at driving speed, on the same log, is a blank: the road was driven and
-    nothing was plotted. Those metres are part of this bad spot.
+    The tight drawn oval is too small: blanks that sit on the same map just
+    outside that oval must still count. Search at least 2.8 km from the spot
+    centre, and never smaller than the stored outline.
     """
-    if samples is None or samples.empty or "outline_width_km" not in getattr(spot, "index", []):
-        return []
-    if pd.isna(spot.get("outline_width_km")):
-        return []
-    need = ["Latitude", "Longitude", "Time"]
-    if any(col not in samples.columns for col in need):
-        return []
-    work = samples.dropna(subset=need).sort_values("Time")
+    lat0 = float(spot.get("outline_lat", spot["lat"]))
+    lon0 = float(spot.get("outline_lon", spot["lon"]))
+    km_lon = _km_per_deg_lon(lat0)
+    half_w = max(float(spot.get("outline_width_km") or 0) / 2.0, 2.8)
+    half_h = max(float(spot.get("outline_height_km") or 0) / 2.0, 2.8)
+    return lat0, lon0, half_w / km_lon, half_h / 111.32, half_w, half_h
+
+
+def _blank_gaps_from_track(
+    work: pd.DataFrame,
+    lat0: float,
+    lon0: float,
+    half_w: float,
+    half_h: float,
+) -> list[dict]:
+    """Gap list from one time-ordered track clipped to the search ellipse."""
     if len(work) < 2:
         return []
     lat = work["Latitude"].to_numpy(dtype=float)
     lon = work["Longitude"].to_numpy(dtype=float)
     time_s = pd.to_datetime(work["Time"]).to_numpy(dtype="datetime64[ns]").astype("int64") / 1e9
     source = work["Source"].to_numpy() if "Source" in work.columns else np.zeros(len(work))
-    lat0 = float(spot["outline_lat"])
-    lon0 = float(spot["outline_lon"])
-    half_w = float(spot["outline_width_km"]) / _km_per_deg_lon(lat0) / 2.0
-    half_h = float(spot["outline_height_km"]) / 111.32 / 2.0
-    if half_w <= 0 or half_h <= 0:
-        return []
     same = source[:-1] == source[1:]
     dt = time_s[1:] - time_s[:-1]
     dist_m = _equirect_km(lat[:-1], lon[:-1], lat[1:], lon[1:]) * 1000.0
@@ -719,16 +721,15 @@ def _blank_segments(samples: pd.DataFrame, spot: pd.Series) -> list[dict]:
     inside = ((mid_lon - lon0) / half_w) ** 2 + ((mid_lat - lat0) / half_h) ** 2 <= 1.0
     keep = (
         same
-        & (dt >= 8.0)
-        & (dt <= 150.0)
+        & (dt >= 5.0)
+        & (dt <= 300.0)
         & (dist_m >= 80.0)
-        & (dist_m <= 1600.0)
-        & (speed >= 15.0)
-        & (speed <= 120.0)
+        & (dist_m <= 2500.0)
+        & (speed >= 10.0)
+        & (speed <= 130.0)
         & inside
     )
     idx = np.flatnonzero(keep)
-    order = idx[np.argsort(-dist_m[idx])]
     return [
         {
             "lat": float(mid_lat[i]),
@@ -739,8 +740,68 @@ def _blank_segments(samples: pd.DataFrame, spot: pd.Series) -> list[dict]:
             "lon2": float(lon[i + 1]),
             "length_m": float(dist_m[i]),
         }
-        for i in order
+        for i in idx
     ]
+
+
+def _blank_segments(samples: pd.DataFrame, spot: pd.Series) -> list[dict]:
+    """Driven stretches near the bad spot where the map has no plot.
+
+    A jump of 80 m to 2.5 km at driving speed on the same log is a blank. Those
+    metres are part of this bad spot and must be circled. Two passes run:
+
+    1. Full-track consecutive samples whose midpoint sits in the search box.
+    2. Map-neighbourhood samples only (points inside the search box, then sorted
+       by time). That catches a blank the map shows when the UE left the window
+       and came back — the stretch still has no plot on this bad-spot map.
+    """
+    if samples is None or samples.empty:
+        return []
+    need = ["Latitude", "Longitude", "Time"]
+    if any(col not in samples.columns for col in need):
+        return []
+    if "outline_width_km" not in getattr(spot, "index", []) or pd.isna(spot.get("outline_width_km")):
+        spot = pd.Series({
+            **dict(spot),
+            "outline_lat": float(spot["lat"]),
+            "outline_lon": float(spot["lon"]),
+            "outline_width_km": 5.6,
+            "outline_height_km": 5.6,
+        })
+    lat0, lon0, half_w, half_h, _w_km, _h_km = _blank_search_box(spot)
+    if half_w <= 0 or half_h <= 0:
+        return []
+    work = samples.dropna(subset=need).sort_values("Time")
+    if len(work) < 2:
+        return []
+    gaps = _blank_gaps_from_track(work, lat0, lon0, half_w, half_h)
+    # Neighbourhood pass: only samples inside the search box.
+    local = work[
+        ((work["Longitude"].astype(float) - lon0) / half_w) ** 2
+        + ((work["Latitude"].astype(float) - lat0) / half_h) ** 2
+        <= 1.0
+    ].sort_values("Time")
+    gaps.extend(_blank_gaps_from_track(local, lat0, lon0, half_w, half_h))
+    # Deduplicate nearly identical gaps (same ends within ~40 m).
+    unique: list[dict] = []
+    for gap in sorted(gaps, key=lambda item: -float(item["length_m"])):
+        dup = False
+        for kept in unique:
+            if (
+                _equirect_km(gap["lat1"], gap["lon1"], kept["lat1"], kept["lon1"]) * 1000.0 < 40.0
+                and _equirect_km(gap["lat2"], gap["lon2"], kept["lat2"], kept["lon2"]) * 1000.0 < 40.0
+            ):
+                dup = True
+                break
+            if (
+                _equirect_km(gap["lat1"], gap["lon1"], kept["lat2"], kept["lon2"]) * 1000.0 < 40.0
+                and _equirect_km(gap["lat2"], gap["lon2"], kept["lat1"], kept["lon1"]) * 1000.0 < 40.0
+            ):
+                dup = True
+                break
+        if not dup:
+            unique.append(gap)
+    return unique
 
 
 def _not_required(reason: str) -> str:
@@ -965,44 +1026,147 @@ def _azimuth_gap(left: float, right: float) -> float:
     return abs(_signed_deg(left, right))
 
 
-def _new_site_azimuths(site_lat: float, site_lon: float, face: float) -> list[tuple[float, float]]:
-    """One sector on the bad spot, two toward the higher population, gaps at least 45°.
+def _cover_bearings_for_new_site(
+    site_lat: float,
+    site_lon: float,
+    red_lat: float,
+    red_lon: float,
+    blanks: list[dict] | None = None,
+    red_points: list[tuple[float, float]] | None = None,
+) -> list[tuple[float, str]]:
+    """Bearings the new site must cover first: blank road, then poor road."""
+    bearings: list[tuple[float, str, float]] = []
+    for gap in blanks or []:
+        length = float(gap.get("length_m") or 0)
+        if length < 80:
+            continue
+        # Blank ends and midpoint so a long blank along the road can take two sectors.
+        for lat_key, lon_key, w in (
+            ("lat1", "lon1", length * 0.35),
+            ("lat2", "lon2", length * 0.35),
+            ("lat", "lon", length),
+        ):
+            br = _bearing_deg(site_lat, site_lon, float(gap[lat_key]), float(gap[lon_key]))
+            bearings.append((br % 360.0, "blank", w))
+    if red_points:
+        for lat, lon in red_points:
+            br = _bearing_deg(site_lat, site_lon, float(lat), float(lon))
+            bearings.append((br % 360.0, "bad", 1.0))
+    else:
+        bearings.append((_bearing_deg(site_lat, site_lon, red_lat, red_lon) % 360.0, "bad", 1.0))
+    # Cluster bearings within 35°; keep the weight-weighted mean of each cluster.
+    bearings.sort(key=lambda item: item[0])
+    clusters: list[list[tuple[float, str, float]]] = []
+    for item in bearings:
+        if clusters and _azimuth_gap(clusters[-1][-1][0], item[0]) <= 35.0:
+            clusters[-1].append(item)
+        else:
+            clusters.append([item])
+    # Merge wrap-around first/last if they sit within 35°.
+    if len(clusters) >= 2 and _azimuth_gap(clusters[0][0][0], clusters[-1][-1][0]) <= 35.0:
+        clusters[0] = clusters[-1] + clusters[0]
+        clusters.pop()
+    out: list[tuple[float, str]] = []
+    for cluster in clusters:
+        total = sum(weight for _br, _kind, weight in cluster) or 1.0
+        # Circular mean via unit vectors.
+        sx = sum(math.sin(math.radians(br)) * weight for br, _kind, weight in cluster)
+        cy = sum(math.cos(math.radians(br)) * weight for br, _kind, weight in cluster)
+        mean = math.degrees(math.atan2(sx, cy)) % 360.0
+        kind = "blank" if any(k == "blank" for _br, k, _w in cluster) else "bad"
+        out.append((mean, kind))
+    out.sort(key=lambda item: (0 if item[1] == "blank" else 1, -sum(
+        w for br, k, w in bearings if k == item[1] and _azimuth_gap(br, item[0]) <= 40.0
+    )))
+    return out
 
-    Returns (azimuth, people per km²) with the bad-spot sector first. Equal spacing
-    is used only when the population grid has no people to choose between.
+
+def _new_site_azimuths(
+    site_lat: float,
+    site_lon: float,
+    face: float,
+    cover: list[tuple[float, str]] | None = None,
+) -> list[tuple[float, float, str]]:
+    """Up to two sectors on blank/bad road first; the rest toward population.
+
+    Returns (azimuth, people per km², aim_tag). aim_tag is "blank", "bad", or "population".
+    Gaps stay at least 45°.
     """
     face = face % 360.0
-    face_pop = _wedge_population(site_lat, site_lon, face)
-    candidates = []
-    for deg in range(0, 360, 5):
-        if _azimuth_gap(face, deg) < NEW_SITE_MIN_GAP_DEG:
-            continue
-        candidates.append((float(deg), _wedge_population(site_lat, site_lon, deg)))
-    best: tuple[float, float, float] | None = None
-    for index, (az1, pop1) in enumerate(candidates):
-        for az2, pop2 in candidates[index + 1 :]:
-            if _azimuth_gap(az1, az2) < NEW_SITE_MIN_GAP_DEG:
+    cover = list(cover or [(face, "bad")])
+    # Prefer blank clusters, then bad. At most two cover sectors.
+    # A long blank along the road gets two fans (A & B) around its bearing so
+    # both ends of the hole are covered before any population sector is added.
+    chosen: list[tuple[float, str]] = []
+    blank_faces = [br for br, kind in cover if kind == "blank"]
+    if blank_faces:
+        primary = blank_faces[0]
+        # ±30° fans stay 60° apart (>= 45° rule) and match "two sectors on the blank road".
+        fans = [((primary - 30.0) % 360.0, "blank"), ((primary + 30.0) % 360.0, "blank")]
+        for br, kind in fans:
+            if any(_azimuth_gap(br, az) < NEW_SITE_MIN_GAP_DEG for az, _k in chosen):
                 continue
-            score = pop1 + pop2
-            if best is None or score > best[0]:
-                best = (score, az1, az2)
-    if best is None or best[0] <= 0:
-        offsets = (0.0, 120.0, 240.0)
-        return [( (face + offset) % 360.0, _wedge_population(site_lat, site_lon, (face + offset) % 360.0)) for offset in offsets]
-    second, third = best[1], best[2]
+            chosen.append((br, kind))
+            if len(chosen) >= 2:
+                break
+    for br, kind in cover:
+        if len(chosen) >= 2:
+            break
+        if any(_azimuth_gap(br, az) < NEW_SITE_MIN_GAP_DEG for az, _k in chosen):
+            continue
+        chosen.append((br % 360.0, kind))
+    if not chosen:
+        chosen = [(face, "bad")]
+
+    blocked = [az for az, _k in chosen]
+    pop_candidates = []
+    for deg in range(0, 360, 5):
+        if any(_azimuth_gap(deg, az) < NEW_SITE_MIN_GAP_DEG for az in blocked):
+            continue
+        pop_candidates.append((float(deg), _wedge_population(site_lat, site_lon, deg)))
+    while len(chosen) < 3:
+        if pop_candidates:
+            pop_candidates.sort(key=lambda item: -item[1])
+            az, _pop = pop_candidates[0]
+            chosen.append((az, "population"))
+            blocked.append(az)
+            pop_candidates = [
+                item for item in pop_candidates
+                if _azimuth_gap(item[0], az) >= NEW_SITE_MIN_GAP_DEG
+            ]
+        else:
+            # Equal spacing fallback when the grid has no free wedge.
+            probe = (chosen[-1][0] + 120.0) % 360.0
+            for _ in range(24):
+                if all(_azimuth_gap(probe, az) >= NEW_SITE_MIN_GAP_DEG for az in blocked):
+                    break
+                probe = (probe + 15.0) % 360.0
+            chosen.append((probe, "population"))
+            blocked.append(probe)
+
     return [
-        (face, face_pop),
-        (second, _wedge_population(site_lat, site_lon, second)),
-        (third, _wedge_population(site_lat, site_lon, third)),
+        (az, _wedge_population(site_lat, site_lon, az), kind)
+        for az, kind in chosen[:3]
     ]
 
 
-def _new_site_text(lat: float, lon: float, red_lat: float, red_lon: float, sectors: list[dict]) -> tuple[str, str]:
+def _new_site_text(
+    lat: float,
+    lon: float,
+    red_lat: float,
+    red_lon: float,
+    sectors: list[dict],
+    blanks: list[dict] | None = None,
+    red_points: list[tuple[float, float]] | None = None,
+) -> tuple[str, str]:
     site_lat = lat + 0.18 / 111.32
     site_lon = lon
     face = _bearing_deg(site_lat, site_lon, red_lat, red_lon)
-    planned = _new_site_azimuths(site_lat, site_lon, face)
-    azimuths = [az for az, _pop in planned]
+    cover = _cover_bearings_for_new_site(
+        site_lat, site_lon, red_lat, red_lon, blanks=blanks, red_points=red_points,
+    )
+    planned = _new_site_azimuths(site_lat, site_lon, face, cover=cover)
+    azimuths = [az for az, _pop, _kind in planned]
     near = min(
         (float(_equirect_km(rec["lat"], rec["lon"], site_lat, site_lon)) for rec in sectors),
         default=5.0,
@@ -1013,9 +1177,11 @@ def _new_site_text(lat: float, lon: float, red_lat: float, red_lon: float, secto
     gaps = [((ordered[(i + 1) % 3] - az) % 360.0) for i, az in enumerate(ordered)]
     gap_text = ", ".join(f"{gap:.0f}°" for gap in gaps)
     sentences = []
-    for index, (az, pop) in enumerate(planned):
-        tilt = face_tilt if index == 0 else outer_tilt
-        if index == 0:
+    for index, (az, pop, kind) in enumerate(planned):
+        tilt = face_tilt if kind in ("blank", "bad") and index < 2 else outer_tilt
+        if kind == "blank":
+            aim = "aims at the blank road"
+        elif kind == "bad":
             aim = "aims at the bad spot"
         else:
             aim = f"aims toward the higher population, {_people(pop)}"
@@ -1030,7 +1196,8 @@ def _new_site_text(lat: float, lon: float, red_lat: float, red_lon: float, secto
     )
     where = f"New site {site_lat:.5f}, {site_lon:.5f}"
     actions = []
-    for index, az in enumerate(azimuths):
+    for index, (az, _pop, kind) in enumerate(planned):
+        tilt = face_tilt if kind in ("blank", "bad") and index < 2 else outer_tilt
         actions.append({
             "site": where,
             "sector": f"S{index + 1}",
@@ -1041,7 +1208,7 @@ def _new_site_text(lat: float, lon: float, red_lat: float, red_lon: float, secto
             "mt": None,
             "p_height": 30.0,
             "p_azimuth": _ep_num(az),
-            "p_et": float(face_tilt if index == 0 else outer_tilt),
+            "p_et": float(tilt),
             "p_mt": 0.0,
             "action": "New 3-sector site",
         })
@@ -1058,13 +1225,16 @@ def _choose_coverage_fix(
     target_lon: float,
     red_lat: float,
     red_lon: float,
+    blanks: list[dict] | None = None,
+    red_points: list[tuple[float, float]] | None = None,
 ) -> dict:
     """Pick one final solution from the distance rules.
 
     A null inside 1.5 km is always a 4th L900 sector. Downtilt is limited to 2°.
     When the spot needs more downtilt, a 4th sector within 1 km is used instead.
     A 4th sector also replaces a new site when a host inside 3 km can aim at the
-    bad spot. A new 3-sector site is kept only when no such host exists.
+    bad spot. A new 3-sector site is kept only when no such host exists. New-site
+    azimuths cover blank/bad road first (up to two sectors), then population.
     """
     nearby = [site for site in sites if site["dist"] <= TUNE_KM]
     nulls = [site for site in sites if site["in_null"]]
@@ -1268,7 +1438,10 @@ def _choose_coverage_fix(
             f"{saver['name']} is inside 3 km, so a new 3-sector site is not added.",
         )
 
-    new_site, new_text, new_draw, new_actions = _new_site_text(target_lat, target_lon, red_lat, red_lon, sectors)
+    new_site, new_text, new_draw, new_actions = _new_site_text(
+        target_lat, target_lon, red_lat, red_lon, sectors,
+        blanks=blanks, red_points=red_points,
+    )
     if nearest is None:
         far = "No sector was found inside the L900 reach."
     elif nearest["dist"] > TUNE_KM:
@@ -2500,10 +2673,10 @@ def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series, mode: s
     finding_lines = []
     if blank_m >= 80:
         finding_lines.append(
-            f"Blank, no plot, {blank_m:,.0f} m inside this circle is counted as part of this bad spot."
+            f"Blank, no plot, {blank_m:,.0f} m on this map is counted as part of this bad spot."
         )
     else:
-        finding_lines.append("No driven blank inside this circle. The poor road is the red plot.")
+        finding_lines.append("No driven blank on this map. The poor road is the red plot.")
     def serving_bits(chosen: list[dict]) -> list[str]:
         served: dict[tuple, dict] = {}
         for item in chosen:
@@ -2547,8 +2720,10 @@ def bad_spot_advice(samples: pd.DataFrame, column: str, spot: pd.Series, mode: s
             f"Nearest sector is {sites[0]['name']} at {sites[0]['dist']:.1f} km. "
             f"{sum(site['dist'] <= TUNE_KM for site in sites)} site(s) are inside 2.5 km."
         )
+    red_points = [(float(item["lat"]), float(item["lon"])) for item in (bins or [])]
     choice = _choose_coverage_fix(
         sites, sectors, spot_pop, target_lat, target_lon, red_lat, red_lon,
+        blanks=blanks, red_points=red_points,
     )
     choice = _separate_fourth_sector(choice, sites, spot_pop)
     choice = _turn_neighbor_to_long_end(
@@ -2676,7 +2851,7 @@ def _spot_sections(
     poor_m = float(spot.get("length_m") or 0)
     geo = [
         f"1. Poor run {poor_m:.0f} m."
-        + (f" Blank inside the circle {blank_m:,.0f} m." if blank_m >= 80 else " No driven blank inside the circle."),
+        + (f" Blank on this map {blank_m:,.0f} m." if blank_m >= 80 else " No driven blank on this map."),
         f"2. Centre {lat:.5f}, {lon:.5f}. WorldPop 2020 {_people(spot_pop)}.",
     ]
     nearest_bits = []
@@ -6235,7 +6410,7 @@ def _cluster_cover_points(
 def _outline_from_points(
     template: pd.Series, points: list[tuple[float, float]], *, dotted: bool,
 ) -> pd.Series:
-    """Tight oval around a pocket of cover points."""
+    """Tight oval around a pocket of cover points (red road or blank)."""
     lats = [p[0] for p in points]
     lons = [p[1] for p in points]
     lat0 = float((min(lats) + max(lats)) / 2.0)
@@ -6246,9 +6421,10 @@ def _outline_from_points(
         (max(lons) - min(lons)) * _km_per_deg_lon(lat0) + 2.0 * pad,
         POCKET_CIRCLE_MIN_KM,
     )
-    # Cap at the stored spot outline so a pocket never outgrows the map frame.
-    height = min(height, float(template.get("outline_height_km") or height), POCKET_CIRCLE_MAX_KM + 0.4)
-    width = min(width, float(template.get("outline_width_km") or width), POCKET_CIRCLE_MAX_KM + 0.4)
+    # Cap only at the pocket max — blanks outside the tight red oval still need
+    # a full-size circle of their own.
+    height = min(height, POCKET_CIRCLE_MAX_KM + 0.4)
+    width = min(width, POCKET_CIRCLE_MAX_KM + 0.4)
     row = template.copy()
     row["outline_lat"] = lat0
     row["outline_lon"] = lon0
@@ -6264,12 +6440,13 @@ def satellite_circle_spots(
     """One or more movable circles that together cover every poor sample and blank.
 
     When red road and blanks sit in one compact pocket, a single oval is enough.
-    When they stretch farther than POCKET_CIRCLE_MAX_KM, the map gets two, three,
-    four, or more circles — no hard cap — so every bad and blank stretch is marked.
+    When they stretch farther than POCKET_CIRCLE_MAX_KM, or a blank sits off the
+    red oval, the map gets two, three, four, or more circles — no hard cap.
     """
     template = with_tight_outline(samples, spot, column, cover_blanks=False)
     points = _cover_points_for_circles(samples, spot, column)
-    if len(points) == 1:
+    blanks = [gap for gap in _blank_segments(samples, spot) if float(gap.get("length_m") or 0) >= 80]
+    if len(points) == 1 and not blanks:
         return pd.DataFrame([with_tight_outline(samples, spot, column)])
 
     lat0 = float(np.mean([p[0] for p in points]))
@@ -6279,13 +6456,37 @@ def satellite_circle_spots(
         math.hypot((lat - lat0) * 111.32, (lon - lon0) * km_lon) * 2.0
         for lat, lon in points
     )
-    # Compact pocket: keep one oval that also pulls in adjacent blanks.
-    if span <= POCKET_CIRCLE_MAX_KM:
+    # Any blank off the main red oval forces a split, even when the red span is small.
+    main_box = {
+        "outline_lat": float(template["outline_lat"]),
+        "outline_lon": float(template["outline_lon"]),
+        "outline_width_km": float(template["outline_width_km"]),
+        "outline_height_km": float(template["outline_height_km"]),
+    }
+    blank_off = any(
+        _outline_radius(float(gap["lat"]), float(gap["lon"]), main_box) > 1.05
+        for gap in blanks
+    )
+    if span <= POCKET_CIRCLE_MAX_KM and not blank_off:
         return pd.DataFrame([with_tight_outline(samples, spot, column)])
 
     clusters = _cluster_cover_points(points, POCKET_CIRCLE_MAX_KM)
-    if len(clusters) <= 1:
+    if len(clusters) <= 1 and not blank_off:
         return pd.DataFrame([with_tight_outline(samples, spot, column)])
+    if len(clusters) <= 1:
+        # Red is compact but a blank sits off it — keep the red oval and add
+        # one circle per blank pocket.
+        rows = [template]
+        for gap in blanks:
+            if _outline_radius(float(gap["lat"]), float(gap["lon"]), main_box) <= 1.05:
+                continue
+            pocket = [
+                (float(gap["lat1"]), float(gap["lon1"])),
+                (float(gap["lat2"]), float(gap["lon2"])),
+                (float(gap["lat"]), float(gap["lon"])),
+            ]
+            rows.append(_outline_from_points(template, pocket, dotted=True))
+        return pd.DataFrame(rows)
 
     # Largest pocket (by point count) keeps the solid style; extras are dotted
     # so discrete holes read as separate shapes on the same map.

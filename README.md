@@ -138,15 +138,21 @@ Colours match the sheets. RSRP is −95 to 0, −110 to −95, −120 to −110,
 
 GitHub shows `index.html` as a file, not as a running map. Download the `web` folder and open `index.html`, or serve that folder with any static file server.
 
-## Download Excel report (v2.07)
+## Download Excel report (v2.08)
 
-**v2.07 (current — Excel / PPT / Web same version):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.07.xlsx
+**v2.08 (current — Excel / PPT / Web same version):** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.08.xlsx
+
+Summary PPT **v2.08:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.08.pptx
+
+Web **v2.08:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.08.zip
+
+Excel / PPT / Web share version **v2.08**. Blank stretches are bad spots and get their own circles (as many ovals as needed). New-site azimuths put two sectors on the blank/road first, then population. PPT Parameter tables wrap Site text. Built from openable v2.06. Check with `python3 validate_xlsx_package.py output/Bogura_DriveTest_Report_v2.08.xlsx`.
+
+**v2.07:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.07.xlsx
 
 Summary PPT **v2.07:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Summary_v2.07.pptx
 
 Web **v2.07:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Web_v2.07.zip
-
-Excel / PPT / Web share version **v2.07**. Multi-circle bad-spot maps: when one oval cannot cover every poor sample and blank, the map gets two/three/four+ circles (no hard cap). Duplicate Parameter change tables under each Active spot are removed (one coloured table only). Numbered Serving / Bad Spot / RCA / Suggestions blocks stay aligned on Excel and PPT. Built from openable v2.06. Check with `python3 validate_xlsx_package.py output/Bogura_DriveTest_Report_v2.07.xlsx`.
 
 **v2.06:** https://github.com/miles4482/Drive-test-Log-Analysis-and-Plot/raw/cursor/active-mode-11nov26-6bd5/output/Bogura_DriveTest_Report_v2.06.xlsx
 

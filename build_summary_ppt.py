@@ -26,13 +26,13 @@ from pptx.util import Emu, Inches, Pt
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
-REPORT = OUTPUT / "Bogura_DriveTest_Report_v2.07.xlsx"
+REPORT = OUTPUT / "Bogura_DriveTest_Report_v2.08.xlsx"
 IDLE_NOTES = OUTPUT / "idle_vs_active_notes.json"
 PLOTS = OUTPUT / "plots"
 DESCRIPTIONS = OUTPUT / "bad_spot_descriptions.json"
-SUMMARY_VERSION = "2.07"
+SUMMARY_VERSION = "2.08"
 DEST = OUTPUT / f"Bogura_DriveTest_Summary_v{SUMMARY_VERSION}.pptx"
-EXCEL_VERSION = "2.07"
+EXCEL_VERSION = "2.08"
 EXEC_HIST_DIR = PLOTS / "ppt_exec_v198"
 EXEC_HIST = {
     "RSRP": EXEC_HIST_DIR / "active_rsrp_hist.png",
@@ -636,11 +636,18 @@ def _example(prs: Presentation, group: dict, item: dict, record: dict[str, str],
     image = _jpeg(picture)
     change_count = len((_description(group["mode"], item["n"]).get("changes") or []))
     table_rows = 2 + min(4, change_count or 1)
+    # Site cells keep full "New site lat, lon" text and wrap, so body rows need
+    # more height than a single-line table.
+    has_new_site = any(
+        str(row.get("site") or "").startswith("New site")
+        for row in (_description(group["mode"], item["n"]).get("changes") or [])
+    )
+    row_h = 0.42 if has_new_site else 0.30
+    table_h = 0.26 * 2 + row_h * max(1, min(4, change_count or 1))
     max_w = 6.55
     note = _idle_note(item["n"]) if group["mode"] == "Active" else None
     if idle_aspect:
         # Side by side, the same width and the same geographic window.
-        table_h = 0.28 * table_rows
         note_h = 0.95 if note else 0.0
         spare = 6.18 - table_h - note_h - 0.12
         gap = 0.08
@@ -660,7 +667,6 @@ def _example(prs: Presentation, group: dict, item: dict, record: dict[str, str],
     else:
         idle_h = 0.0
         note_h = 0.0
-        table_h = 0.30 * table_rows
         max_h = min(4.70, 6.85 - 0.74 - table_h)
         width = max_w
         height = width / aspect
@@ -727,19 +733,25 @@ def _change_table(slide, mode: str, number: int, left: float, top: float, width:
     rows = 2 + len(body)
     table_shape = slide.shapes.add_table(rows, len(headers), Inches(left), Inches(top), Inches(width), Inches(height))
     table = table_shape.table
-    for row in table.rows:
-        row.height = Inches(height / rows)
-    widths = (1.25, 1.15, 0.95, 0.36, 0.40, 0.32, 0.32, 0.36, 0.40, 0.32, 0.32)
+    # Header rows stay compact; body rows grow so wrapped Site text fits.
+    head_share = 0.22
+    body_share = max(0.0, 1.0 - 2 * head_share)
+    body_each = body_share / max(1, len(body))
+    for index, row in enumerate(table.rows):
+        frac = head_share if index < 2 else body_each
+        row.height = Inches(height * frac)
+    # Wider Site column so "New site lat, lon" wraps cleanly.
+    widths = (1.55, 1.05, 0.85, 0.34, 0.38, 0.30, 0.30, 0.34, 0.38, 0.30, 0.30)
     scale = width / sum(widths)
     for index, col_width in enumerate(widths):
         table.columns[index].width = Inches(col_width * scale)
 
-    def write(cell, text, size, bold, fill, color, center=False):
+    def write(cell, text, size, bold, fill, color, center=False, wrap=True):
         cell.text = ""
         cell.fill.solid()
         cell.fill.fore_color.rgb = fill
         frame = cell.text_frame
-        frame.word_wrap = False
+        frame.word_wrap = wrap
         frame.margin_left = Emu(10000)
         frame.margin_right = Emu(10000)
         frame.margin_top = Emu(2000)
@@ -767,11 +779,19 @@ def _change_table(slide, mode: str, number: int, left: float, top: float, width:
             continue
         for col_index, key in enumerate(keys):
             value = item.get(key)
-            if key == "site" and str(value).startswith("New site"):
-                value = "New site"
+            # Keep full "New site lat, lon" — wrap inside the Site cell.
             if isinstance(value, float):
                 value = str(int(round(value))) if abs(value - round(value)) < 0.05 else f"{value:.1f}"
-            write(table.rows[row_index + 2].cells[col_index], value or "", 8, False, WHITE, INK, col_index >= 3)
+            write(
+                table.rows[row_index + 2].cells[col_index],
+                value or "",
+                7 if key == "site" else 8,
+                False,
+                WHITE,
+                INK,
+                col_index >= 3,
+                wrap=True,
+            )
 
 
 def _description(mode: str, number: int) -> dict:
