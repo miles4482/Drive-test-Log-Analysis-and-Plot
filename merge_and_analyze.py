@@ -1042,52 +1042,58 @@ def _cover_bearings_for_new_site(
     red_lon: float,
     blanks: list[dict] | None = None,
     red_points: list[tuple[float, float]] | None = None,
-) -> list[tuple[float, str]]:
-    """Bearings the new site must cover first: blank road, then poor road."""
-    bearings: list[tuple[float, str, float]] = []
+) -> list[tuple[float, str, float]]:
+    """Bearings the new site must cover, heaviest first.
+
+    A blank and a poor road that face different ways stay as two bearings.
+    They are not averaged into one direction. Each item is
+    (bearing, kind, weight). kind is "blank" or "bad".
+    """
+    points: list[tuple[float, str, float]] = []
     for gap in blanks or []:
         length = float(gap.get("length_m") or 0)
         if length < 80:
             continue
-        # Blank ends and midpoint so a long blank along the road can take two sectors.
-        for lat_key, lon_key, w in (
-            ("lat1", "lon1", length * 0.35),
-            ("lat2", "lon2", length * 0.35),
-            ("lat", "lon", length),
-        ):
-            br = _bearing_deg(site_lat, site_lon, float(gap[lat_key]), float(gap[lon_key]))
-            bearings.append((br % 360.0, "blank", w))
+        b1 = _bearing_deg(site_lat, site_lon, float(gap["lat1"]), float(gap["lon1"])) % 360.0
+        b2 = _bearing_deg(site_lat, site_lon, float(gap["lat2"]), float(gap["lon2"])) % 360.0
+        # One bearing per hole. A wide hole uses the mean of its two ends so
+        # both ends sit inside that sector. Only a bend past 70° is split.
+        if _azimuth_gap(b1, b2) <= 70.0:
+            sx = math.sin(math.radians(b1)) + math.sin(math.radians(b2))
+            cy = math.cos(math.radians(b1)) + math.cos(math.radians(b2))
+            aim = math.degrees(math.atan2(sx, cy)) % 360.0
+            points.append((aim, "blank", length))
+        else:
+            points.append((b1, "blank", length * 0.5))
+            points.append((b2, "blank", length * 0.5))
     if red_points:
         for lat, lon in red_points:
-            br = _bearing_deg(site_lat, site_lon, float(lat), float(lon))
-            bearings.append((br % 360.0, "bad", 1.0))
-    else:
-        bearings.append((_bearing_deg(site_lat, site_lon, red_lat, red_lon) % 360.0, "bad", 1.0))
-    # Cluster bearings within 35°; keep the weight-weighted mean of each cluster.
-    bearings.sort(key=lambda item: item[0])
-    clusters: list[list[tuple[float, str, float]]] = []
-    for item in bearings:
-        if clusters and _azimuth_gap(clusters[-1][-1][0], item[0]) <= 35.0:
-            clusters[-1].append(item)
-        else:
-            clusters.append([item])
-    # Merge wrap-around first/last if they sit within 35°.
-    if len(clusters) >= 2 and _azimuth_gap(clusters[0][0][0], clusters[-1][-1][0]) <= 35.0:
-        clusters[0] = clusters[-1] + clusters[0]
-        clusters.pop()
-    out: list[tuple[float, str]] = []
-    for cluster in clusters:
-        total = sum(weight for _br, _kind, weight in cluster) or 1.0
-        # Circular mean via unit vectors.
-        sx = sum(math.sin(math.radians(br)) * weight for br, _kind, weight in cluster)
-        cy = sum(math.cos(math.radians(br)) * weight for br, _kind, weight in cluster)
-        mean = math.degrees(math.atan2(sx, cy)) % 360.0
-        kind = "blank" if any(k == "blank" for _br, k, _w in cluster) else "bad"
-        out.append((mean, kind))
-    out.sort(key=lambda item: (0 if item[1] == "blank" else 1, -sum(
-        w for br, k, w in bearings if k == item[1] and _azimuth_gap(br, item[0]) <= 40.0
-    )))
-    return out
+            br = _bearing_deg(site_lat, site_lon, float(lat), float(lon)) % 360.0
+            points.append((br, "bad", 160.0))
+    elif red_lat or red_lon:
+        points.append((
+            _bearing_deg(site_lat, site_lon, red_lat, red_lon) % 360.0, "bad", 160.0,
+        ))
+    clusters: list[dict] = []
+    for br, kind, weight in sorted(points, key=lambda item: -item[2]):
+        host = next((c for c in clusters if _azimuth_gap(br, c["bearing"]) <= 40.0), None)
+        if host is None:
+            clusters.append({
+                "bearing": br,
+                "kind": kind,
+                "weight": weight,
+                "sx": math.sin(math.radians(br)) * weight,
+                "cy": math.cos(math.radians(br)) * weight,
+            })
+            continue
+        host["weight"] += weight
+        host["sx"] += math.sin(math.radians(br)) * weight
+        host["cy"] += math.cos(math.radians(br)) * weight
+        host["bearing"] = math.degrees(math.atan2(host["sx"], host["cy"])) % 360.0
+        if kind == "blank":
+            host["kind"] = "blank"
+    clusters.sort(key=lambda item: -item["weight"])
+    return [(float(c["bearing"]), str(c["kind"]), float(c["weight"])) for c in clusters]
 
 
 def _new_site_azimuths(
@@ -1102,30 +1108,31 @@ def _new_site_azimuths(
     Gaps stay at least 45°.
     """
     face = face % 360.0
-    cover = list(cover or [(face, "bad")])
-    # Prefer blank clusters, then bad. At most two cover sectors.
-    # A long blank along the road gets two fans (A & B) around its bearing so
-    # both ends of the hole are covered before any population sector is added.
-    chosen: list[tuple[float, str]] = []
-    blank_faces = [br for br, kind in cover if kind == "blank"]
-    if blank_faces:
-        primary = blank_faces[0]
-        # ±30° fans stay 60° apart (>= 45° rule) and match "two sectors on the blank road".
-        fans = [((primary - 30.0) % 360.0, "blank"), ((primary + 30.0) % 360.0, "blank")]
-        for br, kind in fans:
-            if any(_azimuth_gap(br, az) < NEW_SITE_MIN_GAP_DEG for az, _k in chosen):
-                continue
-            chosen.append((br, kind))
-            if len(chosen) >= 2:
-                break
-    for br, kind in cover:
-        if len(chosen) >= 2:
-            break
-        if any(_azimuth_gap(br, az) < NEW_SITE_MIN_GAP_DEG for az, _k in chosen):
-            continue
-        chosen.append((br % 360.0, kind))
-    if not chosen:
-        chosen = [(face, "bad")]
+    clusters: list[tuple[float, str, float]] = []
+    for item in cover or []:
+        if len(item) >= 3:
+            clusters.append((float(item[0]) % 360.0, str(item[1]), float(item[2])))
+        else:
+            clusters.append((float(item[0]) % 360.0, str(item[1]), 1.0))
+    if not clusters:
+        clusters = [(face, "bad", 1.0)]
+    # Two sectors on the bad area. One corridor (blank and road on the same
+    # side) gets a pair 60° apart. Two corridors get one sector each.
+    first_br, first_kind, first_w = clusters[0]
+    second = next((
+        item for item in clusters[1:]
+        if _azimuth_gap(item[0], first_br) >= 50.0 and (item[2] >= 150.0 or item[2] >= first_w * 0.25)
+    ), None)
+    if second is None:
+        chosen = [
+            ((first_br - 30.0) % 360.0, first_kind),
+            ((first_br + 30.0) % 360.0, first_kind),
+        ]
+    else:
+        chosen = [
+            (first_br, first_kind),
+            (second[0] % 360.0, second[1]),
+        ]
 
     blocked = [az for az, _k in chosen]
     pop_candidates = []
@@ -1157,6 +1164,106 @@ def _new_site_azimuths(
         (az, _wedge_population(site_lat, site_lon, az), kind)
         for az, kind in chosen[:3]
     ]
+
+
+def _neighbor_retune_for_new_site(
+    site_lat: float, site_lon: float, sectors: list[dict],
+) -> list[dict]:
+    """Azimuth and tilt on L900 neighbors so their beam meets the new site.
+
+    A sector that already faces the new site is kept on that bearing and tilted
+    to the boundary at about two thirds of the distance. A sector within 55°
+    is turned toward the new site, at most 25°, unless that turn would cross
+    another sector or leave a much busier bearing.
+    """
+    actions = []
+    for site in _sites_around(sectors, site_lat, site_lon):
+        if site["dist"] < 0.4 or site["dist"] > 7.0:
+            continue
+        l900 = [
+            rec for rec in site["recs"]
+            if str(rec.get("layer") or "") == "L900" and rec.get("azimuth") is not None
+        ]
+        if not l900:
+            continue
+        bearing = float(site["bearing"])
+        rec = min(l900, key=lambda item: abs(_signed_deg(float(item["azimuth"]), bearing)))
+        signed = _signed_deg(float(rec["azimuth"]), bearing)
+        off = abs(signed)
+        if off > 55.0:
+            continue
+        turn = math.copysign(min(off, 25.0), signed) if off >= 10.0 else 0.0
+        new_az = (float(rec["azimuth"]) + turn) % 360.0
+        others = [
+            float(other["azimuth"]) for other in site["recs"]
+            if other is not rec and other.get("azimuth") is not None
+        ]
+        if any(_azimuth_gap(new_az, az) < NEW_SITE_MIN_GAP_DEG for az in others):
+            turn = 0.0
+            new_az = float(rec["azimuth"])
+        if abs(turn) >= 8.0:
+            old_pop = _wedge_population(float(rec["lat"]), float(rec["lon"]), float(rec["azimuth"]))
+            new_pop = _wedge_population(float(rec["lat"]), float(rec["lon"]), new_az)
+            if new_pop + 50.0 < old_pop * 0.75:
+                turn = 0.0
+        edge_km = max(0.4, float(site["dist"]) * 0.65)
+        desired = _ground_tilt_deg(rec.get("height") or site.get("height"), edge_km)
+        current = rec.get("etilt")
+        delta = 0.0
+        if current is not None:
+            delta = float(desired) - float(current)
+            delta = min(4.0, max(-2.0, delta))
+            if abs(delta) < 1.0:
+                delta = 0.0
+        if abs(turn) < 8.0 and abs(delta) < 1.0:
+            continue
+        item = {
+            "rec": rec,
+            "dist": site["dist"],
+            "off": off,
+            "delta": delta,
+            "turn": turn,
+            "old_pop": None,
+            "new_pop": None,
+            "overshoot": False,
+            "site": site["name"],
+        }
+        action = _tune_action(item)
+        action["action"] = "Retune for new site"
+        # Same whole degree the suggestion prints (half a degree rounds up).
+        for key in ("p_azimuth", "p_et", "p_mt"):
+            if action.get(key) is None:
+                continue
+            action[key] = float(math.floor(float(action[key]) + 0.5))
+        changed = (
+            (action.get("azimuth") is not None and action.get("p_azimuth") is not None
+             and _azimuth_gap(float(action["azimuth"]), float(action["p_azimuth"])) >= 0.5)
+            or (action.get("et") is not None and action.get("p_et") is not None
+                and abs(float(action["et"]) - float(action["p_et"])) >= 0.5)
+            or (action.get("mt") is not None and action.get("p_mt") is not None
+                and abs(float(action["mt"]) - float(action["p_mt"])) >= 0.5)
+        )
+        if not changed:
+            continue
+        actions.append(action)
+        if len(actions) >= 4:
+            break
+    return actions
+
+
+def _neighbor_retune_sentence(action: dict) -> str:
+    """One neighbor change: azimuth, tilt, or both."""
+    bits = []
+    old_az, new_az = action.get("azimuth"), action.get("p_azimuth")
+    if old_az is not None and new_az is not None and _azimuth_gap(float(old_az), float(new_az)) >= 0.5:
+        bits.append(f"azimuth {_deg_text(float(old_az))}° to {_deg_text(float(new_az))}°")
+    old_et, new_et = action.get("et"), action.get("p_et")
+    if old_et is not None and new_et is not None and abs(float(new_et) - float(old_et)) >= 0.5:
+        bits.append(f"E_tilt {_deg_text(float(old_et))}° to {_deg_text(float(new_et))}°")
+    if not bits:
+        return ""
+    who = f"{action.get('sector') or ''} L900".strip()
+    return f"{action.get('site')} {who}: " + ", ".join(bits) + ", so the beam meets the new site."
 
 
 def _new_site_text(
@@ -1221,6 +1328,11 @@ def _new_site_text(
             "p_mt": 0.0,
             "action": "New 3-sector site",
         })
+    neighbors = _neighbor_retune_for_new_site(site_lat, site_lon, sectors)
+    notes = [line for line in (_neighbor_retune_sentence(action) for action in neighbors) if line]
+    if notes:
+        text += " Neighbor sites are retuned so their coverage meets the new site. " + " ".join(notes)
+        actions.extend(neighbors)
     return "New site", text, _proposal_draw(
         "new", site_lat, site_lon, azimuths, red_lat, red_lon, "New site",
     ), actions
@@ -1470,9 +1582,24 @@ def _choose_coverage_fix(
         )
     else:
         fourth = f"A 4th sector was not the chosen step. {usable_null['name']} is {usable_null['dist']:.1f} km away."
+    neighbor_notes = [
+        line for action in new_actions
+        if action.get("action") == "Retune for new site"
+        for line in [_neighbor_retune_sentence(action)]
+        if line
+    ]
+    tilt_step = (
+        "Final. " + " ".join(neighbor_notes)
+        if neighbor_notes else _not_required(far)
+    )
+    azimuth_step = (
+        "Final. Neighbor azimuths are turned toward the new site so the beams meet. "
+        + " ".join(neighbor_notes)
+        if neighbor_notes else _not_required(far + f" Population on the spot is {_people(spot_pop)}.")
+    )
     return pack("new", new_site, new_text, steps_for(
-        _not_required(far),
-        _not_required(far + f" Population on the spot is {_people(spot_pop)}."),
+        tilt_step,
+        azimuth_step,
         _not_required(fourth),
         "Final. " + new_text,
     ), new_draw, new_actions)
@@ -2888,7 +3015,10 @@ def _spot_sections(
             + f" {near_bit} No host inside 3 km can take a 4th sector."
         )
         cause += "\n2. The logged servers are side-lobe or overshoot signals. No cell holds the road."
-        cause += "\n3. Tilt cannot turn a beam or close a hole this far from the nearest site. A new 3-sector L900 site is the fix."
+        cause += (
+            "\n3. Two new sectors aim at the blank and the poor road. The third aims at population. "
+            "Neighbor L900 sectors that face the new site are retuned in azimuth and tilt so the beams meet."
+        )
     elif kind == "fourth":
         cause = (
             f"1. The poor run is {poor_m:.0f} m"
