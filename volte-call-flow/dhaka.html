@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VoLTE Call Setup Benchmark with Competitor — Dhaka v7</title>
+<title>VoLTE Call Setup Benchmark with Competitor — Dhaka v8</title>
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; background: #fff; color: #1d1d1d; font-family: Arial, Helvetica, sans-serif; }
@@ -60,7 +60,7 @@
 <body>
 <header>
   <h1>VoLTE Call Setup Benchmark with Competitor — Dhaka</h1>
-  <p class="sub">Version v7. Same as v6, with <b>Notes (RCA)</b> as bullet points (Main / also / QCI1 / Domain).</p>
+  <p class="sub">Version v8. Same as v7, plus a <b>Focus points</b> summary at the top of Category (where to act on Robi CST gaps).</p>
 </header>
 <nav class="tabs">
   <button data-tab="overall" class="on">Overall</button>
@@ -263,6 +263,18 @@
     <span class="lbl">Idle pairs:</span> <a href="#idle1">I1</a> <a href="#idle2">I2</a> <a href="#idle3">I3</a> <a href="#idle4">I4</a> <a href="#idle5">I5</a> <a href="#idle6">I6</a> <a href="#idle7">I7</a> <a href="#idle8">I8</a> <a href="#idle9">I9</a> <a href="#idle10">I10</a> <a href="#idle11">I11</a> <a href="#idle12">I12</a> <a href="#idle13">I13</a> <a href="#idle14">I14</a> <a href="#idle15">I15</a> <a href="#idle16">I16</a> <a href="#idle17">I17</a> <a href="#idle18">I18</a>
     <span class="lbl" style="margin-left:12px">Connected pairs:</span> <a href="#conn1">C1</a> <a href="#conn2">C2</a>
   </div>
+
+<section class="gap" id="focus">
+  <h2 class="stage-title" style="padding-left:0">Focus points — where Robi CST gap comes from</h2>
+  <div class="find" style="background:#fdecea;border:1px solid #f5c6cb;border-radius:4px;padding:10px 14px;max-width:1100px">
+    <b class="bad">1) Persistent gap (every idle pair): 183 return B→A + late QCI1 A-bearer — focus here first.</b><br>
+    In all 18 close-RSRP idle pairs, Robi’s 183 takes ~0.6–0.75 s longer to reach UE-A than BL (median ~+0.66 s). Robi always starts QCI1 A-bearer late (after B’s 183, mean ~2.85 s); BL starts it early (mean ~0.19 s). This is the systematic IMS/PCRF timing issue.<br><br>
+    <b class="bad">2) Large outlier gap: INVITE → UE-B (IMS core / paging path).</b><br>
+    When CST blows out (+4 s), it is almost all INVITE path (e.g. Robi pair 17179869212: INVITE→B ~5.24 s vs BL ~1.1–1.7 s, +3.5 to +4.1 s). Not radio: RSRP is matched. Focus IMS/core or paging delay before page/INVITE at UE-B.<br><br>
+    <b>Priority:</b> (A) Fix late QCI1 + slow 183 return on every call — always present. (B) Investigate INVITE/paging path on outlier sessions (esp. 17179869212). PRACK/UPDATE (step 4) is not the main driver.
+  </div>
+</section>
+
   
 <section class="gap">
   <h2 class="stage-title" style="padding-left:0">UE-B idle, paged — all close-RSRP pairs (Δ ≤ 8 dB on weaker phone)</h2>
