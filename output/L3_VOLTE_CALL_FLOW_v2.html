@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VoLTE call flow — Robi, Grameenphone, Banglalink</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 28px 20px 40px;
+      font-family: Calibri, "Segoe UI", Arial, sans-serif;
+      color: #1a1a1a;
+      background: #fff;
+    }
+    h1 { margin: 0 0 6px; font-size: 26px; color: #1f4e78; }
+    .lead { margin: 0 0 16px; color: #5c6570; font-size: 15px; max-width: 1100px; line-height: 1.4; }
+    .sheet { overflow-x: auto; }
+    .note {
+      margin-top: 16px;
+      max-width: 1680px;
+      padding: 12px 14px;
+      background: #fff4ed;
+      border-left: 4px solid #9a3412;
+      font-size: 15px;
+      line-height: 1.45;
+    }
+  </style>
+</head>
+<body>
+  <h1>VoLTE call flow — three operators in parallel</h1>
+  <p class="lead">Read each column from top to bottom. The same step sits on the same row. Times are seconds after that operator’s A-party INVITE. RSRP at the start: Robi −76 dBm, Grameenphone −85 dBm, Banglalink −77 dBm.</p>
+  <div class="sheet">
+    <svg xmlns="http://www.w3.org/2000/svg" width="1680" height="900" viewBox="0 0 1680 900" role="img" aria-label="Parallel VoLTE call flows for Robi, Grameenphone and Banglalink" style="font-family: Calibri, 'Segoe UI', Arial, sans-serif">
+      <g font-family="Calibri, Segoe UI, Arial, sans-serif">
+        <!-- column titles -->
+        <text x="270" y="28" text-anchor="middle" font-size="20" font-weight="700" fill="#9a3412">Robi · rings at 3.27 s</text>
+        <text x="830" y="28" text-anchor="middle" font-size="20" font-weight="700" fill="#1f4e78">Grameenphone · rings at 2.20 s</text>
+        <text x="1390" y="28" text-anchor="middle" font-size="20" font-weight="700" fill="#0f6b3c">Banglalink · rings at 0.75 s</text>
+
+        <!-- lifelines drawn by a repeated pattern: origins 40, 600, 1160 -->
+      </g>
+      <!-- Robi -->
+      <g transform="translate(40,0)">
+        <rect x="12" y="44" width="100" height="40" rx="6" fill="#fff4ed" stroke="#9a3412"/>
+        <text x="62" y="68" text-anchor="middle" font-size="13" font-weight="700" fill="#1a1a1a">A-party</text>
+        <line x1="62" y1="86" x2="62" y2="870" stroke="#e7d3c8" stroke-dasharray="3 4"/>
+        <rect x="132" y="44" width="100" height="40" rx="6" fill="#f4f7fa" stroke="#1f4e78"/>
+        <text x="182" y="62" text-anchor="middle" font-size="12" font-weight="700" fill="#1a1a1a">eNB / MME</text>
+        <text x="182" y="76" text-anchor="middle" font-size="10" fill="#5c6570">radio and core</text>
+        <line x1="182" y1="86" x2="182" y2="870" stroke="#d5dde3" stroke-dasharray="3 4"/>
+        <rect x="252" y="44" width="100" height="40" rx="6" fill="#f4f7fa" stroke="#1f4e78"/>
+        <text x="302" y="68" text-anchor="middle" font-size="13" font-weight="700" fill="#1a1a1a">IMS</text>
+        <line x1="302" y1="86" x2="302" y2="870" stroke="#d5dde3" stroke-dasharray="3 4"/>
+        <rect x="372" y="44" width="100" height="40" rx="6" fill="#f4f7fa" stroke="#1f4e78"/>
+        <text x="422" y="68" text-anchor="middle" font-size="13" font-weight="700" fill="#1a1a1a">B-party</text>
+        <line x1="422" y1="86" x2="422" y2="870" stroke="#d5dde3" stroke-dasharray="3 4"/>
+
+        <line x1="62" y1="130" x2="293" y2="130" stroke="#9a3412" stroke-width="1.6"/>
+        <polygon points="302,130 293,126 293,134" fill="#9a3412"/>
+        <text x="182" y="122" text-anchor="middle" font-size="12" font-weight="700" fill="#9a3412">SIP INVITE  0.00 s</text>
+
+        <line x1="302" y1="200" x2="71" y2="200" stroke="#5c6570"/>
+        <polygon points="62,200 71,196 71,204" fill="#5c6570"/>
+        <text x="182" y="192" text-anchor="middle" font-size="12" fill="#5c6570">100 Trying  0.08 s</text>
+
+        <line x1="182" y1="274" x2="71" y2="274" stroke="#9a3412" stroke-width="2.2"/>
+        <polygon points="62,274 71,270 71,278" fill="#9a3412"/>
+        <text x="122" y="264" text-anchor="middle" font-size="12" font-weight="700" fill="#9a3412">Caller bearer  2.75 s</text>
+
+        <line x1="182" y1="348" x2="413" y2="348" stroke="#9a3412" stroke-width="2.2"/>
+        <polygon points="422,348 413,344 413,352" fill="#9a3412"/>
+        <text x="302" y="338" text-anchor="middle" font-size="12" font-weight="700" fill="#9a3412">Paging  2.01 s</text>
+
+        <line x1="422" y1="418" x2="191" y2="418" stroke="#5c6570"/>
+        <polygon points="182,418 191,414 191,422" fill="#5c6570"/>
+        <text x="302" y="410" text-anchor="middle" font-size="12" fill="#5c6570">RRC connection  2.09 s</text>
+
+        <line x1="302" y1="492" x2="413" y2="492" stroke="#9a3412" stroke-width="2.2"/>
+        <polygon points="422,492 413,488 413,496" fill="#9a3412"/>
+        <text x="362" y="482" text-anchor="middle" font-size="12" font-weight="700" fill="#9a3412">INVITE  2.02 s</text>
+
+        <line x1="422" y1="562" x2="311" y2="562" stroke="#5c6570"/>
+        <polygon points="302,562 311,558 311,566" fill="#5c6570"/>
+        <text x="362" y="554" text-anchor="middle" font-size="12" fill="#5c6570">183  2.07 s</text>
+
+        <line x1="182" y1="636" x2="413" y2="636" stroke="#5c6570"/>
+        <polygon points="422,636 413,632 413,640" fill="#5c6570"/>
+        <text x="302" y="626" text-anchor="middle" font-size="12" fill="#5c6570">Called bearer  2.39 s</text>
+
+        <line x1="302" y1="710" x2="71" y2="710" stroke="#9a3412" stroke-width="2.2"/>
+        <polygon points="62,710 71,706 71,714" fill="#9a3412"/>
+        <text x="182" y="700" text-anchor="middle" font-size="12" font-weight="700" fill="#9a3412">183 to caller  2.94 s</text>
+
+        <line x1="302" y1="784" x2="71" y2="784" stroke="#9a3412" stroke-width="2.2"/>
+        <polygon points="62,784 71,780 71,788" fill="#9a3412"/>
+        <text x="182" y="774" text-anchor="middle" font-size="12" font-weight="700" fill="#9a3412">180 Ringing  3.27 s</text>
+      </g>
+
+      <!-- Grameenphone -->
+      <g transform="translate(600,0)">
+        <rect x="12" y="44" width="100" height="40" rx="6" fill="#f4f7fa" stroke="#1f4e78"/>
+        <text x="62" y="68" text-anchor="middle" font-size="13" font-weight="700" fill="#1a1a1a">A-party</text>
+        <line x1="62" y1="86" x2="62" y2="870" stroke="#d5dde3" stroke-dasharray="3 4"/>
+        <rect x="132" y="44" width="100" height="40" rx="6" fill="#f4f7fa" stroke="#1f4e78"/>
+        <text x="182" y="62" text-anchor="middle" font-size="12" font-weight="700" fill="#1a1a1a">eNB / MME</text>
+        <text x="182" y="76" text-anchor="middle" font-size="10" fill="#5c6570">radio and core</text>
+        <line x1="182" y1="86" x2="182" y2="870" stroke="#d5dde3" stroke-dasharray="3 4"/>
+        <rect x="252" y="44" width="100" height="40" rx="6" fill="#f4f7fa" stroke="#1f4e78"/>
+        <text x="302" y="68" text-anchor="middle" font-size="13" font-weight="700" fill="#1a1a1a">IMS</text>
+        <line x1="302" y1="86" x2="302" y2="870" stroke="#d5dde3" stroke-dasharray="3 4"/>
+        <rect x="372" y="44" width="100" height="40" rx="6" fill="#f4f7fa" stroke="#1f4e78"/>
+        <text x="422" y="68" text-anchor="middle" font-size="13" font-weight="700" fill="#1a1a1a">B-party</text>
+        <line x1="422" y1="86" x2="422" y2="870" stroke="#d5dde3" stroke-dasharray="3 4"/>
+
+        <line x1="62" y1="130" x2="293" y2="130" stroke="#1f4e78" stroke-width="1.6"/>
+        <polygon points="302,130 293,126 293,134" fill="#1f4e78"/>
+        <text x="182" y="122" text-anchor="middle" font-size="12" font-weight="700" fill="#1f4e78">SIP INVITE  0.00 s</text>
+
+        <line x1="302" y1="200" x2="71" y2="200" stroke="#5c6570"/>
+        <polygon points="62,200 71,196 71,204" fill="#5c6570"/>
+        <text x="182" y="192" text-anchor="middle" font-size="12" fill="#5c6570">100 Trying  0.16 s</text>
+
+        <line x1="182" y1="274" x2="71" y2="274" stroke="#1f4e78" stroke-width="1.6"/>
+        <polygon points="62,274 71,270 71,278" fill="#1f4e78"/>
+        <text x="122" y="264" text-anchor="middle" font-size="12" font-weight="700" fill="#1f4e78">Caller bearer  0.24 s</text>
+
+        <line x1="182" y1="348" x2="413" y2="348" stroke="#9a3412" stroke-width="2.2"/>
+        <polygon points="422,348 413,344 413,352" fill="#9a3412"/>
+        <text x="302" y="338" text-anchor="middle" font-size="12" font-weight="700" fill="#9a3412">Paging  1.13 s</text>
+
+        <line x1="422" y1="418" x2="191" y2="418" stroke="#5c6570"/>
+        <polygon points="182,418 191,414 191,422" fill="#5c6570"/>
+        <text x="302" y="410" text-anchor="middle" font-size="12" fill="#5c6570">RRC connection  1.21 s</text>
+
+        <line x1="302" y1="492" x2="413" y2="492" stroke="#9a3412" stroke-width="2.2"/>
+        <polygon points="422,492 413,488 413,496" fill="#9a3412"/>
+        <text x="362" y="482" text-anchor="middle" font-size="12" font-weight="700" fill="#9a3412">INVITE  1.33 s</text>
+
+        <line x1="422" y1="562" x2="311" y2="562" stroke="#5c6570"/>
+        <polygon points="302,562 311,558 311,566" fill="#5c6570"/>
+        <text x="362" y="554" text-anchor="middle" font-size="12" fill="#5c6570">183  1.37 s</text>
+
+        <line x1="182" y1="636" x2="413" y2="636" stroke="#5c6570"/>
+        <polygon points="422,636 413,632 413,640" fill="#5c6570"/>
+        <text x="302" y="626" text-anchor="middle" font-size="12" fill="#5c6570">Called bearer  1.52 s</text>
+
+        <line x1="302" y1="710" x2="71" y2="710" stroke="#5c6570"/>
+        <polygon points="62,710 71,706 71,714" fill="#5c6570"/>
+        <text x="182" y="700" text-anchor="middle" font-size="12" fill="#5c6570">183 to caller  1.93 s</text>
+
+        <line x1="302" y1="784" x2="71" y2="784" stroke="#1f4e78" stroke-width="1.6"/>
+        <polygon points="62,784 71,780 71,788" fill="#1f4e78"/>
+        <text x="182" y="774" text-anchor="middle" font-size="12" font-weight="700" fill="#1f4e78">180 Ringing  2.20 s</text>
+      </g>
+
+      <!-- Banglalink -->
+      <g transform="translate(1160,0)">
+        <rect x="12" y="44" width="100" height="40" rx="6" fill="#eef8f2" stroke="#0f6b3c"/>
+        <text x="62" y="68" text-anchor="middle" font-size="13" font-weight="700" fill="#1a1a1a">A-party</text>
+        <line x1="62" y1="86" x2="62" y2="870" stroke="#d5e5db" stroke-dasharray="3 4"/>
+        <rect x="132" y="44" width="100" height="40" rx="6" fill="#f4f7fa" stroke="#1f4e78"/>
+        <text x="182" y="62" text-anchor="middle" font-size="12" font-weight="700" fill="#1a1a1a">eNB / MME</text>
+        <text x="182" y="76" text-anchor="middle" font-size="10" fill="#5c6570">radio and core</text>
+        <line x1="182" y1="86" x2="182" y2="870" stroke="#d5dde3" stroke-dasharray="3 4"/>
+        <rect x="252" y="44" width="100" height="40" rx="6" fill="#f4f7fa" stroke="#1f4e78"/>
+        <text x="302" y="68" text-anchor="middle" font-size="13" font-weight="700" fill="#1a1a1a">IMS</text>
+        <line x1="302" y1="86" x2="302" y2="870" stroke="#d5dde3" stroke-dasharray="3 4"/>
+        <rect x="372" y="44" width="100" height="40" rx="6" fill="#eef8f2" stroke="#0f6b3c"/>
+        <text x="422" y="68" text-anchor="middle" font-size="13" font-weight="700" fill="#1a1a1a">B-party</text>
+        <line x1="422" y1="86" x2="422" y2="870" stroke="#d5e5db" stroke-dasharray="3 4"/>
+
+        <line x1="62" y1="130" x2="293" y2="130" stroke="#0f6b3c" stroke-width="1.6"/>
+        <polygon points="302,130 293,126 293,134" fill="#0f6b3c"/>
+        <text x="182" y="122" text-anchor="middle" font-size="12" font-weight="700" fill="#0f6b3c">SIP INVITE  0.00 s</text>
+
+        <line x1="302" y1="200" x2="71" y2="200" stroke="#5c6570"/>
+        <polygon points="62,200 71,196 71,204" fill="#5c6570"/>
+        <text x="182" y="192" text-anchor="middle" font-size="12" fill="#5c6570">100 Trying  0.04 s</text>
+
+        <line x1="182" y1="274" x2="71" y2="274" stroke="#0f6b3c" stroke-width="1.6"/>
+        <polygon points="62,274 71,270 71,278" fill="#0f6b3c"/>
+        <text x="122" y="264" text-anchor="middle" font-size="12" font-weight="700" fill="#0f6b3c">Caller bearer  0.08 s</text>
+
+        <line x1="182" y1="348" x2="413" y2="348" stroke="#0f6b3c" stroke-dasharray="5 4"/>
+        <polygon points="422,348 413,344 413,352" fill="#0f6b3c"/>
+        <text x="302" y="338" text-anchor="middle" font-size="12" font-weight="700" fill="#0f6b3c">No paging — already connected</text>
+
+        <line x1="422" y1="418" x2="191" y2="418" stroke="#0f6b3c" stroke-dasharray="5 4"/>
+        <polygon points="182,418 191,414 191,422" fill="#0f6b3c"/>
+        <text x="302" y="410" text-anchor="middle" font-size="12" fill="#0f6b3c">No new RRC setup</text>
+
+        <line x1="302" y1="492" x2="413" y2="492" stroke="#0f6b3c" stroke-width="1.6"/>
+        <polygon points="422,492 413,488 413,496" fill="#0f6b3c"/>
+        <text x="362" y="482" text-anchor="middle" font-size="12" font-weight="700" fill="#0f6b3c">INVITE  0.33 s</text>
+
+        <line x1="422" y1="562" x2="311" y2="562" stroke="#5c6570"/>
+        <polygon points="302,562 311,558 311,566" fill="#5c6570"/>
+        <text x="362" y="554" text-anchor="middle" font-size="12" fill="#5c6570">183  0.37 s</text>
+
+        <line x1="182" y1="636" x2="413" y2="636" stroke="#0f6b3c" stroke-width="1.6"/>
+        <polygon points="422,636 413,632 413,640" fill="#0f6b3c"/>
+        <text x="302" y="626" text-anchor="middle" font-size="12" font-weight="700" fill="#0f6b3c">Called bearer  0.46 s</text>
+
+        <line x1="302" y1="710" x2="71" y2="710" stroke="#0f6b3c" stroke-width="1.6"/>
+        <polygon points="62,710 71,706 71,714" fill="#0f6b3c"/>
+        <text x="182" y="700" text-anchor="middle" font-size="12" font-weight="700" fill="#0f6b3c">183 to caller  0.46 s</text>
+
+        <line x1="302" y1="784" x2="71" y2="784" stroke="#0f6b3c" stroke-width="2"/>
+        <polygon points="62,784 71,780 71,788" fill="#0f6b3c"/>
+        <text x="182" y="774" text-anchor="middle" font-size="12" font-weight="700" fill="#0f6b3c">180 Ringing  0.75 s</text>
+      </g>
+    </svg>
+  </div>
+  <div class="note">
+    The rows line up. On the caller-bearer row, Robi is at 2.75 s while Banglalink is already at 0.08 s. On the paging row, Robi reaches the called phone at 2.01 s. Banglalink does not page, because that phone is already connected, and the INVITE arrives at 0.33 s. Ringing is 3.27 s, 2.20 s, and 0.75 s.
+  </div>
+</body>
+</html>

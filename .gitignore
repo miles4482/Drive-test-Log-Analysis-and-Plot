@@ -10,6 +10,10 @@ output/*.xlsx
 !output/Bogura_DriveTest_Report.xlsx
 !output/Bogura_DriveTest_Report_v*.xlsx
 !output/Bogura_Three_BadSpots_Sample.xlsx
+!output/L3_REPORT_FOR_BOGRA.xlsx
+!output/L3_REPORT_FOR_BOGRA.md
+!output/L3_REPORT_FOR_BOGRA_v*.xlsx
+!output/L3_REPORT_FOR_BOGRA_v*.md
 output/*.parquet
 output/*.csv.gz
 # One PNG per bad spot. The workbook embeds these; they are not published on their own.

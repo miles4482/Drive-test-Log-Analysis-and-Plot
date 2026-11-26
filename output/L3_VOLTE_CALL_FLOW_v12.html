@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoLTE call flow v12 — choose idle or connected</title>
+<style>
+  body { margin: 0; font-family: Arial, Helvetica, sans-serif; background: #f4f7fb; color: #1d1d1d; }
+  main { max-width: 720px; margin: 48px auto; padding: 0 20px; }
+  h1 { font-size: 24px; margin: 0 0 8px; }
+  p { color: #444; line-height: 1.45; }
+  .cards { display: grid; gap: 16px; margin-top: 24px; }
+  a.card { display: block; text-decoration: none; color: inherit; background: #fff; border: 1px solid #cfd6e0;
+            border-radius: 8px; padding: 20px 22px; }
+  a.card:hover { border-color: #4f7fd1; }
+  a.card strong { display: block; font-size: 18px; color: #2c5aa0; margin-bottom: 6px; }
+  a.card span { font-size: 13px; color: #555; }
+</style>
+</head>
+<body>
+<main>
+  <h1>VoLTE call flow v12 — good coverage</h1>
+  <p>Idle and connected are separate pages. Each page has Robi, Banglalink, and Grameenphone side by side for that case only.</p>
+  <div class="cards">
+    <a class="card" href="L3_VOLTE_CALL_FLOW_v12_idle.html">
+      <strong>UE-B idle, paged</strong>
+      <span>Called phone was idle and had to be paged. Open this chart.</span>
+    </a>
+    <a class="card" href="L3_VOLTE_CALL_FLOW_v12_connected.html">
+      <strong>UE-B connected, not paged</strong>
+      <span>Called phone was already connected. Open this chart.</span>
+    </a>
+  </div>
+</main>
+</body>
+</html>

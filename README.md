@@ -10,6 +10,7 @@ LTE **IDLE Mode scanner** and **Active Mode UE** logs from **Bogura** (Robi). Id
 | `Data_active_session ID_Bogra.zip.001` … `.003` | Active Mode UE export with Session ID (split zip) | `Data_active_session ID_Bogra.xlsb` → `output/Bogura_active_merged.csv.gz` |
 | `System DUMP.xlsb` | Cell-level site dump. Several EUtranCellId values share one Sector name | Sector name on every arm, plus the distance line, on the individual bad-spot maps only |
 | `Physical_Site_Database_V2.0.xlsx` | Earlier physical site database | Not used on the current maps |
+| `Layer 3_Active Mode_Data_Robi_v1.7z` | Decoded Active Mode L3 (LTE-RRC) for Robi / GP / Banglalink | `output/L3_REPORT_FOR_BOGRA.xlsx` |
 
 Idle scanner columns include `Time`, `Longitude`, `Latitude`, `Cell Id`, `DL EARFCN`, `NB RSRP`, `NB RSRQ`, `NB RS SINR` (mapped to RSRP / RSRQ / SINR). Campaign is **Scanner**. Files 1–15 cover 11–21 May 2026.
 
@@ -21,6 +22,70 @@ Active auto mode keeps **one band at each latitude and longitude**: the stronges
 Borga_Idle_V2.0.7z     -->  1.csv … 15.csv               -->  output/Bogura_merged.csv.gz
 Data_active_session ID_Bogra.xlsb (d1…d15)  -->  output/Bogura_active_merged.csv.gz
 ```
+
+
+## L3 REPORT FOR BOGRA (Robi vs GP)
+
+Current file is **v8**. Each publish is a new version. Previous workbooks stay in the repo.
+
+| Version | File | Contents |
+| --- | --- | --- |
+| v1 | `output/L3_REPORT_FOR_BOGRA_v1.xlsx` | Full parameter list. Sections: Mobility, Power, Idle mode, Others. |
+| v2 | `output/L3_REPORT_FOR_BOGRA_v2.xlsx` | Stable settings and the idle-search finding. |
+| v3 | `output/L3_REPORT_FOR_BOGRA_v3.xlsx` | Full list, named sections, one sheet per section, and a difference sheet per section. |
+| v4 | `output/L3_REPORT_FOR_BOGRA_v4.xlsx` | v3, with TDD frame-structure parameters in their own section. |
+| v5 | `output/L3_REPORT_FOR_BOGRA_v5.xlsx` | v4, with the mapped meaning inside the Robi value and GP value cells. |
+| v6 | `output/L3_REPORT_FOR_BOGRA_v6.xlsx` | v5, with Power first on the Comparison sheet. |
+| v7 | `output/L3_REPORT_FOR_BOGRA_v7.xlsx` | v6 plus on-net VoLTE call setup time for Robi, Grameenphone, and Banglalink. |
+| v8 | `output/L3_REPORT_FOR_BOGRA_v8.xlsx` | Call setup split into segments. The slow Robi step is the caller voice bearer. |
+
+`output/L3_REPORT_FOR_BOGRA.xlsx` is a copy of v8.
+
+## VoLTE call flow chart
+
+Current file is **v16**. Previous charts stay in the repo. `output/L3_VOLTE_CALL_FLOW.html` is a copy of the current version.
+
+| Version | File | Contents |
+| --- | --- | --- |
+| v1 | `output/L3_VOLTE_CALL_FLOW_v1.html` | First downloadable chart. |
+| v2 | `output/L3_VOLTE_CALL_FLOW_v2.html` | Robi, Grameenphone, and Banglalink side by side. |
+| v3 | `output/L3_VOLTE_CALL_FLOW_v3.html` | Colored-box call flow, three operators. |
+| v4 | `output/L3_VOLTE_CALL_FLOW_v4.html` | Three colored-box ladders, one per operator. |
+| v5 | `output/L3_VOLTE_CALL_FLOW_v5.html` | Full ladder, UE-A to UE-B. Good-RSRP sample (about −75 to −85 dBm). |
+| v6 | `output/L3_VOLTE_CALL_FLOW_v6.html` | Same ladder. Strongest call of each operator. Nothing in the drive is above −50 dBm. |
+| v7 | `output/L3_VOLTE_CALL_FLOW_v7.html` | v6, with a brace on the IMS core and the time that block takes. |
+| v8 | `output/L3_VOLTE_CALL_FLOW_v8.html` | v7, with a brace on every step and the direction of that step. |
+| v9 | `output/L3_VOLTE_CALL_FLOW_v9.html` | Idle calls compared with idle calls, and connected calls with connected calls. |
+| v10 | `output/L3_VOLTE_CALL_FLOW_v10.html` | v9, with a ladder for UE-B idle and a ladder for UE-B connected. |
+| v11 | `output/L3_VOLTE_CALL_FLOW_v11.html` | Idle and connected on one page. Strongest-coverage call per operator, tables at −90 dBm or better. |
+| v12 | `output/L3_VOLTE_CALL_FLOW_v12_idle.html` and `…_v12_connected.html` | Same good-coverage ladders as v11, but idle and connected are separate pages. |
+| v13 | `output/L3_VOLTE_CALL_FLOW_v13.html` | Idle then connected on one page. Each case has its own All three / Robi / BL / GP toolbar. |
+| v14 | `output/L3_VOLTE_CALL_FLOW_v14.html` | Same layout as v13. Coverage target better than −60 dBm for idle and connected; strongest available call per case. |
+| v15 | `output/L3_VOLTE_CALL_FLOW_v15.html` | V6 step table with Robi−BL gaps in red, Gap 1 / Gap 2 notes, and the same notes on the Robi flow chart. Idle then connected toolbars kept. |
+| v16 | `output/L3_VOLTE_CALL_FLOW_v16.html` | Title: VoLTE Call Setup Benchmark with Competitor. Short summary notes only. |
+
+## VoLTE call flow — Dhaka
+
+Source: `Layer 3 Dhaka.7z` (Robi / Banglalink / Grameenphone, 21 A+B pairs). Current chart: **v8**.
+
+| Version | File | Contents |
+| --- | --- | --- |
+| v1 | `output/L3_VOLTE_CALL_FLOW_DHAKA_v1.html` | Idle / connected sections with session pickers. |
+| v2 | `output/L3_VOLTE_CALL_FLOW_DHAKA_v2.html` | All 21 calls one after another. Header per call: Session ID + RSRP for A and B. |
+| v3 | `output/L3_VOLTE_CALL_FLOW_DHAKA_v3.html` | 8 wall-clock dial rounds (GP missing R1; Robi/BL missing R8). |
+| v4 | `output/L3_VOLTE_CALL_FLOW_DHAKA_v4.html` | 7 paired rounds: every round has Robi+BL+GP by call order (GP ~125 s later OK). v15 format. |
+| v5 | `output/L3_VOLTE_CALL_FLOW_DHAKA_v5.html` | Overall tab = v4. Category tab = idle/connected with all close-RSRP pairs (Δ≤8 dB). |
+| v6 | `output/L3_VOLTE_CALL_FLOW_DHAKA_v6.html` | Same as v5 plus Notes (RCA) on each pair: which step/domain raised Robi CST. |
+| v7 | `output/L3_VOLTE_CALL_FLOW_DHAKA_v7.html` | RCA notes as bullet points (Main / also / QCI1 / Domain). |
+| v8 | `output/L3_VOLTE_CALL_FLOW_DHAKA_v8.html` | Category focus-point summary: late QCI1/183 return + INVITE outliers. |
+
+`output/L3_VOLTE_CALL_FLOW_DHAKA.html` is a copy of v8.
+
+```bash
+python3 -c "import py7zr; py7zr.SevenZipFile('Layer 3_Active Mode_Data_Robi_v1.7z').extractall('extracted/l3')"
+python3 build_l3_report_bogra.py
+```
+
 
 ## How to rebuild the final file and plots
 

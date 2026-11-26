@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoLTE call flow: Robi vs Banglalink vs Grameenphone</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #fff; color: #1d1d1d; font-family: Arial, Helvetica, sans-serif; }
+  header { padding: 16px 20px 6px; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .sub { margin: 0; font-size: 13px; color: #444; }
+  .gap { padding: 6px 20px 4px; }
+  table { border-collapse: collapse; font-size: 13px; min-width: 860px; }
+  th, td { border: 1px solid #cfd6e0; padding: 5px 9px; text-align: right; white-space: nowrap; }
+  th { background: #4f7fd1; color: #fff; font-weight: 700; }
+  td:first-child, th:first-child { text-align: left; }
+  tr.sub td { color: #555; font-style: italic; background: #fafafa; }
+  tr.total td { font-weight: 700; background: #eef3fb; }
+  td.bad { color: #c0392b; font-weight: 700; background: #fdecea; }
+  td.ok { color: #1e8449; }
+  .find { padding: 6px 20px 2px; font-size: 13px; line-height: 1.45; max-width: 1200px; }
+  .find b.bad { color: #c0392b; }
+  .bar { position: sticky; top: 0; z-index: 5; background: #fff; border-bottom: 1px solid #e3e3e3;
+         padding: 8px 20px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .bar button { border: 1px solid #4f7fd1; background: #fff; color: #2c5aa0; border-radius: 4px;
+                padding: 5px 12px; font-size: 13px; cursor: pointer; }
+  .bar button.on { background: #4f7fd1; color: #fff; }
+  .bar .sep { width: 1px; height: 22px; background: #ddd; margin: 0 6px; }
+  .legend { font-size: 12px; color: #444; display: flex; gap: 14px; flex-wrap: wrap; margin-left: 8px; }
+  .legend i { display: inline-block; width: 26px; height: 0; vertical-align: middle; margin-right: 5px; border-top: 2px solid #222; }
+  .legend i.d { border-top-style: dashed; }
+  .legend i.c { border-top: 2px dashed #9aa3ad; }
+  .legend i.q { border-top-color: #d35400; }
+  .charts { display: flex; gap: 16px; padding: 10px 20px 30px; overflow-x: auto; align-items: flex-start; }
+  .op { flex: none; }
+  .op h2 { margin: 0 0 2px; font-size: 18px; }
+  .op .meta { font-size: 12px; color: #444; margin-bottom: 4px; }
+  .op svg { display: block; cursor: zoom-in; }
+  .single .op svg { cursor: default; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VoLTE call flow v7 — Robi vs Banglalink vs Grameenphone</h1>
+  <p class="sub">Version v7. The brace on the left is the IMS core, which the UE log does not see hop by hop. The time on the brace is the whole block. Strongest alerted call per operator. Nothing in this drive is above −50 dBm.</p>
+</header>
+
+<section class="gap">
+  <table>
+    <thead>
+      <tr><th>Setup step (adds up to CST)</th><th>Robi</th><th>Banglalink</th><th>Grameenphone</th><th>Robi − BL</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1. UE-A INVITE → UE-B receives INVITE (IMS core, paging, RRC)</td><td class="bad">1.49 s</td><td class="ok">0.34 s</td><td>1.84 s</td><td class="bad">+1.16 s</td></tr>
+      <tr class="sub"><td>&nbsp;&nbsp;&nbsp;UE-B paged at</td><td>1.29 s (idle, answered immediately)</td><td>not paged (connected)</td><td>1.67 s (idle, answered immediately)</td><td></td></tr>
+      <tr><td>2. UE-B receives INVITE → UE-B sends 183</td><td>0.06 s</td><td>0.04 s</td><td>0.06 s</td><td>+0.02 s</td></tr>
+      <tr><td>3. UE-B sends 183 → UE-A receives 183</td><td class="bad">0.67 s</td><td class="ok">0.09 s</td><td>0.43 s</td><td class="bad">+0.58 s</td></tr>
+      <tr class="sub"><td>&nbsp;&nbsp;&nbsp;UE-A voice bearer (QCI 1) at</td><td>2.05 s (after B's 183)</td><td>0.08 s</td><td>0.35 s</td><td></td></tr>
+      <tr><td>4. UE-A receives 183 → 180 Ringing (PRACK, UPDATE)</td><td>0.26 s</td><td>0.29 s</td><td>0.40 s</td><td>−0.03 s</td></tr>
+      <tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td>2.49 s</td><td>0.76 s</td><td>2.73 s</td><td>+1.73 s</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="find">
+  <b class="bad">Gap 1, +1.16 s, and it is not the radio.</b> At −70 to −78 dBm, Robi's INVITE still needs 1.49 s to reach UE-B. UE-B was idle. The page for that phone arrived at 1.29 s, the phone answered in the same millisecond, RRC was up at 1.38 s, and the INVITE arrived at 1.49 s. The air interface after the page is 0.20 s. The wait is before the page. Banglalink's UE-B was already connected and had the INVITE at 0.34 s. Grameenphone, on the strongest call in the drive (−60 to −69 dBm), is slower than Robi: its idle UE-B is paged at 1.67 s and receives the INVITE at 1.84 s.<br>
+  <b class="bad">Gap 2, +0.58 s.</b> Robi starts UE-A's QCI 1 bearer at 2.05 s, after UE-B has sent 183, and that 183 takes 0.67 s to reach UE-A. Banglalink starts the bearer at 0.08 s and returns the 183 in 0.09 s. GP starts its bearer at 0.35 s.
+</section>
+
+<div class="bar" id="bar">
+  <button data-view="all" class="on">All three side by side</button>
+  <button data-view="robi">Robi</button>
+  <button data-view="bl">Banglalink</button>
+  <button data-view="gp">Grameenphone</button>
+  <span class="sep"></span>
+  <button data-zoom="fit">Fit</button>
+  <button data-zoom="out">−</button>
+  <button data-zoom="in">+</button>
+  <span class="legend">
+    <span><i></i>at one UE</span>
+    <span><i class="d"></i>UE-A ↔ UE-B (send → receive)</span>
+    <span><i class="c"></i>IMS core hop, not in UE log</span>
+    <span><i class="q"></i>QCI 1 voice bearer</span>
+  </span>
+</div>
+
+<div class="charts" id="charts"></div>
+
+<script>
+const LANES = ["UE-A", "orig SBC\nwith P-CSCF", "orig S-CSCF", "O - TAS", "term I-CSCF", "term S-CSCF", "T-TAS", "term SBC\nwith P-CSCF", "UE-B"];
+const X = i => 128 + i * 82;
+const W = 128 + 8 * 82 + 48;
+const C = { line: "#222", core: "#9aa3ad", bad: "#c0392b", warn: "#b9770e", good: "#1e8449", bearer: "#d35400", lane: "#8f99a6" };
+
+const CORE = [
+  { k: "core", f: 1, to: 2, l: "SIP INVITE (SDP O1)" },
+  { k: "core", f: 2, to: 3, l: "SIP INVITE (SDP O1)" },
+  { k: "loop", at: 3, l: "UDR/UDA", opt: true },
+  { k: "cnote", at: 3, l: "originating services" },
+  { k: "core", f: 3, to: 2, l: "SIP INVITE (SDP O1)" },
+  { k: "loop", at: 2, l: "DNS" },
+  { k: "core", f: 2, to: 4, l: "SIP INVITE (SDP O1)" },
+  { k: "loop", at: 4, l: "LIR/LIA" },
+  { k: "core", f: 4, to: 5, l: "SIP INVITE (SDP O1)" },
+  { k: "core", f: 5, to: 6, l: "SIP INVITE (SDP O1)" },
+  { k: "loop", at: 6, l: "UDR/UDA", opt: true },
+  { k: "cnote", at: 6, l: "terminating services" },
+  { k: "core", f: 6, to: 5, l: "SIP INVITE (SDP O1)" },
+  { k: "core", f: 5, to: 7, l: "SIP INVITE (SDP O1)" }
+];
+
+const OPS = [
+  {
+    id: "robi", name: "Robi", color: "#c0392b", cst: 2486,
+    brace: { time: "1.24 s", range: "0.05 s → 1.29 s" },
+    meta: "Log 6.txt · strongest Robi call · RSRP UE-A −78 to −71 dBm, UE-B −75 to −70 dBm · CST 2.49 s",
+    steps: [
+      { k: "msg", f: 0, to: 1, l: "SIP INVITE (SDP O1)", tm: "0.00 s", t: 0 },
+      { k: "msg", f: 1, to: 0, l: "100 Trying", tm: "0.05 s", t: 51 },
+      ...CORE,
+      { k: "note", side: "mid", cls: "bad", t: 1293, lines: ["Gap 1: INVITE needs 1.49 s to reach UE-B (Banglalink 0.34 s)", "Page at 1.29 s, phone answers immediately. Air time after the page is 0.20 s"] },
+      { k: "note", side: "B", cls: "bad", t: 1294, lines: ["UE-B idle → paged 1.29 s", "Service Request same ms, RRC 1.38 s"] },
+      { k: "msg", f: 7, to: 8, l: "SIP INVITE (SDP O1)", tm: "B 1.49 s", t: 1492, cls: "bad" },
+      { k: "msg", f: 8, to: 7, l: "183 In Progress (SDP A1)", tm: "B 1.55 s", t: 1554 },
+      { k: "bearer", f: 7, to: 8, l: "QCI 1 voice bearer (B)", tm: "1.74 s", t: 1740 },
+      { k: "bearer", f: 1, to: 0, l: "QCI 1 voice bearer (A)", tm: "2.05 s", t: 2045, cls: "bad" },
+      { k: "note", side: "A", cls: "bad", t: 2046, lines: ["Gap 2: A bearer starts only", "after B's 183 (BL: 0.08 s)"] },
+      { k: "e2e", f: 7, to: 0, l: "183 In Progress (SDP A1)", tm: "B 1.55 → A 2.23 s", t: 2226, cls: "bad" },
+      { k: "e2e", f: 0, to: 8, l: "SIP PRACK", tm: "A 2.25 → B 2.34 s", t: 2246 },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (PRACK)", tm: "B 2.37 → A 2.49 s", t: 2372 },
+      { k: "note", side: "B", t: 2373, lines: ["SDP ok, start to ring"] },
+      { k: "e2e", f: 8, to: 0, l: "180 Ringing", tm: "B 2.38 → A 2.49 s  ·  CST 2.49 s", t: 2375, cls: "cst" },
+      { k: "note", side: "B", t: 4012, lines: ["call accepted"] },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (INVITE)", tm: "B 4.01 → A 4.31 s", t: 4013 },
+      { k: "e2e", f: 0, to: 8, l: "SIP ACK", tm: "A 4.32 → B 4.48 s", t: 4324 },
+      { k: "rtp", t: 4500 },
+      { k: "note", side: "mid", t: 5000, lines: ["No BYE for this call in the log"] }
+    ]
+  },
+  {
+    id: "bl", name: "Banglalink", color: "#1e8449", cst: 761,
+    brace: { time: "0.26 s", range: "0.08 s → 0.34 s" },
+    meta: "Log 9.txt · strongest BL call · RSRP UE-A −81 dBm (3.9 s before), UE-B −81 dBm · CST 0.76 s",
+    steps: [
+      { k: "msg", f: 0, to: 1, l: "SIP INVITE (SDP O1)", tm: "0.00 s", t: 0 },
+      { k: "msg", f: 1, to: 0, l: "100 Trying", tm: "0.05 s", t: 46 },
+      { k: "bearer", f: 1, to: 0, l: "QCI 1 voice bearer (A)", tm: "0.08 s", t: 79, cls: "good" },
+      { k: "note", side: "A", cls: "good", t: 80, lines: ["A bearer right after INVITE"] },
+      ...CORE,
+      { k: "note", side: "B", cls: "good", t: 300, lines: ["UE-B already connected", "no paging needed"] },
+      { k: "msg", f: 7, to: 8, l: "SIP INVITE (SDP O1)", tm: "B 0.34 s", t: 337, cls: "good" },
+      { k: "msg", f: 8, to: 7, l: "183 In Progress (SDP A1)", tm: "B 0.38 s", t: 380 },
+      { k: "bearer", f: 7, to: 8, l: "QCI 1 voice bearer (B)", tm: "0.46 s", t: 457 },
+      { k: "e2e", f: 7, to: 0, l: "183 In Progress (SDP A1)", tm: "B 0.38 → A 0.47 s", t: 472, cls: "good" },
+      { k: "e2e", f: 0, to: 8, l: "SIP PRACK", tm: "A 0.48 → B 0.53 s", t: 484 },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (PRACK)", tm: "B 0.54 → A 0.59 s", t: 538 },
+      { k: "e2e", f: 0, to: 8, l: "SIP UPDATE (SDP O2)", tm: "A 0.59 → B 0.66 s", t: 593 },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (SDP A2 - UPDATE)", tm: "B 0.68 → A 0.73 s", t: 676 },
+      { k: "note", side: "B", t: 677, lines: ["SDP ok, start to ring"] },
+      { k: "e2e", f: 8, to: 0, l: "180 Ringing", tm: "B 0.68 → A 0.76 s  ·  CST 0.76 s", t: 679, cls: "cst" },
+      { k: "note", side: "B", t: 2334, lines: ["call accepted"] },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (INVITE)", tm: "B 2.34 → A 2.45 s", t: 2335 },
+      { k: "e2e", f: 0, to: 8, l: "SIP ACK", tm: "A 2.47 → B 2.52 s", t: 2466 },
+      { k: "rtp", t: 2600 },
+      { k: "note", side: "mid", t: 3000, lines: ["No BYE for this call in the log"] }
+    ]
+  },
+  {
+    id: "gp", name: "Grameenphone", color: "#1f4e9a", cst: 2732,
+    brace: { time: "1.32 s", range: "0.35 s → 1.67 s" },
+    meta: "Log 8.txt · strongest call in the drive · RSRP UE-A −63 to −60 dBm, UE-B −69 to −63 dBm · CST 2.73 s",
+    steps: [
+      { k: "msg", f: 0, to: 1, l: "SIP INVITE (SDP O1)", tm: "0.00 s", t: 0 },
+      { k: "msg", f: 1, to: 0, l: "100 Trying", tm: "0.20 s", t: 200 },
+      { k: "bearer", f: 1, to: 0, l: "QCI 1 voice bearer (A)", tm: "0.35 s", t: 352, cls: "good" },
+      { k: "note", side: "A", cls: "good", t: 353, lines: ["A bearer right after INVITE", "UE-A RRC up at 0.09 s"] },
+      ...CORE,
+      { k: "note", side: "mid", cls: "warn", t: 1670, lines: ["INVITE needs 1.84 s to reach UE-B (Banglalink 0.34 s)", "UE-B idle: paged at 1.67 s, answers immediately"] },
+      { k: "note", side: "B", cls: "warn", t: 1671, lines: ["UE-B idle → paged 1.67 s", "Service Request same ms, RRC 1.74 s"] },
+      { k: "msg", f: 7, to: 8, l: "SIP INVITE (SDP O1)", tm: "B 1.84 s", t: 1840, cls: "warn" },
+      { k: "msg", f: 8, to: 7, l: "183 In Progress (SDP A1)", tm: "B 1.90 s", t: 1900 },
+      { k: "bearer", f: 7, to: 8, l: "QCI 1 voice bearer (B)", tm: "2.03 s", t: 2034 },
+      { k: "e2e", f: 7, to: 0, l: "183 In Progress (SDP A1)", tm: "B 1.90 → A 2.33 s", t: 2333, cls: "warn" },
+      { k: "note", side: "A", cls: "warn", t: 2334, lines: ["183 needs 0.43 s B → A", "(Banglalink 0.09 s)"] },
+      { k: "e2e", f: 0, to: 8, l: "SIP PRACK", tm: "A 2.34 → B 2.61 s", t: 2344 },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (PRACK)", tm: "B 2.63 → A 2.73 s", t: 2629 },
+      { k: "note", side: "B", t: 2630, lines: ["SDP ok, start to ring"] },
+      { k: "e2e", f: 8, to: 0, l: "180 Ringing", tm: "B 2.63 → A 2.73 s  ·  CST 2.73 s", t: 2630, cls: "cst" },
+      { k: "note", side: "B", t: 4317, lines: ["call accepted"] },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (INVITE)", tm: "B 4.32 → A 4.57 s", t: 4318 },
+      { k: "e2e", f: 0, to: 8, l: "SIP ACK", tm: "A 4.59 → B 4.68 s", t: 4590 },
+      { k: "rtp", t: 4800 },
+      { k: "brk", l: "talk time ≈ 86 s" },
+      { k: "note", side: "A", t: 90787, lines: ["call finished"] },
+      { k: "e2e", f: 0, to: 8, l: "SIP BYE", tm: "A 90.79 → B 91.08 s", t: 90788 },
+      { k: "e2e", f: 8, to: 0, l: "200 OK (BYE)", tm: "B 91.11 → A 91.21 s", t: 91108 }
+    ]
+  }
+];
+
+const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const HALO = 'paint-order="stroke" stroke="#fff" stroke-width="3" stroke-linejoin="round"';
+
+function colorOf(cls, fallback) {
+  if (cls === "bad") return C.bad;
+  if (cls === "warn") return C.warn;
+  if (cls === "good") return C.good;
+  return fallback;
+}
+
+function laneBox(i, y) {
+  const lines = LANES[i].split("\n");
+  const cy = y + 20 - (lines.length - 1) * 6.5 + 4;
+  const text = lines.map((s, n) => `<tspan x="${X(i)}" y="${cy + n * 13}">${esc(s)}</tspan>`).join("");
+  return `<rect x="${X(i) - 40}" y="${y}" width="80" height="40" rx="4" fill="#4f7fd1" stroke="#3a64ad"/>
+    <text text-anchor="middle" font-size="11.5" font-weight="700" fill="#fff">${text}</text>`;
+}
+
+function render(op) {
+  const p = [];
+  const id = op.id;
+  let y = 64;
+  let lastT = null;
+  let braceTop = null;
+  let braceBot = null;
+  const markCore = (yy) => {
+    if (braceTop == null) braceTop = yy;
+    braceBot = yy;
+  };
+
+  const arrow = (f, to, yy, color, opts = {}) => {
+    const x1 = X(f), x2 = X(to);
+    const dir = Math.sign(x2 - x1);
+    const end = x2 - dir * 2;
+    const dash = opts.dash ? ` stroke-dasharray="${opts.dash}"` : "";
+    const mk = opts.both ? `marker-start="url(#${id}-h-${opts.mk})" marker-end="url(#${id}-h-${opts.mk})"` : `marker-end="url(#${id}-h-${opts.mk})"`;
+    return `<line x1="${x1}" y1="${yy}" x2="${end}" y2="${yy}" stroke="${color}" stroke-width="${opts.w || 1.4}"${dash} ${mk}/>`;
+  };
+
+  const label = (f, to, yy, text, color, weight) => {
+    const x1 = X(f), x2 = X(to);
+    let anchor = "middle", x = (x1 + x2) / 2;
+    if (Math.abs(to - f) === 1) {
+      if (Math.min(f, to) === 0) { anchor = "start"; x = X(0) + 6; }
+      else if (Math.max(f, to) === 8) { anchor = "end"; x = X(8) - 6; }
+    }
+    return `<text x="${x}" y="${yy - 5}" text-anchor="${anchor}" font-size="11" font-weight="${weight || 600}" fill="${color}" ${HALO}>${esc(text)}</text>`;
+  };
+
+  const note = (it) => {
+    const h = it.lines.length * 14 + 8;
+    let x, w;
+    if (it.side === "A") { x = 12; w = 200; }
+    else if (it.side === "B") { x = W - 12 - 200; w = 200; }
+    else { x = X(1) + 8; w = X(7) - X(1) - 16; }
+    const stroke = colorOf(it.cls, "#8a8a8a");
+    const fill = it.cls === "bad" ? "#fdecea" : it.cls === "warn" ? "#fdf2e0" : it.cls === "good" ? "#e8f6ee" : "#ffffff";
+    const fold = `<path d="M${x + w - 9} ${y} L${x + w} ${y + 9} L${x + w - 9} ${y + 9} Z" fill="${stroke}" opacity="0.35"/>`;
+    const text = it.lines.map((s, n) =>
+      `<text x="${x + 7}" y="${y + 15 + n * 14}" font-size="11" font-weight="${n === 0 && it.cls ? 700 : 400}" fill="${it.cls ? stroke : "#222"}">${esc(s)}</text>`
+    ).join("");
+    p.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}" stroke="${stroke}"/>${fold}${text}`);
+    return h;
+  };
+
+  for (const it of op.steps) {
+    if (it.t != null && lastT != null && it.t <= op.cst && it.t - lastT > 250) {
+      y += Math.min(150, (it.t - lastT - 250) * 0.075);
+    }
+    if (it.t != null) lastT = it.t;
+
+    if (it.k === "msg" || it.k === "e2e" || it.k === "bearer") {
+      y += 30;
+      const isCst = it.cls === "cst";
+      let color = it.k === "bearer" ? C.bearer : C.line;
+      color = colorOf(it.cls, color);
+      const mk = it.k === "bearer" ? "q" : it.cls === "bad" ? "r" : it.cls === "warn" ? "w" : it.cls === "good" ? "g" : "k";
+      p.push(arrow(it.f, it.to, y, color, { dash: it.k === "e2e" ? "6 4" : "", mk, w: isCst || it.cls ? 2.2 : 1.4 }));
+      const txtColor = it.k === "bearer" && !it.cls ? C.bearer : color;
+      p.push(label(it.f, it.to, y, `${it.l}  ·  ${it.tm}`, txtColor, isCst ? 800 : 600));
+    } else if (it.k === "core") {
+      y += 24;
+      p.push(arrow(it.f, it.to, y, C.core, { dash: "4 3", mk: "c" }));
+      p.push(`<text x="${(X(it.f) + X(it.to)) / 2}" y="${y - 5}" text-anchor="middle" font-size="10" fill="#7d8792" ${HALO}>${esc(it.l)}</text>`);
+      markCore(y);
+    } else if (it.k === "loop") {
+      y += 22;
+      const x = X(it.at);
+      if (it.opt) {
+        p.push(`<rect x="${x - 40}" y="${y - 12}" width="84" height="30" fill="#dfe8f7" stroke="#8aa6d8"/>
+          <rect x="${x - 40}" y="${y - 12}" width="22" height="11" fill="#4f7fd1"/>
+          <text x="${x - 29}" y="${y - 3.5}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#fff">opt</text>`);
+      }
+      p.push(`<path d="M${x} ${y} H${x + 30} V${y + 10} H${x + 3}" fill="none" stroke="${C.core}" stroke-width="1.4" marker-end="url(#${id}-h-c)"/>
+        <text x="${x - 4}" y="${y + 9}" text-anchor="end" font-size="10" fill="#7d8792" ${HALO}>${esc(it.l)}</text>`);
+      markCore(y + 5);
+      y += 10;
+    } else if (it.k === "cnote") {
+      y += 12;
+      const x = X(it.at);
+      p.push(`<rect x="${x - 56}" y="${y}" width="112" height="18" fill="#fff" stroke="#b5bcc5"/>
+        <text x="${x}" y="${y + 12.5}" text-anchor="middle" font-size="10" fill="#7d8792">${esc(it.l)}</text>`);
+      markCore(y + 9);
+      y += 18;
+    } else if (it.k === "note") {
+      y += 12;
+      y += note(it);
+    } else if (it.k === "rtp") {
+      y += 30;
+      for (const [a, b] of [[0, 1], [1, 7], [7, 8]]) {
+        p.push(arrow(a, b, y, C.line, { both: true, mk: "k", w: 1.6 }));
+      }
+      p.push(`<text x="${X(0) + 6}" y="${y - 5}" font-size="11" font-weight="700" ${HALO}>RTP</text>`);
+      p.push(`<text x="${(X(1) + X(7)) / 2}" y="${y - 5}" text-anchor="middle" font-size="11" font-weight="700" ${HALO}>RTP</text>`);
+      p.push(`<text x="${X(8) - 6}" y="${y - 5}" text-anchor="end" font-size="11" font-weight="700" ${HALO}>RTP</text>`);
+    } else if (it.k === "brk") {
+      y += 30;
+      p.push(`<rect x="6" y="${y - 9}" width="${W - 12}" height="18" fill="#f4f6f9"/>
+        <text x="${W / 2}" y="${y + 4}" text-anchor="middle" font-size="11" font-style="italic" fill="#555">··· ${esc(it.l)} ···</text>`);
+      y += 6;
+    }
+  }
+
+  if (op.brace && braceTop != null) {
+    const y1 = braceTop - 10;
+    const y2 = braceBot + 10;
+    const mid = (y1 + y2) / 2;
+    const x = 108;
+    const tip = 16;
+    const arm = Math.min(22, (y2 - y1) / 5);
+    const d = `M ${x} ${y1} Q ${x - 12} ${y1} ${x - 12} ${y1 + arm} V ${mid - arm} Q ${x - 12} ${mid} ${x - 12 - tip} ${mid} Q ${x - 12} ${mid} ${x - 12} ${mid + arm} V ${y2 - arm} Q ${x - 12} ${y2} ${x} ${y2}`;
+    p.push(`<path d="${d}" fill="none" stroke="${op.color}" stroke-width="2" stroke-dasharray="6 3.5"/>`);
+    p.push(`<text x="8" y="${mid - 6}" font-size="11" font-weight="700" fill="${op.color}">IMS core</text>`);
+    p.push(`<text x="8" y="${mid + 12}" font-size="16" font-weight="800" fill="${op.color}">${esc(op.brace.time)}</text>`);
+    p.push(`<text x="8" y="${mid + 26}" font-size="10" font-weight="700" fill="${op.color}">${esc(op.brace.range)}</text>`);
+  }
+
+  y += 30;
+  const H = y + 48;
+  const lanes = LANES.map((_, i) =>
+    `<line x1="${X(i)}" y1="48" x2="${X(i)}" y2="${y}" stroke="${C.lane}" stroke-width="1"/>`
+  ).join("");
+  const tops = LANES.map((_, i) => laneBox(i, 8)).join("");
+  const bottoms = LANES.map((_, i) => laneBox(i, y)).join("");
+  const marker = (k, col) =>
+    `<marker id="${id}-h-${k}" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="${col}"/></marker>`;
+  const defs = `<defs>${marker("k", C.line)}${marker("c", C.core)}${marker("r", C.bad)}${marker("w", C.warn)}${marker("g", C.good)}${marker("q", C.bearer)}</defs>`;
+
+  return {
+    w: W, h: H,
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" font-family="Arial, Helvetica, sans-serif">
+      ${defs}<rect width="${W}" height="${H}" fill="#fff"/>${lanes}${p.join("")}${tops}${bottoms}</svg>`
+  };
+}
+
+const built = OPS.map(op => ({ op, ...render(op) }));
+const charts = document.getElementById("charts");
+let view = ["robi", "bl", "gp"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "all";
+let zoom = null;
+
+function fitZoom() {
+  const avail = charts.clientWidth - 40;
+  const n = view === "all" ? 3 : 1;
+  const z = (avail - (n - 1) * 16) / (n * W);
+  return Math.max(0.45, Math.min(n === 1 ? 1.5 : 1.2, z));
+}
+
+function draw() {
+  const z = zoom || fitZoom();
+  const list = view === "all" ? built : built.filter(b => b.op.id === view);
+  charts.className = "charts" + (view === "all" ? "" : " single");
+  charts.innerHTML = list.map(b => `
+    <div class="op" data-id="${b.op.id}" style="width:${Math.round(b.w * z)}px">
+      <h2 style="color:${b.op.color}">${esc(b.op.name)}</h2>
+      <div class="meta">${esc(b.op.meta)}</div>
+      ${b.svg.replace("<svg ", `<svg width="${Math.round(b.w * z)}" height="${Math.round(b.h * z)}" `)}
+    </div>`).join("");
+  document.querySelectorAll("[data-view]").forEach(btn => btn.classList.toggle("on", btn.dataset.view === view));
+}
+
+document.getElementById("bar").addEventListener("click", e => {
+  const btn = e.target.closest("button");
+  if (!btn) return;
+  if (btn.dataset.view) { view = btn.dataset.view; zoom = null; }
+  const cur = zoom || fitZoom();
+  if (btn.dataset.zoom === "fit") zoom = null;
+  if (btn.dataset.zoom === "in") zoom = Math.min(2, cur * 1.15);
+  if (btn.dataset.zoom === "out") zoom = Math.max(0.35, cur / 1.15);
+  draw();
+});
+
+charts.addEventListener("click", e => {
+  const card = e.target.closest(".op");
+  if (!card || view !== "all") return;
+  view = card.dataset.id;
+  zoom = null;
+  draw();
+});
+
+window.addEventListener("resize", () => { if (!zoom) draw(); });
+draw();
+</script>
+</body>
+</html>

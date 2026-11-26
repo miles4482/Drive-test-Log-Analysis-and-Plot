@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoLTE call flow v12 — UE-B idle, paged (good coverage)</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #fff; color: #1d1d1d; font-family: Arial, Helvetica, sans-serif; }
+  header { padding: 16px 20px 6px; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .sub { margin: 0; font-size: 13px; color: #444; }
+  .gap { padding: 6px 20px 4px; }
+  table { border-collapse: collapse; font-size: 13px; min-width: 860px; }
+  th, td { border: 1px solid #cfd6e0; padding: 5px 9px; text-align: right; white-space: nowrap; }
+  th { background: #4f7fd1; color: #fff; font-weight: 700; }
+  td:first-child, th:first-child { text-align: left; }
+  tr.sub td { color: #555; font-style: italic; background: #fafafa; }
+  tr.total td { font-weight: 700; background: #eef3fb; }
+  td.bad { color: #c0392b; font-weight: 700; background: #fdecea; }
+  td.ok { color: #1e8449; }
+  .find { padding: 6px 20px 2px; font-size: 13px; line-height: 1.45; max-width: 1200px; }
+  .find b.bad { color: #c0392b; }
+  .bar { position: sticky; top: 0; z-index: 5; background: #fff; border-bottom: 1px solid #e3e3e3;
+         padding: 8px 20px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .bar button { border: 1px solid #4f7fd1; background: #fff; color: #2c5aa0; border-radius: 4px;
+                padding: 5px 12px; font-size: 13px; cursor: pointer; }
+  .bar button.on { background: #4f7fd1; color: #fff; }
+  .bar .sep { width: 1px; height: 22px; background: #ddd; margin: 0 6px; }
+  .legend { font-size: 12px; color: #444; display: flex; gap: 14px; flex-wrap: wrap; margin-left: 8px; }
+  .legend i { display: inline-block; width: 26px; height: 0; vertical-align: middle; margin-right: 5px; border-top: 2px solid #222; }
+  .legend i.d { border-top-style: dashed; }
+  .legend i.c { border-top: 2px dashed #9aa3ad; }
+  .legend i.q { border-top-color: #d35400; }
+  .charts { display: flex; gap: 16px; padding: 10px 20px 30px; overflow-x: auto; align-items: flex-start; }
+  .op { flex: none; }
+  .op h2 { margin: 0 0 2px; font-size: 18px; }
+  .op .meta { font-size: 12px; color: #444; margin-bottom: 4px; }
+  .op svg { display: block; cursor: zoom-in; }
+  .single .op svg { cursor: default; }
+  .nav { padding: 8px 20px 0; font-size: 13px; }
+  .nav a { color: #2c5aa0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VoLTE call flow v12 — UE-B idle, paged (good coverage)</h1>
+  <p class="sub">Version v12. This page is only the UE-B idle, paged case. Each ladder is the call with the strongest RSRP on both phones. The table is the median of calls with both phones at −90 dBm or better. Times are seconds after UE-A sends SIP INVITE, and the braces add up on that clock.</p>
+</header>
+<p class="nav">Also open: <a href="L3_VOLTE_CALL_FLOW_v12_connected.html">UE-B connected, not paged →</a></p>
+<div class="bar" id="bar">
+  <button data-view="all" class="on">All three side by side</button>
+  <button data-view="robi">Robi</button>
+  <button data-view="bl">Banglalink</button>
+  <button data-view="gp">Grameenphone</button>
+  <span class="sep"></span>
+  <button data-zoom="fit">Fit</button>
+  <button data-zoom="out">−</button>
+  <button data-zoom="in">+</button>
+  <span class="legend">
+    <span><i></i>at one UE</span>
+    <span><i class="d"></i>UE-A ↔ UE-B (send → receive)</span>
+    <span><i class="c"></i>IMS core hop, not in UE log</span>
+    <span><i class="q"></i>QCI 1 voice bearer</span>
+  </span>
+</div>
+<section class="gap">
+  <table>
+    <thead><tr><th>Good coverage, both phones −90 dBm or better · UE-B idle, paged</th><th>Robi</th><th>Banglalink</th><th>Grameenphone</th></tr></thead>
+    <tbody>
+<tr class="sub"><td>Calls with both phones at −90 dBm or better</td><td>5 of 15</td><td>0 of 1</td><td>6 of 14</td></tr>
+<tr><td>UE-A INVITE → UE-B receives INVITE</td><td>1.94 s</td><td>—</td><td>1.78 s</td></tr>
+<tr class="sub"><td>&nbsp;&nbsp;&nbsp;UE-B paged at</td><td>1.78 s</td><td>—</td><td>1.60 s</td></tr>
+<tr class="sub"><td>&nbsp;&nbsp;&nbsp;Air time after the page</td><td>0.17 s</td><td>—</td><td>0.18 s</td></tr>
+<tr><td>UE-B sends 183 → UE-A receives 183</td><td>0.68 s</td><td>—</td><td>0.55 s</td></tr>
+<tr><td>UE-A voice bearer (QCI 1) at</td><td>2.51 s</td><td>—</td><td>0.26 s</td></tr>
+<tr><td>UE-B voice bearer (QCI 1) at</td><td>2.20 s</td><td>—</td><td>2.00 s</td></tr>
+<tr class="total"><td>Call setup time: INVITE → 180 Ringing</td><td>3.05 s</td><td>—</td><td>2.65 s</td></tr>
+    </tbody>
+  </table>
+</section>
+<p class="find">All idle calls, any coverage, median CST: Robi 2.99 s (15), Banglalink 2.29 s (1), Grameenphone 2.99 s (14). Banglalink paged the called phone only once in the drive, at −101 dBm, so it has no good-coverage idle call. Its ladder below is that one call.</p>
+<div class="charts" id="charts"></div>
+<script>
+const OPS_DATA = [{"id": "robi", "name": "Robi", "color": "#c0392b", "cst": 2486.0, "meta": "UE-B idle · good coverage. Log 6.txt · RSRP UE-A −76 to −74 dBm, UE-B −72 to −70 dBm · CST 2.49 s", "segs": [{"from": "invite", "to": "trying", "dir": "UE-A → P-CSCF", "time": "0.05 s"}, {"from": "trying", "to": "page", "dir": "P-CSCF → term IMS", "time": "1.24 s", "cls": "bad"}, {"from": "page", "to": "binvite", "dir": "MME → UE-B", "time": "0.20 s"}, {"from": "binvite", "to": "b183", "dir": "UE-B → IMS", "time": "0.06 s"}, {"from": "b183", "to": "bbear", "dir": "PCRF → UE-B", "time": "0.19 s"}, {"from": "bbear", "to": "abear", "dir": "PCRF → UE-A", "time": "0.30 s", "cls": "bad"}, {"from": "abear", "to": "a183", "dir": "IMS → UE-A", "time": "0.18 s"}, {"from": "a183", "to": "prack", "dir": "UE-A → UE-B", "time": "0.02 s"}, {"from": "prack", "to": "ring", "dir": "UE-B → UE-A", "time": "0.24 s"}, {"from": "ring", "to": "ok", "dir": "UE-B → UE-A", "time": "1.82 s"}, {"from": "ok", "to": "ack", "dir": "UE-A → UE-B", "time": "0.02 s"}], "steps": [{"k": "msg", "f": 0, "to": 1, "l": "SIP INVITE (SDP O1)", "tm": "0.00 s", "t": 0, "mark": "invite"}, {"k": "msg", "f": 1, "to": 0, "l": "100 Trying", "tm": "0.05 s", "t": 51.0, "mark": "trying"}, {"k": "CORE"}, {"k": "note", "side": "mid", "cls": "bad", "t": 1293.0, "lines": ["UE-B idle. INVITE reaches UE-B at 1.49 s", "Page at 1.29 s, air time after the page 0.20 s"]}, {"k": "note", "side": "B", "cls": "bad", "t": 1294.0, "lines": ["UE-B idle → paged 1.29 s", "RRC request 1.29 s, setup 1.38 s"], "mark": "page"}, {"k": "msg", "f": 7, "to": 8, "l": "SIP INVITE (SDP O1)", "tm": "B 1.49 s", "t": 1492.0, "cls": "bad", "mark": "binvite"}, {"k": "msg", "f": 8, "to": 7, "l": "183 In Progress (SDP A1)", "tm": "B 1.55 s", "t": 1554.0, "mark": "b183"}, {"k": "bearer", "f": 7, "to": 8, "l": "QCI 1 voice bearer (B)", "tm": "1.74 s", "t": 1740.0, "mark": "bbear"}, {"k": "bearer", "f": 1, "to": 0, "l": "QCI 1 voice bearer (A)", "tm": "2.04 s", "t": 2045.0, "cls": "bad", "mark": "abear"}, {"k": "note", "side": "A", "cls": "bad", "t": 2046.0, "lines": ["A bearer starts after B's 183"]}, {"k": "e2e", "f": 7, "to": 0, "l": "183 In Progress (SDP A1)", "tm": "B 1.55 s → A 2.23 s", "t": 2226.0, "cls": "bad", "mark": "a183"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP PRACK", "tm": "A 2.25 s → B 2.34 s", "t": 2246.0, "mark": "prack"}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (PRACK)", "tm": "B 2.37 s → A 2.49 s", "t": 2485.5}, {"k": "note", "side": "B", "t": 2485.8, "lines": ["SDP ok, start to ring"]}, {"k": "e2e", "f": 8, "to": 0, "l": "180 Ringing", "tm": "B 2.38 s → A 2.49 s  ·  CST 2.49 s", "t": 2486.0, "cls": "cst", "mark": "ring"}, {"k": "note", "side": "B", "t": 4305.8, "lines": ["call accepted"]}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (INVITE)", "tm": "B 4.01 s → A 4.31 s", "t": 4306.0, "mark": "ok"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP ACK", "tm": "A 4.32 s → B 4.47 s", "t": 4324.0, "mark": "ack"}, {"k": "rtp", "t": 4625.0}, {"k": "note", "side": "mid", "t": 4924.0, "lines": ["No BYE for this call in the log"]}]}, {"id": "bl", "name": "Banglalink", "color": "#1e8449", "cst": 2294.0, "meta": "UE-B idle · best coverage this operator has in this state. Log 10.txt · RSRP UE-A −102 to −100 dBm, UE-B −101 to −100 dBm · CST 2.29 s", "segs": [{"from": "invite", "to": "trying", "dir": "UE-A → P-CSCF", "time": "0.04 s"}, {"from": "trying", "to": "abear", "dir": "P-CSCF → PCRF", "time": "0.16 s", "cls": "good"}, {"from": "abear", "to": "page", "dir": "PCRF → term IMS", "time": "1.47 s", "cls": "warn"}, {"from": "page", "to": "binvite", "dir": "MME → UE-B", "time": "0.13 s"}, {"from": "binvite", "to": "b183", "dir": "UE-B → IMS", "time": "0.08 s"}, {"from": "b183", "to": "bbear", "dir": "PCRF → UE-B", "time": "0.09 s"}, {"from": "bbear", "to": "a183", "dir": "IMS → UE-A", "time": "0.01 s"}, {"from": "a183", "to": "prack", "dir": "UE-A → UE-B", "time": "0.02 s"}, {"from": "prack", "to": "ring", "dir": "UE-B → UE-A", "time": "0.30 s"}, {"from": "ring", "to": "ok", "dir": "UE-B → UE-A", "time": "1.70 s"}, {"from": "ok", "to": "ack", "dir": "UE-A → UE-B", "time": "0.02 s"}], "steps": [{"k": "msg", "f": 0, "to": 1, "l": "SIP INVITE (SDP O1)", "tm": "0.00 s", "t": 0, "mark": "invite"}, {"k": "msg", "f": 1, "to": 0, "l": "100 Trying", "tm": "0.04 s", "t": 37.0, "mark": "trying"}, {"k": "bearer", "f": 1, "to": 0, "l": "QCI 1 voice bearer (A)", "tm": "0.20 s", "t": 198.0, "cls": "good", "mark": "abear"}, {"k": "note", "side": "A", "cls": "good", "t": 199.0, "lines": ["A bearer right after INVITE"]}, {"k": "CORE"}, {"k": "note", "side": "mid", "cls": "warn", "t": 1666.0, "lines": ["UE-B idle. INVITE reaches UE-B at 1.80 s", "Page at 1.67 s, air time after the page 0.13 s"]}, {"k": "note", "side": "B", "cls": "warn", "t": 1667.0, "lines": ["UE-B idle → paged 1.67 s", "RRC request 1.67 s, setup 1.74 s"], "mark": "page"}, {"k": "msg", "f": 7, "to": 8, "l": "SIP INVITE (SDP O1)", "tm": "B 1.80 s", "t": 1797.0, "mark": "binvite"}, {"k": "msg", "f": 8, "to": 7, "l": "183 In Progress (SDP A1)", "tm": "B 1.87 s", "t": 1873.0, "mark": "b183"}, {"k": "bearer", "f": 7, "to": 8, "l": "QCI 1 voice bearer (B)", "tm": "1.96 s", "t": 1960.0, "mark": "bbear"}, {"k": "e2e", "f": 7, "to": 0, "l": "183 In Progress (SDP A1)", "tm": "B 1.87 s → A 1.97 s", "t": 1968.0, "mark": "a183"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP PRACK", "tm": "A 1.99 s → B 2.03 s", "t": 1990.0, "mark": "prack"}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (PRACK)", "tm": "B 2.05 s → A 2.11 s", "t": 2112.5}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP UPDATE (SDP O2)", "tm": "A 2.13 s → B 2.18 s", "t": 2133.0}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (SDP A2 - UPDATE)", "tm": "B 2.19 s → A 2.25 s", "t": 2251.5}, {"k": "note", "side": "B", "t": 2293.8, "lines": ["SDP ok, start to ring"]}, {"k": "e2e", "f": 8, "to": 0, "l": "180 Ringing", "tm": "B 2.19 s → A 2.29 s  ·  CST 2.29 s", "t": 2294.0, "cls": "cst", "mark": "ring"}, {"k": "note", "side": "B", "t": 3993.8, "lines": ["call accepted"]}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (INVITE)", "tm": "B 3.87 s → A 3.99 s", "t": 3994.0, "mark": "ok"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP ACK", "tm": "A 4.01 s → B 4.06 s", "t": 4011.0, "mark": "ack"}, {"k": "rtp", "t": 4213.0}, {"k": "brk", "l": "talk time ≈ 87 s"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP BYE", "tm": "A 90.82 s → B 90.87 s", "t": 90819.0}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (BYE)", "tm": "B 90.90 s → A 90.97 s", "t": 90899.0}]}, {"id": "gp", "name": "Grameenphone", "color": "#1f4e9a", "cst": 2732.0, "meta": "UE-B idle · good coverage. Log 8.txt · RSRP UE-A −63 to −60 dBm, UE-B −69 to −63 dBm · CST 2.73 s", "segs": [{"from": "invite", "to": "trying", "dir": "UE-A → P-CSCF", "time": "0.20 s"}, {"from": "trying", "to": "abear", "dir": "P-CSCF → PCRF", "time": "0.15 s", "cls": "good"}, {"from": "abear", "to": "page", "dir": "PCRF → term IMS", "time": "1.32 s", "cls": "warn"}, {"from": "page", "to": "binvite", "dir": "MME → UE-B", "time": "0.17 s"}, {"from": "binvite", "to": "b183", "dir": "UE-B → IMS", "time": "0.06 s"}, {"from": "b183", "to": "bbear", "dir": "PCRF → UE-B", "time": "0.13 s"}, {"from": "bbear", "to": "a183", "dir": "IMS → UE-A", "time": "0.30 s"}, {"from": "a183", "to": "prack", "dir": "UE-A → UE-B", "time": "0.01 s"}, {"from": "prack", "to": "ring", "dir": "UE-B → UE-A", "time": "0.39 s"}, {"from": "ring", "to": "ok", "dir": "UE-B → UE-A", "time": "1.84 s"}, {"from": "ok", "to": "ack", "dir": "UE-A → UE-B", "time": "0.02 s"}], "steps": [{"k": "msg", "f": 0, "to": 1, "l": "SIP INVITE (SDP O1)", "tm": "0.00 s", "t": 0, "mark": "invite"}, {"k": "msg", "f": 1, "to": 0, "l": "100 Trying", "tm": "0.20 s", "t": 200.0, "mark": "trying"}, {"k": "bearer", "f": 1, "to": 0, "l": "QCI 1 voice bearer (A)", "tm": "0.35 s", "t": 352.0, "cls": "good", "mark": "abear"}, {"k": "note", "side": "A", "cls": "good", "t": 353.0, "lines": ["A bearer right after INVITE"]}, {"k": "CORE"}, {"k": "note", "side": "mid", "cls": "warn", "t": 1670.0, "lines": ["UE-B idle. INVITE reaches UE-B at 1.84 s", "Page at 1.67 s, air time after the page 0.17 s"]}, {"k": "note", "side": "B", "cls": "warn", "t": 1671.0, "lines": ["UE-B idle → paged 1.67 s", "RRC request 1.67 s, setup 1.74 s"], "mark": "page"}, {"k": "msg", "f": 7, "to": 8, "l": "SIP INVITE (SDP O1)", "tm": "B 1.84 s", "t": 1840.0, "mark": "binvite"}, {"k": "msg", "f": 8, "to": 7, "l": "183 In Progress (SDP A1)", "tm": "B 1.90 s", "t": 1900.0, "mark": "b183"}, {"k": "bearer", "f": 7, "to": 8, "l": "QCI 1 voice bearer (B)", "tm": "2.03 s", "t": 2034.0, "mark": "bbear"}, {"k": "e2e", "f": 7, "to": 0, "l": "183 In Progress (SDP A1)", "tm": "B 1.90 s → A 2.33 s", "t": 2333.0, "mark": "a183"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP PRACK", "tm": "A 2.34 s → B 2.61 s", "t": 2344.0, "mark": "prack"}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (PRACK)", "tm": "B 2.63 s → A 2.73 s", "t": 2731.5}, {"k": "note", "side": "B", "t": 2731.8, "lines": ["SDP ok, start to ring"]}, {"k": "e2e", "f": 8, "to": 0, "l": "180 Ringing", "tm": "B 2.63 s → A 2.73 s  ·  CST 2.73 s", "t": 2732.0, "cls": "cst", "mark": "ring"}, {"k": "note", "side": "B", "t": 4570.8, "lines": ["call accepted"]}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (INVITE)", "tm": "B 4.32 s → A 4.57 s", "t": 4571.0, "mark": "ok"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP ACK", "tm": "A 4.59 s → B 4.68 s", "t": 4590.0, "mark": "ack"}, {"k": "rtp", "t": 4831.0}, {"k": "brk", "l": "talk time ≈ 86 s"}, {"k": "e2e", "f": 0, "to": 8, "l": "SIP BYE", "tm": "A 90.79 s → B 91.08 s", "t": 90788.0}, {"k": "e2e", "f": 8, "to": 0, "l": "200 OK (BYE)", "tm": "B 91.11 s → A 91.21 s", "t": 91108.0}]}];
+const LANES = ["UE-A", "orig SBC\nwith P-CSCF", "orig S-CSCF", "O - TAS", "term I-CSCF", "term S-CSCF", "T-TAS", "term SBC\nwith P-CSCF", "UE-B"];
+const GUTTER = 210;
+const X = i => GUTTER + 28 + i * 74;
+const W = GUTTER + 28 + 8 * 74 + 36;
+const C = { line: "#222", core: "#9aa3ad", bad: "#c0392b", warn: "#b9770e", good: "#1e8449", bearer: "#d35400", lane: "#8f99a6" };
+
+const CORE = [
+  { k: "core", f: 1, to: 2, l: "SIP INVITE (SDP O1)" },
+  { k: "core", f: 2, to: 3, l: "SIP INVITE (SDP O1)" },
+  { k: "loop", at: 3, l: "UDR/UDA", opt: true },
+  { k: "cnote", at: 3, l: "originating services" },
+  { k: "core", f: 3, to: 2, l: "SIP INVITE (SDP O1)" },
+  { k: "loop", at: 2, l: "DNS" },
+  { k: "core", f: 2, to: 4, l: "SIP INVITE (SDP O1)" },
+  { k: "loop", at: 4, l: "LIR/LIA" },
+  { k: "core", f: 4, to: 5, l: "SIP INVITE (SDP O1)" },
+  { k: "core", f: 5, to: 6, l: "SIP INVITE (SDP O1)" },
+  { k: "loop", at: 6, l: "UDR/UDA", opt: true },
+  { k: "cnote", at: 6, l: "terminating services" },
+  { k: "core", f: 6, to: 5, l: "SIP INVITE (SDP O1)" },
+  { k: "core", f: 5, to: 7, l: "SIP INVITE (SDP O1)" }
+];
+
+const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const HALO = 'paint-order="stroke" stroke="#fff" stroke-width="3" stroke-linejoin="round"';
+
+function colorOf(cls, fallback) {
+  if (cls === "bad") return C.bad;
+  if (cls === "warn") return C.warn;
+  if (cls === "good") return C.good;
+  return fallback;
+}
+
+function laneBox(i, y) {
+  const lines = LANES[i].split("\n");
+  const cy = y + 20 - (lines.length - 1) * 6.5 + 4;
+  const text = lines.map((s, n) => `<tspan x="${X(i)}" y="${cy + n * 13}">${esc(s)}</tspan>`).join("");
+  return `<rect x="${X(i) - 40}" y="${y}" width="80" height="40" rx="4" fill="#4f7fd1" stroke="#3a64ad"/>
+    <text text-anchor="middle" font-size="11.5" font-weight="700" fill="#fff">${text}</text>`;
+}
+
+function render(op) {
+  const p = [];
+  const id = op.id;
+  let y = 64;
+  let lastT = null;
+  const marks = {};
+  const seen = (it, yy) => { if (it && it.mark) marks[it.mark] = yy; };
+
+  const arrow = (f, to, yy, color, opts = {}) => {
+    const x1 = X(f), x2 = X(to);
+    const dir = Math.sign(x2 - x1);
+    const end = x2 - dir * 2;
+    const dash = opts.dash ? ` stroke-dasharray="${opts.dash}"` : "";
+    const mk = opts.both ? `marker-start="url(#${id}-h-${opts.mk})" marker-end="url(#${id}-h-${opts.mk})"` : `marker-end="url(#${id}-h-${opts.mk})"`;
+    return `<line x1="${x1}" y1="${yy}" x2="${end}" y2="${yy}" stroke="${color}" stroke-width="${opts.w || 1.4}"${dash} ${mk}/>`;
+  };
+
+  const label = (f, to, yy, text, color, weight) => {
+    const x1 = X(f), x2 = X(to);
+    let anchor = "middle", x = (x1 + x2) / 2;
+    if (Math.abs(to - f) === 1) {
+      if (Math.min(f, to) === 0) { anchor = "start"; x = X(0) + 6; }
+      else if (Math.max(f, to) === 8) { anchor = "end"; x = X(8) - 6; }
+    }
+    return `<text x="${x}" y="${yy - 5}" text-anchor="${anchor}" font-size="11" font-weight="${weight || 600}" fill="${color}" ${HALO}>${esc(text)}</text>`;
+  };
+
+  const note = (it) => {
+    const h = it.lines.length * 14 + 8;
+    let x, w;
+    if (it.side === "A") { x = X(0) + 8; w = 168; }
+    else if (it.side === "B") { x = W - 12 - 200; w = 200; }
+    else { x = X(1) + 8; w = X(7) - X(1) - 16; }
+    const stroke = colorOf(it.cls, "#8a8a8a");
+    const fill = it.cls === "bad" ? "#fdecea" : it.cls === "warn" ? "#fdf2e0" : it.cls === "good" ? "#e8f6ee" : "#ffffff";
+    const fold = `<path d="M${x + w - 9} ${y} L${x + w} ${y + 9} L${x + w - 9} ${y + 9} Z" fill="${stroke}" opacity="0.35"/>`;
+    const text = it.lines.map((s, n) =>
+      `<text x="${x + 7}" y="${y + 15 + n * 14}" font-size="11" font-weight="${n === 0 && it.cls ? 700 : 400}" fill="${it.cls ? stroke : "#222"}">${esc(s)}</text>`
+    ).join("");
+    p.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}" stroke="${stroke}"/>${fold}${text}`);
+    return h;
+  };
+
+  for (const it of op.steps.flatMap(s => s.k === "CORE" ? CORE : [s])) {
+    if (it.t != null && lastT != null && it.t <= op.cst && it.t - lastT > 250) {
+      y += Math.min(150, (it.t - lastT - 250) * 0.075);
+    }
+    if (it.t != null) lastT = it.t;
+
+    if (it.k === "msg" || it.k === "e2e" || it.k === "bearer") {
+      y += 30;
+      const isCst = it.cls === "cst";
+      let color = it.k === "bearer" ? C.bearer : C.line;
+      color = colorOf(it.cls, color);
+      const mk = it.k === "bearer" ? "q" : it.cls === "bad" ? "r" : it.cls === "warn" ? "w" : it.cls === "good" ? "g" : "k";
+      p.push(arrow(it.f, it.to, y, color, { dash: it.k === "e2e" ? "6 4" : "", mk, w: isCst || it.cls ? 2.2 : 1.4 }));
+      const txtColor = it.k === "bearer" && !it.cls ? C.bearer : color;
+      p.push(label(it.f, it.to, y, `${it.l}  ·  ${it.tm}`, txtColor, isCst ? 800 : 600));
+      seen(it, y);
+    } else if (it.k === "core") {
+      y += 24;
+      p.push(arrow(it.f, it.to, y, C.core, { dash: "4 3", mk: "c" }));
+      p.push(`<text x="${(X(it.f) + X(it.to)) / 2}" y="${y - 5}" text-anchor="middle" font-size="10" fill="#7d8792" ${HALO}>${esc(it.l)}</text>`);
+      if (marks.core0 == null) marks.core0 = y;
+      marks.core1 = y;
+    } else if (it.k === "loop") {
+      y += 22;
+      const x = X(it.at);
+      if (it.opt) {
+        p.push(`<rect x="${x - 40}" y="${y - 12}" width="84" height="30" fill="#dfe8f7" stroke="#8aa6d8"/>
+          <rect x="${x - 40}" y="${y - 12}" width="22" height="11" fill="#4f7fd1"/>
+          <text x="${x - 29}" y="${y - 3.5}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#fff">opt</text>`);
+      }
+      p.push(`<path d="M${x} ${y} H${x + 30} V${y + 10} H${x + 3}" fill="none" stroke="${C.core}" stroke-width="1.4" marker-end="url(#${id}-h-c)"/>
+        <text x="${x - 4}" y="${y + 9}" text-anchor="end" font-size="10" fill="#7d8792" ${HALO}>${esc(it.l)}</text>`);
+      marks.core1 = y + 5;
+      y += 10;
+    } else if (it.k === "cnote") {
+      y += 12;
+      const x = X(it.at);
+      p.push(`<rect x="${x - 56}" y="${y}" width="112" height="18" fill="#fff" stroke="#b5bcc5"/>
+        <text x="${x}" y="${y + 12.5}" text-anchor="middle" font-size="10" fill="#7d8792">${esc(it.l)}</text>`);
+      marks.core1 = y + 9;
+      y += 18;
+    } else if (it.k === "note") {
+      y += 12;
+      y += note(it);
+      seen(it, y - 8);
+    } else if (it.k === "rtp") {
+      y += 30;
+      for (const [a, b] of [[0, 1], [1, 7], [7, 8]]) {
+        p.push(arrow(a, b, y, C.line, { both: true, mk: "k", w: 1.6 }));
+      }
+      p.push(`<text x="${X(0) + 6}" y="${y - 5}" font-size="11" font-weight="700" ${HALO}>RTP</text>`);
+      p.push(`<text x="${(X(1) + X(7)) / 2}" y="${y - 5}" text-anchor="middle" font-size="11" font-weight="700" ${HALO}>RTP</text>`);
+      p.push(`<text x="${X(8) - 6}" y="${y - 5}" text-anchor="end" font-size="11" font-weight="700" ${HALO}>RTP</text>`);
+    } else if (it.k === "brk") {
+      y += 30;
+      p.push(`<rect x="${GUTTER}" y="${y - 9}" width="${W - GUTTER - 6}" height="18" fill="#f4f6f9"/>
+        <text x="${W / 2}" y="${y + 4}" text-anchor="middle" font-size="11" font-style="italic" fill="#555">··· ${esc(it.l)} ···</text>`);
+      y += 6;
+    }
+  }
+
+  const braces = [];
+  for (const seg of op.segs || []) {
+    const a = marks[seg.from];
+    const b = marks[seg.to];
+    if (a == null || b == null) continue;
+    braces.push({ y1: Math.min(a, b), y2: Math.max(a, b), seg });
+  }
+  let labelY = -999;
+  for (const br of braces) {
+    let y1 = br.y1;
+    let y2 = Math.max(br.y2, y1 + 16);
+    const mid = (y1 + y2) / 2;
+    const want = Math.max(mid, labelY + 28);
+    br.labelY = want;
+    labelY = want;
+    const color = colorOf(br.seg.cls, op.color);
+    const x = GUTTER - 4;
+    const span = y2 - y1;
+    const arm = Math.min(16, span / 4);
+    const tip = Math.min(12, Math.max(6, span / 5));
+    const d = `M ${x} ${y1} Q ${x - 10} ${y1} ${x - 10} ${y1 + arm} V ${mid - arm} Q ${x - 10} ${mid} ${x - 10 - tip} ${mid} Q ${x - 10} ${mid} ${x - 10} ${mid + arm} V ${y2 - arm} Q ${x - 10} ${y2} ${x} ${y2}`;
+    p.push(`<path d="${d}" fill="none" stroke="${color}" stroke-width="1.8"/>`);
+    p.push(`<text x="${x - 28}" y="${want - 1}" text-anchor="end" font-size="11" font-weight="700" fill="${color}" ${HALO}>${esc(br.seg.dir)}</text>`);
+    p.push(`<text x="${x - 28}" y="${want + 13}" text-anchor="end" font-size="12" font-weight="800" fill="${color}" ${HALO}>${esc(br.seg.time)}</text>`);
+  }
+
+  y += 30;
+  const H = y + 48;
+  const lanes = LANES.map((_, i) =>
+    `<line x1="${X(i)}" y1="48" x2="${X(i)}" y2="${y}" stroke="${C.lane}" stroke-width="1"/>`
+  ).join("");
+  const tops = LANES.map((_, i) => laneBox(i, 8)).join("");
+  const bottoms = LANES.map((_, i) => laneBox(i, y)).join("");
+  const marker = (k, col) =>
+    `<marker id="${id}-h-${k}" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="${col}"/></marker>`;
+  const defs = `<defs>${marker("k", C.line)}${marker("c", C.core)}${marker("r", C.bad)}${marker("w", C.warn)}${marker("g", C.good)}${marker("q", C.bearer)}</defs>`;
+
+  return {
+    w: W, h: H,
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" font-family="Arial, Helvetica, sans-serif">
+      ${defs}<rect width="${W}" height="${H}" fill="#fff"/>${lanes}${p.join("")}${tops}${bottoms}</svg>`
+  };
+}
+
+const OPS = OPS_DATA.map(op => ({ op, ...render(op) }));
+const box = document.getElementById("charts");
+let view = "all";
+let zoom = null;
+function fitZoom() {
+  const avail = document.documentElement.clientWidth - 80;
+  const n = view === "all" ? 3 : 1;
+  return Math.max(0.45, Math.min(n === 1 ? 1.5 : 1.2, (avail - (n - 1) * 16) / (n * W)));
+}
+function draw() {
+  const z = zoom || fitZoom();
+  const list = view === "all" ? OPS : OPS.filter(b => b.op.id === view);
+  box.className = "charts" + (view === "all" ? "" : " single");
+  box.innerHTML = list.map(b => `
+    <div class="op" data-id="${b.op.id}" style="width:${Math.round(b.w * z)}px">
+      <h2 style="color:${b.op.color}">${esc(b.op.name)}</h2>
+      <div class="meta">${esc(b.op.meta)}</div>
+      ${b.svg.replace("<svg ", `<svg width="${Math.round(b.w * z)}" height="${Math.round(b.h * z)}" `)}
+    </div>`).join("");
+  document.querySelectorAll("[data-view]").forEach(btn => btn.classList.toggle("on", btn.dataset.view === view));
+}
+document.getElementById("bar").addEventListener("click", e => {
+  const btn = e.target.closest("button");
+  if (!btn) return;
+  if (btn.dataset.view) { view = btn.dataset.view; zoom = null; }
+  const cur = zoom || fitZoom();
+  if (btn.dataset.zoom === "fit") zoom = null;
+  if (btn.dataset.zoom === "in") zoom = Math.min(2, cur * 1.15);
+  if (btn.dataset.zoom === "out") zoom = Math.max(0.35, cur / 1.15);
+  draw();
+});
+box.addEventListener("click", e => {
+  const card = e.target.closest(".op");
+  if (!card || view !== "all") return;
+  view = card.dataset.id; zoom = null; draw();
+});
+window.addEventListener("resize", () => { if (!zoom) draw(); });
+draw();
+
+</script>
+</body>
+</html>
